@@ -18,6 +18,7 @@ AI-enabled SOW review system using GraphRAG and ML classification.
 - **Backend:** Python/FastAPI
 - **Database:** TBD (ArangoDB or Neo4j + PostgreSQL)
 - **AI/ML:** Azure AI Foundry
+- **Backlog:** Jira https://samueltfries.atlassian.net/jira/software/projects/SCRUM/summary
 
 ## Quick Start
 
