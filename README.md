@@ -6,12 +6,12 @@ AI-enabled Statement of Work review system using GraphRAG and ML classification,
 
 | Name | Roles |
 |------|-------|
-| Eugene Pak | DevOps, Security Engineer, Software Engineer |
-| Jayden Ferguson | AI/ML Engineer, Data Engineer |
 | Nate Dorsey | Scrum Master, AI/ML Engineer |
-| Phuong Thai | AI/ML Engineer, Data Engineer |
+| Jayden Ferguson | AI/ML Engineer, Data Engineer |
 | Samuel Fries | Product Owner, Tech Lead, Software Engineer |
+| Eugene Pak | DevOps, Security Engineer, Software Engineer |
 | Zhan Su | Infrastructure Engineer, QA Engineer, Software Engineer |
+| Phuong Thai | AI/ML Engineer, Data Engineer |
 
 ## Tech Stack
 
