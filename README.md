@@ -77,9 +77,12 @@ pip install uv
 # Install pre-commit via uv
 uv tool install pre-commit
 
-# Windows only — add to PATH if prompted
+# Windows (PowerShell) — add to PATH if prompted
 $env:PATH = "$HOME\.local\bin;$env:PATH"
 uv tool update-shell
+
+# macOS/Linux — usually not needed, but if pre-commit isn't found:
+export PATH="$HOME/.local/bin:$PATH"
 
 # Install git hooks
 pre-commit install
@@ -168,4 +171,4 @@ Capstone-Microsoft-SoW/
 
 - **Sprint 1:** Environment setup, architecture
 - **Sprint 2–4:** Feature development
-- **Final Demo:** May 14, 2026 at 4:30PM - 6:30PM
+- **Final Demo:** May 14, 2026 4:30PM - 6:30PM
