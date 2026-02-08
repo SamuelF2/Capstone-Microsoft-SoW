@@ -1,21 +1,18 @@
 # Environment
 .env
-.env.local
-.env.*.local
+
+# Docker volumes
+arango_data/
 
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
 .venv/
-venv/
+.uv/
 
 # Node
 node_modules/
 .next/
-dist/
-
-# Docker volumes
-*_data/
 
 # IDE
 .vscode/
@@ -24,10 +21,3 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
-
-# Testing
-.coverage
-.pytest_cache/
-
-# Logs
-*.log
