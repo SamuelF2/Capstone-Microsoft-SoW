@@ -6,19 +6,25 @@ import os
 from contextlib import asynccontextmanager
 
 import asyncpg
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
+from status import router as status_router
+
+load_dotenv()
 
 # ── Config ──────────────────────────────────────────────
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "cocoon_dev_2026")
+NEO4J_PASSWORD = os.environ["NEO4J_PASSWORD"]
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://cocoon:cocoon_dev_2026@localhost:5432/cocoon",
-)
+PG_USER = os.environ["POSTGRES_USER"]
+PG_PASSWORD = os.environ["POSTGRES_PASSWORD"]
+PG_DB = os.environ["POSTGRES_DB"]
+PG_HOST = os.getenv("POSTGRES_HOST", "postgres")
+PG_PORT = os.getenv("POSTGRES_PORT", "5432")
+DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 
 # ── Database clients ────────────────────────────────────
 neo4j_driver = None
@@ -33,11 +39,11 @@ async def lifespan(app: FastAPI):
     # --- Start Neo4j driver ---
     neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     neo4j_driver.verify_connectivity()
-    print("✓ Neo4j connected")
+    print("Neo4j connected")
 
     # --- Start PostgreSQL pool ---
     pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    print("✓ PostgreSQL connected")
+    print("PostgreSQL connected")
 
     # --- Create initial tables if needed ---
     async with pg_pool.acquire() as conn:
@@ -62,7 +68,7 @@ async def lifespan(app: FastAPI):
                 reviewed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
-    print("✓ PostgreSQL tables initialized")
+    print("PostgreSQL tables initialized")
 
     yield
 
@@ -88,6 +94,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Status page ─────────────────────────────────────────
+app.include_router(status_router)
 
 
 # ── Health ──────────────────────────────────────────────
