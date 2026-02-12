@@ -39,7 +39,7 @@ jobs:
       - name: Backend Tests
         run : |
           cd backend
-          uv pip install -r requirements.txt
+          uv pip install -r requirements.txt --system
           pytest # temporary testing tool
 
   docker-build:
