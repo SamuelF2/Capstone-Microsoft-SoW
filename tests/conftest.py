@@ -2,7 +2,9 @@
 Pytest configuration and fixtures
 Owner: Zhan Su (QA Engineer)
 """
+
 import pytest
+
 
 @pytest.fixture
 def sample_sow():
