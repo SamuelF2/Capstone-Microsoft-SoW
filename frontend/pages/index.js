@@ -15,12 +15,12 @@ export default function Home() {
     // Delay features section animation
     const featuresTimer = setTimeout(() => {
       setFeaturesVisible(true);
-    }, 400);
+    }, 200);
 
     // Delay how it works section animation
     const howItWorksTimer = setTimeout(() => {
       setHowItWorksVisible(true);
-    }, 800);
+    }, 400);
 
     return () => {
       clearTimeout(featuresTimer);
@@ -54,14 +54,14 @@ export default function Home() {
               zIndex: 1,
               opacity: isVisible ? 1 : 0,
               transform: isVisible ? 'translateY(0)' : 'translateY(20px)',
-              transition: 'opacity 0.8s ease-out, transform 0.8s ease-out',
+              transition: 'opacity 0.5s ease-out, transform 0.5s ease-out',
             }}
           >
             <div
               className="badge badge-primary mb-lg"
               style={{
                 opacity: isVisible ? 1 : 0,
-                transition: 'opacity 0.8s ease-out 0.1s',
+                transition: 'opacity 0.5s ease-out 0.05s',
               }}
             >
               🛡️ Microsoft MCEM Compliant
@@ -74,7 +74,7 @@ export default function Home() {
                 color: '#fff',
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? 'translateY(0)' : 'translateY(-20px)',
-                transition: 'opacity 1s ease-out 0.2s, transform 1s ease-out 0.2s',
+                transition: 'opacity 0.4s ease-out 0.05s, transform 0.4s ease-out 0.05s',
               }}
             >
               Cocoon SoW Automation
@@ -89,7 +89,7 @@ export default function Home() {
                 margin: '0 auto var(--spacing-2xl)',
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? 'translateY(0)' : 'translateY(20px)',
-                transition: 'opacity 0.8s ease-out 0.4s, transform 0.8s ease-out 0.4s',
+                transition: 'opacity 0.5s ease-out 0.2s, transform 0.5s ease-out 0.2s',
               }}
             >
               Streamline Statement of Work creation, ensure MCEM compliance, and accelerate
@@ -101,10 +101,13 @@ export default function Home() {
               style={{
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? 'translateY(0)' : 'translateY(20px)',
-                transition: 'opacity 0.8s ease-out 0.6s, transform 0.8s ease-out 0.6s',
+                transition: 'opacity 0.5s ease-out 0.3s, transform 0.5s ease-out 0.3s',
               }}
             >
-              <button className="btn btn-primary btn-lg" onClick={() => router.push('/create-new')}>
+              <button
+                className="btn btn-primary btn-lg"
+                onClick={() => router.push('/create-task')}
+              >
                 Create New SOW
               </button>
               <button
@@ -125,7 +128,7 @@ export default function Home() {
             margin: '0 auto',
             opacity: featuresVisible ? 1 : 0,
             transform: featuresVisible ? 'translateY(0)' : 'translateY(30px)',
-            transition: 'opacity 1s ease-out, transform 1s ease-out',
+            transition: 'opacity 0.6s ease-out, transform 0.6s ease-out',
           }}
         >
           <div className="grid grid-cols-4 gap-lg">
@@ -137,7 +140,7 @@ export default function Home() {
                 backgroundColor: 'var(--color-bg-secondary)',
                 opacity: featuresVisible ? 1 : 0,
                 transform: featuresVisible ? 'translateY(0)' : 'translateY(20px)',
-                transition: 'opacity 0.6s ease-out 0.1s, transform 0.6s ease-out 0.1s',
+                transition: 'opacity 0.4s ease-out 0.05s, transform 0.4s ease-out 0.05s',
               }}
             >
               <div
@@ -166,7 +169,7 @@ export default function Home() {
                 backgroundColor: 'var(--color-bg-secondary)',
                 opacity: featuresVisible ? 1 : 0,
                 transform: featuresVisible ? 'translateY(0)' : 'translateY(20px)',
-                transition: 'opacity 0.6s ease-out 0.2s, transform 0.6s ease-out 0.2s',
+                transition: 'opacity 0.4s ease-out 0.1s, transform 0.4s ease-out 0.1s',
               }}
             >
               <div
@@ -195,7 +198,7 @@ export default function Home() {
                 backgroundColor: 'var(--color-bg-secondary)',
                 opacity: featuresVisible ? 1 : 0,
                 transform: featuresVisible ? 'translateY(0)' : 'translateY(20px)',
-                transition: 'opacity 0.6s ease-out 0.3s, transform 0.6s ease-out 0.3s',
+                transition: 'opacity 0.4s ease-out 0.15s, transform 0.4s ease-out 0.15s',
               }}
             >
               <div
@@ -224,7 +227,7 @@ export default function Home() {
                 backgroundColor: 'var(--color-bg-secondary)',
                 opacity: featuresVisible ? 1 : 0,
                 transform: featuresVisible ? 'translateY(0)' : 'translateY(20px)',
-                transition: 'opacity 0.6s ease-out 0.4s, transform 0.6s ease-out 0.4s',
+                transition: 'opacity 0.4s ease-out 0.2s, transform 0.4s ease-out 0.2s',
               }}
             >
               <div
@@ -254,7 +257,7 @@ export default function Home() {
             backgroundColor: 'var(--color-bg-primary)',
             opacity: howItWorksVisible ? 1 : 0,
             transform: howItWorksVisible ? 'translateY(0)' : 'translateY(30px)',
-            transition: 'opacity 1s ease-out, transform 1s ease-out',
+            transition: 'opacity 0.6s ease-out, transform 0.6s ease-out',
           }}
         >
           <div
@@ -268,7 +271,7 @@ export default function Home() {
               style={{
                 opacity: howItWorksVisible ? 1 : 0,
                 transform: howItWorksVisible ? 'translateY(0)' : 'translateY(-20px)',
-                transition: 'opacity 0.8s ease-out 0.2s, transform 0.8s ease-out 0.2s',
+                transition: 'opacity 0.5s ease-out 0.1s, transform 0.5s ease-out 0.1s',
               }}
             >
               How It Works
@@ -281,7 +284,7 @@ export default function Home() {
                 style={{
                   opacity: howItWorksVisible ? 1 : 0,
                   transform: howItWorksVisible ? 'translateY(0)' : 'translateY(20px)',
-                  transition: 'opacity 0.6s ease-out 0.3s, transform 0.6s ease-out 0.3s',
+                  transition: 'opacity 0.4s ease-out 0.15s, transform 0.4s ease-out 0.15s',
                 }}
               >
                 <div
@@ -318,7 +321,7 @@ export default function Home() {
                 style={{
                   opacity: howItWorksVisible ? 1 : 0,
                   transform: howItWorksVisible ? 'translateY(0)' : 'translateY(20px)',
-                  transition: 'opacity 0.6s ease-out 0.5s, transform 0.6s ease-out 0.5s',
+                  transition: 'opacity 0.4s ease-out 0.25s, transform 0.4s ease-out 0.25s',
                 }}
               >
                 <div
@@ -355,7 +358,7 @@ export default function Home() {
                 style={{
                   opacity: howItWorksVisible ? 1 : 0,
                   transform: howItWorksVisible ? 'translateY(0)' : 'translateY(20px)',
-                  transition: 'opacity 0.6s ease-out 0.7s, transform 0.6s ease-out 0.7s',
+                  transition: 'opacity 0.4s ease-out 0.35s, transform 0.4s ease-out 0.35s',
                 }}
               >
                 <div
