@@ -4,9 +4,17 @@ import { useRouter } from 'next/router';
 export default function Navigation() {
   const router = useRouter();
 
-  const isActive = (path) => {
-    return router.pathname === path;
-  };
+  const isActive = (path) => router.pathname === path;
+
+  const navLinkStyle = (path) => ({
+    fontSize: 'var(--font-size-sm)',
+    color: isActive(path) ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+    fontWeight: isActive(path) ? 'var(--font-weight-medium)' : 'var(--font-weight-normal)',
+    transition: 'color var(--transition-base)',
+    textDecoration: 'none',
+    paddingBottom: '2px',
+    borderBottom: isActive(path) ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
+  });
 
   return (
     <nav
@@ -29,6 +37,7 @@ export default function Navigation() {
           justifyContent: 'space-between',
         }}
       >
+        {/* Logo */}
         <Link
           href="/"
           style={{
@@ -37,6 +46,8 @@ export default function Navigation() {
             gap: 'var(--spacing-sm)',
             fontSize: 'var(--font-size-xl)',
             fontWeight: 'var(--font-weight-bold)',
+            color: 'var(--color-text-primary)',
+            textDecoration: 'none',
           }}
         >
           <div
@@ -48,7 +59,9 @@ export default function Navigation() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.2rem',
+              fontSize: '1rem',
+              fontWeight: 'bold',
+              color: '#fff',
             }}
           >
             C
@@ -56,87 +69,48 @@ export default function Navigation() {
           <span>Cocoon</span>
         </Link>
 
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--spacing-xl)',
-            alignItems: 'center',
-          }}
-        >
-          <Link
-            href="/"
-            style={{
-              fontSize: 'var(--font-size-sm)',
-              color: isActive('/') ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-              fontWeight: isActive('/') ? 'var(--font-weight-medium)' : 'var(--font-weight-normal)',
-              transition: 'color var(--transition-base)',
-            }}
-          >
-            All SOWs
+        {/* Nav Links */}
+        <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'center' }}>
+          <Link href="/all-sows" style={navLinkStyle('/all-sows')}>
+            All SoWs
           </Link>
-          <Link
-            href="/create-task"
-            style={{
-              fontSize: 'var(--font-size-sm)',
-              color: isActive('/create-task')
-                ? 'var(--color-text-primary)'
-                : 'var(--color-text-secondary)',
-              fontWeight: isActive('/create-task')
-                ? 'var(--font-weight-medium)'
-                : 'var(--font-weight-normal)',
-              transition: 'color var(--transition-base)',
-            }}
-          >
-            Create Task
+          <Link href="/create-new" style={navLinkStyle('/create-new')}>
+            Create New
           </Link>
-          <Link
-            href="/review-history"
-            style={{
-              fontSize: 'var(--font-size-sm)',
-              color: isActive('/review-history')
-                ? 'var(--color-text-primary)'
-                : 'var(--color-text-secondary)',
-              fontWeight: isActive('/review-history')
-                ? 'var(--font-weight-medium)'
-                : 'var(--font-weight-normal)',
-              transition: 'color var(--transition-base)',
-            }}
-          >
+          <Link href="/ai-review" style={navLinkStyle('/ai-review')}>
+            AI Review
+          </Link>
+          <Link href="/review-history" style={navLinkStyle('/review-history')}>
             Review History
           </Link>
-          <Link
-            href="/account"
-            style={{
-              fontSize: 'var(--font-size-sm)',
-              color: isActive('/account')
-                ? 'var(--color-text-primary)'
-                : 'var(--color-text-secondary)',
-              fontWeight: isActive('/account')
-                ? 'var(--font-weight-medium)'
-                : 'var(--font-weight-normal)',
-              transition: 'color var(--transition-base)',
-            }}
-          >
+          <Link href="/my-reviews" style={navLinkStyle('/my-reviews')}>
             My Reviews
           </Link>
         </div>
 
-        <button
-          style={{
-            width: '36px',
-            height: '36px',
-            borderRadius: 'var(--radius-full)',
-            backgroundColor: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border-default)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '1.2rem',
-            cursor: 'pointer',
-          }}
-        >
-          👤
-        </button>
+        {/* Account Button */}
+        <Link href="/account" style={{ textDecoration: 'none' }}>
+          <button
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: 'var(--radius-full)',
+              backgroundColor: isActive('/account')
+                ? 'var(--color-accent-blue)'
+                : 'var(--color-bg-secondary)',
+              border: `1px solid ${isActive('/account') ? 'var(--color-accent-blue)' : 'var(--color-border-default)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              transition:
+                'background-color var(--transition-base), border-color var(--transition-base)',
+            }}
+          >
+            👤
+          </button>
+        </Link>
       </div>
     </nav>
   );
