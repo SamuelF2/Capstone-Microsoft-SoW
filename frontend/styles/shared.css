@@ -24,9 +24,9 @@ html {
 :root {
   /* Colors - Background */
   --color-bg-primary: #0a0a0a;
-  --color-bg-secondary: #1a1a1a;
-  --color-bg-tertiary: #2a2a2a;
-  --color-bg-hover: #333333;
+  --color-bg-secondary: #141414;
+  --color-bg-tertiary: #1e1e1e;
+  --color-bg-hover: #252525;
 
   /* Colors - Text */
   --color-text-primary: #ffffff;
@@ -55,7 +55,7 @@ html {
   /* Gradients */
   --gradient-blue: linear-gradient(135deg, #0078d4 0%, #1e88e5 100%);
   --gradient-purple: linear-gradient(135deg, #6b46c1 0%, #8b5cf6 100%);
-  --gradient-hero: linear-gradient(135deg, #0a2540 0%, #1a1a3e 100%);
+  --gradient-hero: linear-gradient(135deg, #1a0b2e 0%, #16213e 50%, #0f2027 100%);
   --gradient-text: linear-gradient(135deg, #fff 0%, #a0c4ff 100%);
 
   /* Spacing */
@@ -178,23 +178,48 @@ img {
 }
 
 .container-sm {
+  width: 100%;
   max-width: var(--container-sm);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-xl);
 }
 
 .container-md {
+  width: 100%;
   max-width: var(--container-md);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-xl);
 }
 
 .container-lg {
+  width: 100%;
   max-width: var(--container-lg);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-xl);
 }
 
 .container-xl {
+  width: 100%;
   max-width: var(--container-xl);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-xl);
 }
 
 .container-2xl {
+  width: 100%;
   max-width: var(--container-2xl);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-xl);
 }
 
 /* Flexbox utilities */
@@ -624,7 +649,7 @@ p {
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.25rem 0.75rem;
+  padding: 0.75rem 1rem;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   border-radius: var(--radius-full);
