@@ -1,0 +1,102 @@
+# =============================================================================
+# Azure Deploy (Manual Trigger)
+# =============================================================================
+# Provisions Azure infrastructure and deploys containers using azd.
+#
+# MANUAL ONLY — triggered via GitHub Actions UI or gh CLI:
+#   gh workflow run azure-deploy.yml
+#
+# This is intentionally separate from CI to avoid burning Azure credits
+# on every push. Only run before sprint demos or when you need the
+# environment up for testing.
+#
+# Required GitHub Secrets:
+#   AZURE_CLIENT_ID        - Service principal client ID
+#   AZURE_TENANT_ID        - Azure AD tenant ID
+#   AZURE_SUBSCRIPTION_ID  - Azure subscription ID
+#   AZURE_CLIENT_SECRET    - Service principal secret
+#   AZURE_ENV_NAME         - azd environment name (e.g., "cocoon-dev")
+#   AZURE_LOCATION         - Azure region (e.g., "eastus")
+#   AZURE_POSTGRES_PASSWORD - PostgreSQL admin password
+#   AZURE_NEO4J_PASSWORD   - Neo4j password
+#
+# Optional GitHub Secrets:
+#   AZURE_AI_ENDPOINT      - Azure AI Foundry endpoint
+#   AZURE_AI_KEY           - Azure AI Foundry API key
+# =============================================================================
+
+name: Azure Deploy
+run-name: "${{ github.actor }} deploying to Azure (${{ github.event.inputs.action }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Deploy action'
+        required: true
+        default: 'up'
+        type: choice
+        options:
+          - up          # Provision + deploy (first time or update)
+          - deploy      # Deploy containers only (infra already exists)
+          - provision   # Provision infra only (no container deploy)
+
+permissions:
+  id-token: write    # Required for Azure OIDC login
+  contents: read
+
+jobs:
+  deploy:
+    name: "Azure ${{ github.event.inputs.action }}"
+    runs-on: ubuntu-latest
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_ENV_NAME: ${{ secrets.AZURE_ENV_NAME }}
+      AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+      AZURE_POSTGRES_PASSWORD: ${{ secrets.AZURE_POSTGRES_PASSWORD }}
+      AZURE_NEO4J_PASSWORD: ${{ secrets.AZURE_NEO4J_PASSWORD }}
+      AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
+      AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install azd
+        uses: Azure/setup-azd@v1.0.0
+
+      - name: Log in to Azure
+        run: |
+          azd auth login \
+            --client-id "$AZURE_CLIENT_ID" \
+            --federated-credential-provider "github" \
+            --tenant-id "$AZURE_TENANT_ID"
+        shell: bash
+
+      # Initialize the azd environment with required config
+      - name: Configure azd environment
+        run: |
+          azd env new "$AZURE_ENV_NAME" --no-prompt || true
+          azd env set AZURE_LOCATION "$AZURE_LOCATION"
+          azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+        shell: bash
+
+      # Run the selected action
+      - name: "Run azd ${{ github.event.inputs.action }}"
+        run: azd ${{ github.event.inputs.action }} --no-prompt
+        shell: bash
+
+      # Show deployment outputs (URLs, resource names)
+      - name: Show deployment info
+        if: success()
+        run: |
+          echo "============================================"
+          echo "  Deployment complete!"
+          echo "============================================"
+          azd env get-values | grep -E "^(API_URL|WEB_URL|NEO4J_FQDN|POSTGRES_FQDN)" || true
+          echo "============================================"
+          echo "  Run 'gh workflow run azure-teardown.yml' to tear down"
+          echo "============================================"
+        shell: bash
