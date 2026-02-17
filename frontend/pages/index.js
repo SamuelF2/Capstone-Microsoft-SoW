@@ -104,10 +104,7 @@ export default function Home() {
                 transition: 'opacity 0.5s ease-out 0.3s, transform 0.5s ease-out 0.3s',
               }}
             >
-              <button
-                className="btn btn-primary btn-lg"
-                onClick={() => router.push('/create-task')}
-              >
+              <button className="btn btn-primary btn-lg" onClick={() => router.push('/create-new')}>
                 Create New SOW
               </button>
               <button
