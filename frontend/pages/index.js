@@ -1,39 +1,64 @@
-import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import Head from 'next/head';
 
 export default function Home() {
-  const [health, setHealth] = useState(null);
-
-  useEffect(() => {
-    fetch('http://localhost:8000/health')
-      .then((res) => res.json())
-      .then(setHealth)
-      .catch((err) => setHealth({ status: 'error', database: err.message }));
-  }, []);
+  const router = useRouter();
 
   return (
-    <div style={{ fontFamily: 'system-ui', padding: '2rem', maxWidth: 600 }}>
-      <h1>🧬 Cocoon</h1>
-      <p>Microsoft SoW Review Automation</p>
-      <hr />
-      <h3>System Status</h3>
-      {health ? (
-        <pre
+    <>
+      <Head>
+        <title>Microsoft Cocoon - AI-Powered SOW Review</title>
+      </Head>
+
+      <div
+        className="flex items-center justify-center"
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          background: 'var(--gradient-hero)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          className="text-center"
           style={{
-            background: '#f4f4f4',
-            padding: '1rem',
-            borderRadius: 8,
+            maxWidth: '600px',
+            padding: 'var(--spacing-xl)',
+            zIndex: 1,
           }}
         >
-          {JSON.stringify(health, null, 2)}
-        </pre>
-      ) : (
-        <p>Connecting to backend...</p>
-      )}
-      <p style={{ color: '#888', fontSize: '0.85rem' }}>
-        Backend: <a href="http://localhost:8000/docs">http://localhost:8000/docs</a>
-        <br />
-        ArangoDB: <a href="http://localhost:8529">http://localhost:8529</a>
-      </p>
-    </div>
+          <h1
+            className="font-bold mb-md"
+            style={{
+              fontSize: '3.5rem',
+              background: 'var(--gradient-text)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            Microsoft Cocoon
+          </h1>
+
+          <p className="text-xl text-secondary mb-2xl">
+            AI-powered compliance for agile transformation
+          </p>
+
+          <div className="flex gap-md justify-center mb-2xl">
+            <button className="btn btn-primary btn-lg" onClick={() => router.push('/create-task')}>
+              Create New SOW
+            </button>
+            <button
+              className="btn btn-secondary btn-lg"
+              onClick={() => router.push('/review-history')}
+            >
+              View All SOWs
+            </button>
+          </div>
+
+          <p className="text-sm text-tertiary">Microsoft organization for SOW management</p>
+        </div>
+      </div>
+    </>
   );
 }
