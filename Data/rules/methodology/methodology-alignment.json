@@ -1,0 +1,204 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-10-12T00:00:00Z",
+  "description": "Methodology-specific validation rules for Agile, Waterfall, and Sure Step approaches",
+  "methodologies": {
+    "agile": {
+      "name": "Agile/Scrum",
+      "requiredKeywords": [
+        "sprint",
+        "backlog",
+        "scrum",
+        "iteration",
+        "product owner",
+        "DoD",
+        "demo",
+        "retrospective"
+      ],
+      "approachRequirements": {
+        "minLength": 300,
+        "mustInclude": [
+          "Sprint planning and execution process",
+          "Product backlog management approach",
+          "Definition of Done (DoD)",
+          "Sprint review/demo schedule",
+          "Retrospective cadence"
+        ]
+      },
+      "deliverableFormat": {
+        "preferredMilestones": ["Sprint 1", "Sprint 2", "Sprint N", "Increment 1", "Release 1"],
+        "acceptanceCriteria": "Must reference sprint review and DoD validation"
+      },
+      "customerResponsibilities": [
+        "Assign and empower dedicated Product Owner",
+        "Participate in sprint planning, reviews, and demos",
+        "Maintain prioritized product backlog",
+        "Provide timely feedback during sprints",
+        "Make decisions on backlog priorities"
+      ],
+      "warnings": [
+        {
+          "condition": "Contains 'phase' or 'milestone' without 'sprint'",
+          "message": "Agile projects should use sprint-based terminology",
+          "severity": "warning"
+        },
+        {
+          "condition": "Missing 'product owner' or 'PO'",
+          "message": "Agile approach requires Product Owner role",
+          "severity": "error"
+        }
+      ]
+    },
+    "waterfall": {
+      "name": "Waterfall/Traditional",
+      "requiredKeywords": [
+        "phase",
+        "milestone",
+        "gate",
+        "requirement",
+        "design",
+        "build",
+        "test",
+        "deploy"
+      ],
+      "approachRequirements": {
+        "minLength": 300,
+        "mustInclude": [
+          "Project phases (requirements, design, build, test, deploy)",
+          "Phase gate criteria and approval process",
+          "Requirement traceability approach",
+          "Change control process"
+        ]
+      },
+      "deliverableFormat": {
+        "preferredMilestones": [
+          "Phase 1",
+          "Phase 2",
+          "Design Milestone",
+          "Build Complete",
+          "UAT",
+          "Go-Live"
+        ],
+        "acceptanceCriteria": "Must reference phase gate approval and formal sign-off"
+      },
+      "customerResponsibilities": [
+        "Provide complete requirements during requirements phase",
+        "Participate in phase gate reviews",
+        "Sign off on phase deliverables",
+        "Execute user acceptance testing (UAT)",
+        "Approve changes through change control board"
+      ],
+      "warnings": [
+        {
+          "condition": "Contains 'sprint' or 'iteration' without 'phase'",
+          "message": "Waterfall projects should use phase-based terminology",
+          "severity": "warning"
+        },
+        {
+          "condition": "Missing 'requirements' or 'design'",
+          "message": "Waterfall approach must define requirements and design phases",
+          "severity": "error"
+        }
+      ]
+    },
+    "sure-step-365": {
+      "name": "Sure Step for Dynamics 365",
+      "requiredKeywords": [
+        "sure step",
+        "diagnostic",
+        "analysis",
+        "design",
+        "development",
+        "deployment",
+        "operation"
+      ],
+      "approachRequirements": {
+        "minLength": 300,
+        "mustInclude": [
+          "Sure Step methodology phases",
+          "Fit-gap analysis approach",
+          "Configuration vs. customization strategy",
+          "Data migration methodology",
+          "Change management and training plan"
+        ]
+      },
+      "deliverableFormat": {
+        "preferredMilestones": [
+          "Diagnostic Phase",
+          "Analysis Phase",
+          "Design Phase",
+          "Development Phase",
+          "Deployment Phase",
+          "Operation Phase"
+        ],
+        "acceptanceCriteria": "Must reference Sure Step deliverables and sign-offs"
+      },
+      "customerResponsibilities": [
+        "Provide access to current business processes and systems",
+        "Assign functional and technical SMEs",
+        "Participate in fit-gap analysis workshops",
+        "Provide clean master data for migration",
+        "Participate in User Acceptance Testing (UAT)",
+        "Execute change management and training plan"
+      ],
+      "warnings": [
+        {
+          "condition": "Missing 'fit-gap' or 'fit gap'",
+          "message": "Sure Step requires fit-gap analysis documentation",
+          "severity": "warning"
+        },
+        {
+          "condition": "Missing 'data migration'",
+          "message": "Data migration strategy required for Dynamics implementations",
+          "severity": "error"
+        }
+      ]
+    },
+    "cloud-adoption": {
+      "name": "Cloud Adoption Framework",
+      "requiredKeywords": [
+        "assessment",
+        "migration",
+        "azure",
+        "workload",
+        "landing zone",
+        "governance"
+      ],
+      "approachRequirements": {
+        "minLength": 300,
+        "mustInclude": [
+          "Cloud readiness assessment approach",
+          "Migration wave strategy",
+          "Azure landing zone design",
+          "Security and compliance framework",
+          "Cost optimization strategy"
+        ]
+      },
+      "deliverableFormat": {
+        "preferredMilestones": [
+          "Assessment",
+          "Migration Wave 1",
+          "Migration Wave 2",
+          "Optimization",
+          "Governance"
+        ],
+        "acceptanceCriteria": "Must reference Azure-specific success criteria"
+      },
+      "customerResponsibilities": [
+        "Provide access to current infrastructure inventory",
+        "Assign cloud center of excellence (CCoE) team",
+        "Participate in workload assessment workshops",
+        "Provide Azure subscription(s) and access",
+        "Execute security and compliance reviews",
+        "Approve architecture and governance policies"
+      ],
+      "warnings": [
+        {
+          "condition": "Missing 'landing zone' or 'subscription'",
+          "message": "Cloud adoption should reference Azure landing zone design",
+          "severity": "warning"
+        }
+      ]
+    }
+  }
+}

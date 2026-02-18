@@ -1,0 +1,264 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-10-12T00:00:00Z",
+  "description": "Role-specific review checklists for persona-based approvals",
+  "personas": {
+    "solution-architect": {
+      "displayName": "Solution Architect",
+      "role": "solution-architect",
+      "reviewStage": "internal-review",
+      "focusAreas": ["Technical Feasibility", "Architecture", "Security", "Scalability"],
+      "checklist": [
+        {
+          "id": "sa-001",
+          "text": "Technical approach is feasible and aligns with customer requirements",
+          "required": true,
+          "category": "technical-feasibility",
+          "helpText": "Verify the proposed solution can be delivered with available technology and resources"
+        },
+        {
+          "id": "sa-002",
+          "text": "No commitments to unsupported SLAs or outcomes",
+          "required": true,
+          "category": "risk-management",
+          "helpText": "Ensure no performance guarantees beyond our control or without proper measurement"
+        },
+        {
+          "id": "sa-003",
+          "text": "All technical assumptions are clearly stated",
+          "required": true,
+          "category": "assumptions",
+          "helpText": "Document assumptions about environments, integrations, performance, scalability"
+        },
+        {
+          "id": "sa-004",
+          "text": "Performance and scalability considerations addressed",
+          "required": false,
+          "category": "nfr",
+          "helpText": "Confirm non-functional requirements are covered appropriately"
+        },
+        {
+          "id": "sa-005",
+          "text": "Security and compliance requirements identified",
+          "required": true,
+          "category": "security",
+          "helpText": "Ensure security review tasks are included if needed; compliance requirements documented"
+        },
+        {
+          "id": "sa-006",
+          "text": "Integration points and dependencies documented",
+          "required": true,
+          "category": "architecture",
+          "helpText": "List all external systems, third-party dependencies, and integration approaches"
+        },
+        {
+          "id": "sa-007",
+          "text": "Technical governance during delivery planned",
+          "required": false,
+          "category": "governance",
+          "helpText": "Code reviews, architecture checkpoints, quality gates defined"
+        }
+      ]
+    },
+    "delivery-manager": {
+      "displayName": "Delivery Manager / ADL",
+      "role": "delivery-manager",
+      "reviewStage": "drm-approval",
+      "focusAreas": ["Deliverability", "Resourcing", "Timeline", "Risk Management"],
+      "checklist": [
+        {
+          "id": "dm-001",
+          "text": "Timeline is realistic and achievable",
+          "required": true,
+          "category": "timeline",
+          "helpText": "Verify schedule accounts for complexity, dependencies, and resource availability"
+        },
+        {
+          "id": "dm-002",
+          "text": "Resource plan includes all necessary roles",
+          "required": true,
+          "category": "resourcing",
+          "helpText": "PM, Architect, Developers, QA, etc. per project needs with realistic allocation"
+        },
+        {
+          "id": "dm-003",
+          "text": "All high risks have identified mitigations",
+          "required": true,
+          "category": "risk-management",
+          "helpText": "Review risk register and ensure mitigation plans exist for critical/high risks"
+        },
+        {
+          "id": "dm-004",
+          "text": "Support transition plan is defined",
+          "required": true,
+          "category": "transition",
+          "helpText": "Who will operate the solution after go-live? Hypercare period defined?"
+        },
+        {
+          "id": "dm-005",
+          "text": "Resource availability confirmed or plan to secure",
+          "required": true,
+          "category": "resourcing",
+          "helpText": "Named resources committed or clear path to staffing defined"
+        },
+        {
+          "id": "dm-006",
+          "text": "Delivery methodology aligns with project type",
+          "required": true,
+          "category": "methodology",
+          "helpText": "Agile, Waterfall, Sure Step - appropriate for scope, customer, and team"
+        }
+      ]
+    },
+    "cpl": {
+      "displayName": "Customer Practice Lead (CPL)",
+      "role": "cpl",
+      "reviewStage": "drm-approval",
+      "focusAreas": ["Practice Standards", "Margin", "Scope Definition", "Resource Mix"],
+      "checklist": [
+        {
+          "id": "cpl-001",
+          "text": "Solution aligns with practice standards and best practices",
+          "required": true,
+          "category": "standards",
+          "helpText": "Follows domain-specific guidance, patterns, and delivery frameworks"
+        },
+        {
+          "id": "cpl-002",
+          "text": "Sold margin meets or exceeds threshold",
+          "required": true,
+          "category": "financials",
+          "helpText": "Verify margin is acceptable or exception is justified with mitigation"
+        },
+        {
+          "id": "cpl-003",
+          "text": "All customer obligations are clearly documented",
+          "required": true,
+          "category": "responsibilities",
+          "helpText": "Customer responsibilities section is complete and realistic"
+        },
+        {
+          "id": "cpl-004",
+          "text": "Scope is clearly defined with in/out boundaries",
+          "required": true,
+          "category": "scope",
+          "helpText": "No ambiguous scope items; clear in-scope and out-of-scope delineation"
+        },
+        {
+          "id": "cpl-005",
+          "text": "Resource mix is appropriate for deal type",
+          "required": true,
+          "category": "resourcing",
+          "helpText": "Onshore/offshore balance optimizes delivery quality and margin"
+        },
+        {
+          "id": "cpl-006",
+          "text": "No non-standard terms without proper approval",
+          "required": true,
+          "category": "compliance",
+          "helpText": "Check for unusual financial, legal, or liability terms requiring escalation"
+        }
+      ]
+    },
+    "cdp": {
+      "displayName": "Customer Delivery Partner (CDP)",
+      "role": "cdp",
+      "reviewStage": "drm-approval",
+      "focusAreas": ["Account Alignment", "Customer Success", "Consumption", "Relationship"],
+      "checklist": [
+        {
+          "id": "cdp-001",
+          "text": "SoW supports customer business outcomes and success plan",
+          "required": true,
+          "category": "alignment",
+          "helpText": "Aligns with strategic account objectives and customer success metrics"
+        },
+        {
+          "id": "cdp-002",
+          "text": "Consumption goals are aligned (if applicable)",
+          "required": false,
+          "category": "consumption",
+          "helpText": "Verify solution drives Azure/M365 consumption as planned in account strategy"
+        },
+        {
+          "id": "cdp-003",
+          "text": "Customer relationship and satisfaction considerations addressed",
+          "required": true,
+          "category": "relationship",
+          "helpText": "Ensure delivery approach maintains and strengthens customer relationship"
+        },
+        {
+          "id": "cdp-004",
+          "text": "Support model is sustainable for long-term partnership",
+          "required": true,
+          "category": "support",
+          "helpText": "Post-delivery support aligns with account strategy and customer expectations"
+        }
+      ]
+    },
+    "sqa-reviewer": {
+      "displayName": "SQA / Quality Reviewer",
+      "role": "sqa-reviewer",
+      "reviewStage": "internal-review",
+      "focusAreas": ["Quality Standards", "Compliance", "Risk", "Completeness"],
+      "checklist": [
+        {
+          "id": "sqa-001",
+          "text": "Scope is clearly defined and bounded",
+          "required": true,
+          "category": "scope",
+          "helpText": "No ambiguous phrasing or open-ended commitments in scope definition"
+        },
+        {
+          "id": "sqa-002",
+          "text": "All customer obligations are listed",
+          "required": true,
+          "category": "responsibilities",
+          "helpText": "Customer responsibilities section is complete with specific items"
+        },
+        {
+          "id": "sqa-003",
+          "text": "Risks and assumptions are documented",
+          "required": true,
+          "category": "risk-assumptions",
+          "helpText": "Risk register and assumptions are comprehensive and realistic"
+        },
+        {
+          "id": "sqa-004",
+          "text": "Mitigation plans exist for high risks",
+          "required": true,
+          "category": "risk-management",
+          "helpText": "Each critical/high risk has an owner and documented mitigation strategy"
+        },
+        {
+          "id": "sqa-005",
+          "text": "No use of banned phrases or problematic language",
+          "required": true,
+          "category": "compliance",
+          "helpText": "Check for 'best effort', 'guarantee', 'satisfaction', etc."
+        },
+        {
+          "id": "sqa-006",
+          "text": "Deliverable acceptance process is defined",
+          "required": true,
+          "category": "acceptance",
+          "helpText": "Clear, objective criteria for how customer validates each deliverable"
+        }
+      ]
+    },
+    "pursuit-lead": {
+      "displayName": "Pursuit Lead",
+      "role": "pursuit-lead",
+      "reviewStage": "none",
+      "focusAreas": [],
+      "checklist": []
+    },
+    "sales-lead": {
+      "displayName": "Sales Lead",
+      "role": "sales-lead",
+      "reviewStage": "none",
+      "focusAreas": [],
+      "checklist": []
+    }
+  }
+}

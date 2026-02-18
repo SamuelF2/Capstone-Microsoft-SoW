@@ -1,0 +1,239 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-10-12T00:00:00Z",
+  "description": "ESAP (Empowerment) level determination and approval requirements",
+  "esapLevels": {
+    "type-1": {
+      "name": "Type 1 - High Risk/Value",
+      "triggers": [
+        {
+          "condition": "dealValue > 5000000",
+          "description": "Deal value exceeds $5M"
+        },
+        {
+          "condition": "estimatedMargin < 10",
+          "description": "Estimated margin below 10%"
+        }
+      ],
+      "requiredApprovers": [
+        {
+          "role": "solution-architect",
+          "stage": "internal-review",
+          "required": true,
+          "reason": "Technical solution validation required for all deals"
+        },
+        {
+          "role": "sqa-reviewer",
+          "stage": "internal-review",
+          "required": true,
+          "reason": "Quality assurance review required for high risk deals"
+        },
+        {
+          "role": "cpl",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Practice lead approval required for all deals"
+        },
+        {
+          "role": "cdp",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Account alignment approval required for all deals"
+        },
+        {
+          "role": "delivery-manager",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Delivery leadership approval required for high value/risk deals"
+        }
+      ],
+      "additionalChecks": [
+        "Executive sponsor identified",
+        "Risk mitigation plan for all critical risks",
+        "Resource commitments secured",
+        "Financial terms approved by finance"
+      ]
+    },
+    "type-2": {
+      "name": "Type 2 - Medium Risk/Value",
+      "triggers": [
+        {
+          "condition": "dealValue > 1000000 AND dealValue <= 5000000",
+          "description": "Deal value between $1M and $5M"
+        },
+        {
+          "condition": "estimatedMargin >= 10 AND estimatedMargin < 15",
+          "description": "Estimated margin between 10% and 15%"
+        }
+      ],
+      "requiredApprovers": [
+        {
+          "role": "solution-architect",
+          "stage": "internal-review",
+          "required": true,
+          "reason": "Technical solution validation required for all deals"
+        },
+        {
+          "role": "sqa-reviewer",
+          "stage": "internal-review",
+          "required": true,
+          "reason": "Quality assurance review required for medium risk deals"
+        },
+        {
+          "role": "cpl",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Practice lead approval required for all deals"
+        },
+        {
+          "role": "cdp",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Account alignment approval required for all deals"
+        }
+      ],
+      "additionalChecks": [
+        "Risk mitigation plan for high/critical risks",
+        "Resource plan validated"
+      ]
+    },
+    "type-3": {
+      "name": "Type 3 - Low Risk/Value",
+      "triggers": [
+        {
+          "condition": "dealValue <= 1000000 AND estimatedMargin >= 15",
+          "description": "Deal value under $1M with healthy margin"
+        }
+      ],
+      "requiredApprovers": [
+        {
+          "role": "solution-architect",
+          "stage": "internal-review",
+          "required": true,
+          "reason": "Technical solution validation required for all deals"
+        },
+        {
+          "role": "cpl",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Practice lead approval required for all deals"
+        },
+        {
+          "role": "cdp",
+          "stage": "drm-approval",
+          "required": true,
+          "reason": "Account alignment approval required for all deals"
+        }
+      ],
+      "additionalChecks": []
+    }
+  },
+  "workflowStages": {
+    "draft": {
+      "name": "Drafting",
+      "description": "Author creates and edits SoW content",
+      "allowedActions": ["edit", "validate", "submit-for-review"],
+      "exitCriteria": [
+        "All required sections completed",
+        "No blocking validation errors",
+        "Executive summary written",
+        "At least one deliverable with acceptance criteria"
+      ]
+    },
+    "internal-review": {
+      "name": "Internal Review",
+      "description": "Technical and quality review by SA and SQA",
+      "allowedActions": ["review", "approve", "reject", "request-changes"],
+      "exitCriteria": [
+        "Solution Architect approval received",
+        "SQA approval received (if Type 1 or Type 2)",
+        "All review conditions addressed"
+      ],
+      "gatingRules": [
+        {
+          "rule": "SA approval required for all deals",
+          "blocker": true
+        },
+        {
+          "rule": "SQA approval required if ESAP Type 1 or Type 2",
+          "blocker": true,
+          "condition": "esapLevel IN ['type-1', 'type-2']"
+        }
+      ]
+    },
+    "drm-approval": {
+      "name": "Deal Review Meeting (DRM)",
+      "description": "Business and delivery leadership approval",
+      "allowedActions": ["review", "approve", "approve-with-conditions", "reject"],
+      "exitCriteria": [
+        "CPL approval received",
+        "CDP approval received",
+        "Delivery Manager approval received (if Type 1)",
+        "All conditions documented"
+      ],
+      "gatingRules": [
+        {
+          "rule": "Internal Review stage must be complete",
+          "blocker": true
+        },
+        {
+          "rule": "CPL approval required for all deals",
+          "blocker": true
+        },
+        {
+          "rule": "CDP approval required for all deals",
+          "blocker": true
+        },
+        {
+          "rule": "Delivery Manager approval required if ESAP Type 1",
+          "blocker": true,
+          "condition": "esapLevel = 'type-1'"
+        }
+      ]
+    },
+    "approved": {
+      "name": "Approved",
+      "description": "SoW has received all required approvals",
+      "allowedActions": ["finalize", "export", "create-contract"],
+      "exitCriteria": [
+        "All required approvals received",
+        "All conditions documented and assigned",
+        "Final validation passed"
+      ]
+    },
+    "finalized": {
+      "name": "Finalized",
+      "description": "SoW is locked and ready for contract execution",
+      "allowedActions": ["export", "view"],
+      "exitCriteria": []
+    },
+    "rejected": {
+      "name": "Rejected",
+      "description": "SoW was rejected during review process",
+      "allowedActions": ["view", "restart-draft"],
+      "exitCriteria": []
+    }
+  },
+  "approvalDecisions": {
+    "approved": {
+      "name": "Approved",
+      "description": "Reviewer approves without conditions",
+      "allowsProgress": true,
+      "requiresComments": false
+    },
+    "approved-with-conditions": {
+      "name": "Approved with Conditions",
+      "description": "Approved but with specific conditions that must be addressed",
+      "allowsProgress": true,
+      "requiresComments": true,
+      "requiresConditionsList": true
+    },
+    "rejected": {
+      "name": "Rejected",
+      "description": "Reviewer rejects and returns to author",
+      "allowsProgress": false,
+      "requiresComments": true,
+      "returnToStage": "draft"
+    }
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-10-12T00:00:00Z",
+  "source": "SDMPlus/MCEM Compliance Guidelines",
+  "description": "Phrases that should never appear in SoW documents as they create inappropriate commitments or ambiguity",
+  "bannedPhrases": [
+    {
+      "phrase": "best effort",
+      "severity": "error",
+      "reason": "Creates ambiguous commitment without clear deliverable criteria",
+      "suggestion": "Use 'commercially reasonable efforts' with specific success criteria, or remove entirely",
+      "category": "vague-commitment"
+    },
+    {
+      "phrase": "ensure success",
+      "severity": "error",
+      "reason": "Guarantees outcome beyond our control",
+      "suggestion": "Avoid guaranteeing outcomes; focus on deliverables and process",
+      "category": "outcome-guarantee"
+    },
+    {
+      "phrase": "guarantee",
+      "severity": "error",
+      "reason": "Creates warranty or outcome commitment",
+      "suggestion": "Use 'will' or 'intends to' instead, focus on process not outcomes",
+      "category": "outcome-guarantee"
+    },
+    {
+      "phrase": "at sole discretion",
+      "severity": "error",
+      "reason": "Gives unilateral decision-making authority without criteria",
+      "suggestion": "Specify criteria for decisions or remove",
+      "category": "unilateral-control"
+    },
+    {
+      "phrase": "will ensure",
+      "severity": "warning",
+      "reason": "Can imply outcome guarantee",
+      "suggestion": "Use 'will use commercially reasonable efforts to' or simply 'will'",
+      "category": "vague-commitment"
+    },
+    {
+      "phrase": "to client's satisfaction",
+      "severity": "error",
+      "reason": "Subjective acceptance criteria without objective measures",
+      "suggestion": "Provide specific, measurable, objective acceptance criteria",
+      "category": "subjective-criteria"
+    },
+    {
+      "phrase": "unlimited",
+      "severity": "error",
+      "reason": "Creates unbounded scope or commitment",
+      "suggestion": "Specify clear boundaries and limits",
+      "category": "unbounded-scope"
+    },
+    {
+      "phrase": "as needed",
+      "severity": "warning",
+      "reason": "Ambiguous frequency or scope",
+      "suggestion": "Define specific scope, frequency, or trigger conditions",
+      "category": "vague-commitment"
+    },
+    {
+      "phrase": "roughly",
+      "severity": "warning",
+      "reason": "Introduces imprecision in commitments",
+      "suggestion": "Use specific ranges or estimates with context",
+      "category": "imprecise-language"
+    },
+    {
+      "phrase": "we will achieve",
+      "severity": "warning",
+      "reason": "May imply outcome guarantee",
+      "suggestion": "Focus on deliverables and activities, not outcomes",
+      "category": "outcome-guarantee"
+    },
+    {
+      "phrase": "experts",
+      "severity": "error",
+      "reason": "Implies additional qualification or certification, creates warranty risk that these people are special",
+      "suggestion": "Use 'knowledgeable individual', 'experienced professional', or 'subject matter specialist'",
+      "category": "warranty-risk"
+    },
+    {
+      "phrase": "highest quality",
+      "severity": "error",
+      "reason": "Highest possible standard poses potential warranty issue",
+      "suggestion": "Use 'commercially reasonable efforts' or 'industry standard quality'",
+      "category": "warranty-risk"
+    },
+    {
+      "phrase": "best quality",
+      "severity": "error",
+      "reason": "Superlative creates potential warranty issue",
+      "suggestion": "Use 'commercially reasonable efforts' or 'high-quality deliverables'",
+      "category": "warranty-risk"
+    },
+    {
+      "phrase": "time is of the essence",
+      "severity": "error",
+      "reason": "Legal phrase meaning both parties understand time is critically important; avoid unless intentional",
+      "suggestion": "Use 'timely delivery is important' or specify milestone dates with flexibility",
+      "category": "legal-risk"
+    },
+    {
+      "phrase": "service level agreement",
+      "severity": "error",
+      "reason": "SLAs should be avoided whenever possible; requires baselining existing levels and creates hard commitments",
+      "suggestion": "Describe expected service characteristics without creating an SLA commitment, or work with Contract Executive",
+      "category": "commitment-risk"
+    },
+    {
+      "phrase": "sla",
+      "severity": "error",
+      "reason": "SLA abbreviation should be avoided; creates service level commitments",
+      "suggestion": "Describe service expectations without SLA terminology",
+      "category": "commitment-risk"
+    }
+  ],
+  "additionalPatterns": [
+    {
+      "pattern": "\\b(guarantee|guarantees|guaranteed|guaranteeing)\\b",
+      "severity": "error",
+      "description": "Any form of 'guarantee' should be avoided",
+      "category": "outcome-guarantee"
+    },
+    {
+      "pattern": "\\b(unlimited|unlim\\.)\\b",
+      "severity": "error",
+      "description": "Any reference to unlimited scope or quantity",
+      "category": "unbounded-scope"
+    },
+    {
+      "pattern": "\\b(satisfaction|satisfactory|satisfied)\\b",
+      "severity": "warning",
+      "description": "Subjective satisfaction criteria should have objective measures",
+      "category": "subjective-criteria"
+    },
+    {
+      "pattern": "\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+\\d{1,2},?\\s+\\d{4}\\b",
+      "severity": "warning",
+      "description": "Specific delivery dates should be avoided as they can change based on contract signing",
+      "suggestion": "Use 'estimated timeframes' or 'within X weeks of project kickoff'",
+      "category": "commitment-risk"
+    },
+    {
+      "pattern": "\\b(expert|experts)\\b",
+      "severity": "error",
+      "description": "The term 'expert' implies special qualification and creates warranty risk",
+      "suggestion": "Use 'knowledgeable professional', 'experienced team member', or 'subject matter specialist'",
+      "category": "warranty-risk"
+    },
+    {
+      "pattern": "\\b(highest|best)\\s+(quality|standard)\\b",
+      "severity": "error",
+      "description": "Superlatives about quality create potential warranty issues",
+      "suggestion": "Use 'commercially reasonable efforts' or 'high-quality'",
+      "category": "warranty-risk"
+    }
+  ]
+}
