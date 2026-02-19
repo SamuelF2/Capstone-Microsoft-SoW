@@ -1,0 +1,186 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-10-12T00:00:00Z",
+  "source": "SDMPlus/MCEM Required Elements",
+  "description": "Mandatory elements that must be present in all SoW documents",
+  "requiredSections": [
+    {
+      "section": "executiveSummary",
+      "displayName": "Executive Summary",
+      "required": true,
+      "minLength": 100,
+      "description": "High-level overview of project goals, scope, and business value",
+      "errorMessage": "Executive Summary is required and must be at least 100 characters"
+    },
+    {
+      "section": "scope",
+      "displayName": "Project Scope",
+      "required": true,
+      "minItems": 1,
+      "description": "Clear definition of what is in-scope and out-of-scope",
+      "errorMessage": "At least one scope item is required with clear in/out designation"
+    },
+    {
+      "section": "deliverables",
+      "displayName": "Deliverables",
+      "required": true,
+      "minItems": 1,
+      "description": "Specific outputs with acceptance criteria",
+      "errorMessage": "At least one deliverable is required with acceptance criteria"
+    },
+    {
+      "section": "approach",
+      "displayName": "Delivery Approach",
+      "required": true,
+      "minLength": 200,
+      "description": "How the project will be executed using selected methodology",
+      "errorMessage": "Delivery approach must be at least 200 characters and align with methodology"
+    },
+    {
+      "section": "customerResponsibilities",
+      "displayName": "Customer Responsibilities",
+      "required": true,
+      "minItems": 1,
+      "description": "Explicit list of what customer must provide/do",
+      "errorMessage": "Customer responsibilities must be explicitly documented"
+    },
+    {
+      "section": "supportTransitionPlan",
+      "displayName": "Support Transition Plan",
+      "required": true,
+      "allowNA": true,
+      "minLength": 50,
+      "description": "Operations and support plan for transitioning solution to customer (SOW Drafting Guidance - Fundamentals)",
+      "errorMessage": "Support transition plan required or mark as N/A with justification",
+      "requiredElements": [
+        "Who provides support (Microsoft/GSI/Customer)",
+        "RACI for support responsibilities",
+        "Customer incident/problem/change management process confirmation",
+        "Knowledge transfer plan and timeline"
+      ],
+      "recommendedElements": [
+        "Hypercare period duration and coverage (e.g., 30 days with 8x5 coverage)",
+        "Support handoff activities and documentation",
+        "Operational runbooks and monitoring procedures",
+        "Escalation procedures and contacts",
+        "Training plan for customer IT team"
+      ],
+      "examples": [
+        "Post-migration, Microsoft will provide 30 days of hypercare support with 8x5 coverage. This includes monitoring, issue resolution, and performance optimization. Knowledge transfer sessions will be conducted during weeks 11-12 covering Azure operations, monitoring, and incident response procedures. After hypercare, customer IT team will assume full operational responsibility with option to purchase extended support.",
+        "Customer will assume full operational support upon go-live. Microsoft will provide 2 weeks of knowledge transfer including documentation, runbook walkthroughs, and shadowing support tickets. Customer confirms existing incident management process and 24x7 support team capacity."
+      ]
+    },
+    {
+      "section": "assumptions",
+      "displayName": "Assumptions",
+      "required": true,
+      "minItems": 1,
+      "description": "Project assumptions that must hold true",
+      "errorMessage": "At least one assumption must be documented"
+    },
+    {
+      "section": "risks",
+      "displayName": "Risks",
+      "required": true,
+      "minItems": 1,
+      "description": "Identified risks with mitigation plans",
+      "errorMessage": "At least one risk must be identified with mitigation strategy"
+    }
+  ],
+  "deliverableRequirements": {
+    "acceptanceCriteria": {
+      "required": true,
+      "minLength": 20,
+      "errorMessage": "Each deliverable MUST have specific, measurable acceptance criteria (SOW Writing Guide v2.1)",
+      "guidelines": [
+        "Must be objective and measurable",
+        "Avoid subjective terms like 'satisfaction' or 'quality'",
+        "Include success metrics or test criteria",
+        "Specify who validates (customer/Microsoft/both)",
+        "Include evidence of completion (e.g., approval, test results, documentation)"
+      ],
+      "forbiddenVagueTerms": [
+        "to client's satisfaction",
+        "to customer's satisfaction",
+        "as agreed",
+        "acceptable to customer",
+        "acceptable quality",
+        "roughly",
+        "approximately",
+        "as needed",
+        "best effort"
+      ],
+      "goodExamples": [
+        "All 50 VMs successfully migrated and operational in Azure with zero S1 defects; validation testing completed with sign-off from customer infrastructure team",
+        "Architecture documentation including network diagrams, resource groups, and security policies reviewed and approved by customer CTO",
+        "Runbook includes pre-migration checklist, migration steps, validation procedures, and rollback plan; approved by migration team lead",
+        "All security controls documented and validated against customer security baseline; compliance scan results with zero critical findings",
+        "User acceptance testing completed with 95% pass rate and all S1/S2 defects resolved",
+        "All unit tests passing with 80%+ code coverage and approved by technical lead"
+      ],
+      "badExamples": [
+        "Deliverable completed to customer satisfaction",
+        "High quality documentation provided",
+        "Migration roughly complete",
+        "System acceptable to customer",
+        "Best effort deployment"
+      ]
+    },
+    "milestone": {
+      "required": false,
+      "description": "Optional milestone or phase assignment"
+    }
+  },
+  "customerResponsibilitiesGuidelines": {
+    "required": true,
+    "minItems": 3,
+    "description": "Customer dependencies and obligations must be explicitly documented in SOW (SOW Drafting Guidance)",
+    "suggestedItems": [
+      "Provide timely access to all systems, data, documentation, and credentials",
+      "Assign dedicated Product Owner/decision-maker with authority",
+      "Assign dedicated infrastructure SME available for daily coordination",
+      "Participate in scheduled meetings and reviews",
+      "Provide test data and validation resources",
+      "Make decisions within agreed timeframes (specify: e.g., 2 business days)",
+      "Provide necessary environments (dev/test/prod)",
+      "Grant required security clearances/access",
+      "Execute user acceptance testing within specified timeframe",
+      "Provide production environment access within X business days of request",
+      "Approve migration runbooks and provide sign-off for each wave"
+    ],
+    "agileSpecificRequirements": [
+      "Empower Product Owner with decision-making authority and budget control",
+      "Assign Scrum Master (can be Microsoft or customer)",
+      "Assign Application/Business Owners for each workstream",
+      "Participate in Sprint Planning, Daily Standups, Sprint Reviews, and Retrospectives",
+      "Prioritize backlog items before each sprint (within X business days)",
+      "Provide timely approval/feedback within sprint cycle",
+      "Maintain Definition of Ready for backlog items",
+      "Validate deliverables against Definition of Done",
+      "Provide availability for agile ceremonies (specify frequency and duration)"
+    ],
+    "errorMessage": "Customer must have clear, explicit responsibilities documented with specific obligations",
+    "validationRules": [
+      "Each responsibility should be specific and actionable",
+      "Include timeframes where applicable (e.g., 'within 2 business days')",
+      "Avoid vague terms like 'as needed' or 'timely' without definition",
+      "Consider adding consequences for unmet dependencies (e.g., Change Request process)"
+    ]
+  },
+  "riskRequirements": {
+    "mitigation": {
+      "required": true,
+      "errorMessage": "Each risk must have a documented mitigation plan"
+    },
+    "owner": {
+      "required": false,
+      "recommended": true,
+      "description": "Recommended to assign risk owner for high/critical risks"
+    },
+    "severity": {
+      "required": true,
+      "allowedValues": ["low", "medium", "high", "critical"],
+      "errorMessage": "Risk severity must be specified"
+    }
+  }
+}

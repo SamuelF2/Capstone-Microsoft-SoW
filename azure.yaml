@@ -9,14 +9,35 @@ services:
     host: containerapp
     docker:
       path: ./Dockerfile
-      context: ./backend
+      context: .
+
+  web:
+    project: ./frontend
+    language: js
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      context: .
 
   neo4j:
     project: ./
     host: containerapp
+    image: neo4j:5-community
     docker:
       path: ./Dockerfile.neo4j
-      context: ./
+      context: .
 
+  postgres:
+    project: ./
+    host: containerapp
+    image: postgres:16-alpine
+    docker:
+      path: ./Dockerfile.postgres
+      context: .
 
-  # Might need hooks here for better pipeline implementation?
+hooks:
+  postprovision:
+    shell: sh
+    run: echo "Infrastructure provisioned. Review outputs in .azure/ before deploying."
+    interactive: true
+    continueOnError: true

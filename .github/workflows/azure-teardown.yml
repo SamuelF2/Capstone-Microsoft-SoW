@@ -1,0 +1,92 @@
+# =============================================================================
+# Azure Teardown (Manual Trigger)
+# =============================================================================
+# Destroys all Azure resources provisioned by azd to stop spending credits.
+#
+# RUN THIS AFTER EVERY DEMO to conserve Azure credits.
+#
+# Trigger via GitHub Actions UI or gh CLI:
+#   gh workflow run azure-teardown.yml
+#
+# This runs `azd down --force --purge` which:
+#   - Deletes all container apps
+#   - Deletes the container registry
+#   - Deletes the PostgreSQL server (AND ALL DATA)
+#   - Deletes the resource group
+#   - Purges soft-deleted resources
+# =============================================================================
+
+name: Azure Teardown
+run-name: "${{ github.actor }} tearing down Azure environment"
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm teardown'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  teardown:
+    name: Teardown Azure Resources
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'destroy'
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_ENV_NAME: ${{ secrets.AZURE_ENV_NAME }}
+      AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install azd
+        uses: Azure/setup-azd@v1.0.0
+
+      - name: Log in to Azure
+        run: |
+          azd auth login \
+            --client-id "$AZURE_CLIENT_ID" \
+            --federated-credential-provider "github" \
+            --tenant-id "$AZURE_TENANT_ID"
+        shell: bash
+
+      - name: Select azd environment
+        run: |
+          azd env new "$AZURE_ENV_NAME" --no-prompt || true
+          azd env set AZURE_LOCATION "$AZURE_LOCATION"
+          azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+        shell: bash
+
+      - name: Tear down all resources
+        run: azd down --force --purge --no-prompt
+        shell: bash
+
+      - name: Confirm teardown
+        if: success()
+        run: |
+          echo "============================================"
+          echo "  All Azure resources have been destroyed."
+          echo "  No more credits are being consumed."
+          echo "============================================"
+          echo "  Run 'gh workflow run azure-deploy.yml' to redeploy."
+          echo "============================================"
+        shell: bash
+
+  skip:
+    name: Teardown Skipped
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm != 'destroy'
+    steps:
+      - name: Confirmation not provided
+        run: |
+          echo "Teardown was NOT executed."
+          echo "You must type 'destroy' in the confirmation field to proceed."
+          exit 1

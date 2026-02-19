@@ -1,0 +1,7 @@
+FROM postgres:16-alpine
+
+# Copy init scripts so the database gets seeded on first start
+# These run automatically when the container starts with an empty data dir
+COPY infrastructure/postgres/init/ /docker-entrypoint-initdb.d/
+
+EXPOSE 5432

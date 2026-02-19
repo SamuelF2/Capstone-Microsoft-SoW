@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "postgresUser": {
+      "value": "cocoon"
+    },
+    "postgresPassword": {
+      "value": "$(secretOrRandomPassword ${AZURE_POSTGRES_PASSWORD})"
+    },
+    "neo4jPassword": {
+      "value": "$(secretOrRandomPassword ${AZURE_NEO4J_PASSWORD})"
+    },
+    "postgresDbName": {
+      "value": "cocoon"
+    },
+    "azureAiEndpoint": {
+      "value": "${AZURE_AI_ENDPOINT}"
+    },
+    "azureAiKey": {
+      "value": "${AZURE_AI_KEY}"
+    }
+  }
+}

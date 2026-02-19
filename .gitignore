@@ -1,23 +1,64 @@
+# ======================
 # Environment
+# ======================
 .env
+.env.local
+.env.*.local
 
-# Docker volumes
-arango_data/
+# ======================
+# Azure Developer CLI
+# ======================
+.azure/
 
+# ======================
+# Docker
+# ======================
+neo4j_data/
+neo4j_logs/
+postgres_data/
+
+# ======================
 # Python
+# ======================
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 .uv/
+*.egg-info/
+dist/
+build/
 
+# ======================
 # Node
+# ======================
 node_modules/
 .next/
+out/
 
+# ======================
 # IDE
+# ======================
 .vscode/
 .idea/
+*.swp
+*.swo
 
+# ======================
 # OS
+# ======================
 .DS_Store
 Thumbs.db
+Desktop.ini
+
+# ======================
+# Testing / Coverage
+# ======================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ======================
+# Ruff / Linting
+# ======================
+.ruff_cache/
