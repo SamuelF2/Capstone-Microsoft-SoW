@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOW Knowledge Graph — Schema</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    background: #0d0d12;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  #header {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 18px 28px; z-index: 10;
+    background: linear-gradient(180deg, #0d0d12 70%, transparent);
+    display: flex; align-items: center; justify-content: space-between;
+    pointer-events: none;
+  }
+  #header .subtitle {
+    font-size: 11px; letter-spacing: 4px; color: #555;
+    text-transform: uppercase; margin-bottom: 4px;
+  }
+  #header .title {
+    font-size: 20px; font-weight: 700; color: #f0f0f0; letter-spacing: -0.5px;
+  }
+  #legend {
+    display: flex; gap: 16px; align-items: center;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 7px;
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 2px; opacity: 0.85;
+  }
+  .legend-label {
+    font-size: 11px; color: #666; letter-spacing: 1px; text-transform: uppercase;
+  }
+  .legend-hint {
+    font-size: 10px; color: #333; margin-left: 8px; letter-spacing: 1px;
+  }
+  svg { width: 100vw; height: 100vh; display: block; }
+  #info-panel {
+    position: absolute; bottom: 24px; left: 24px;
+    background: #101018;
+    border-radius: 8px; padding: 16px 20px;
+    max-width: 380px; z-index: 20;
+    display: none;
+    border-left-width: 3px; border-left-style: solid;
+  }
+  .info-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .info-dot {
+    width: 8px; height: 8px; border-radius: 2px;
+  }
+  .info-name {
+    font-size: 14px; font-weight: 700; color: #f0f0f0; letter-spacing: -0.3px;
+  }
+  .info-group {
+    font-size: 10px; color: #444; margin-left: auto;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .info-desc {
+    font-size: 10px; color: #555; margin-bottom: 12px;
+    letter-spacing: 0.3px; line-height: 1.6;
+  }
+  .info-edges { display: flex; flex-direction: column; gap: 4px; }
+  .info-edge {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .edge-dir { font-size: 9px; color: #333; width: 20px; text-align: center; }
+  .edge-label { font-size: 9px; letter-spacing: 0.5px; }
+  .edge-target { font-size: 9px; margin-left: auto; }
+  .info-more { font-size: 9px; color: #333; margin-top: 2px; }
+  .info-hint { font-size: 9px; color: #333; margin-top: 10px; letter-spacing: 1px; }
+  #zoom-label {
+    position: absolute; bottom: 24px; right: 24px;
+    font-size: 10px; color: #282830; letter-spacing: 2px;
+    text-transform: uppercase; pointer-events: none;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <div class="subtitle">SOW Knowledge Graph</div>
+    <div class="title">Schema Reference</div>
+  </div>
+  <div id="legend"></div>
+</div>
+
+<svg id="canvas"></svg>
+
+<div id="info-panel">
+  <div class="info-header">
+    <div class="info-dot" id="ip-dot"></div>
+    <span class="info-name" id="ip-name"></span>
+    <span class="info-group" id="ip-group"></span>
+  </div>
+  <div class="info-desc" id="ip-desc"></div>
+  <div class="info-edges" id="ip-edges"></div>
+  <div class="info-hint" id="ip-hint"></div>
+</div>
+
+<div id="zoom-label">100%</div>
+
+<script>
+const NODES = [
+  { id: "SOW",           x: 500, y: 300, color: "#e8c547", text: "#111",  desc: "id · title · methodology · deal_value · estimated_margin · outcome",        group: "document" },
+  { id: "Section",       x: 280, y: 160, color: "#e8c547", text: "#111",  desc: "id · heading · section_type · content · char_count",                        group: "document" },
+  { id: "Deliverable",   x: 720, y: 160, color: "#e8c547", text: "#111",  desc: "id · title · acceptance_criteria · has_ac",                                 group: "document" },
+  { id: "Risk",          x: 720, y: 440, color: "#e8547a", text: "#fff",  desc: "id · description · severity · mitigation · has_mitigation · confidence",     group: "risk" },
+  { id: "Party",         x: 280, y: 440, color: "#e8c547", text: "#111",  desc: "name · role (microsoft/customer/subcontractor)",                             group: "document" },
+  { id: "BannedPhrase",  x: 140, y: 280, color: "#e8547a", text: "#fff",  desc: "phrase · severity · category · suggestion",                                  group: "risk" },
+  { id: "Rule",          x: 140, y: 520, color: "#6e8efb", text: "#fff",  desc: "rule_id · description · severity · category · condition · is_regex",         group: "rules" },
+  { id: "ChecklistItem", x: 860, y: 280, color: "#6e8efb", text: "#fff",  desc: "item_id · text · required · category · help_text",                           group: "rules" },
+  { id: "Persona",       x: 860, y: 120, color: "#6e8efb", text: "#fff",  desc: "role · display_name · review_stage · focus_areas",                           group: "rules" },
+  { id: "Methodology",   x: 500, y: 120, color: "#54c9a8", text: "#111",  desc: "method_id · name · min_approach_length",                                     group: "process" },
+  { id: "EsapLevel",     x: 860, y: 440, color: "#54c9a8", text: "#111",  desc: "level_id · name (type-1/2/3)",                                               group: "process" },
+  { id: "ApprovalStage", x: 860, y: 580, color: "#54c9a8", text: "#111",  desc: "stage_id · name · description",                                              group: "process" },
+  { id: "ClauseType",    x: 280, y: 580, color: "#9b6ef3", text: "#fff",  desc: "type_id · display_name · description · is_reference",                        group: "taxonomy" },
+  { id: "Term",          x: 500, y: 540, color: "#9b6ef3", text: "#fff",  desc: "text · is_milestone",                                                        group: "taxonomy" },
+  { id: "Requirement",   x: 500, y: 660, color: "#9b6ef3", text: "#fff",  desc: "text",                                                                       group: "taxonomy" },
+];
+
+const EDGES = [
+  { from: "SOW",           to: "Section",       label: "HAS_SECTION",                      color: "#e8c547" },
+  { from: "SOW",           to: "Deliverable",   label: "HAS_DELIVERABLE",                  color: "#e8c547" },
+  { from: "SOW",           to: "Risk",          label: "HAS_RISK",                         color: "#e8547a" },
+  { from: "SOW",           to: "Party",         label: "INVOLVES",                         color: "#e8c547" },
+  { from: "SOW",           to: "Methodology",   label: "USES_METHODOLOGY",                 color: "#54c9a8" },
+  { from: "SOW",           to: "EsapLevel",     label: "CLASSIFIED_AS",                    color: "#54c9a8" },
+  { from: "SOW",           to: "ApprovalStage", label: "AT_STAGE",                         color: "#54c9a8" },
+  { from: "Section",       to: "ClauseType",    label: "INSTANCE_OF",                      color: "#9b6ef3" },
+  { from: "Section",       to: "BannedPhrase",  label: "CONTAINS_BANNED_PHRASE",           color: "#e8547a" },
+  { from: "Deliverable",   to: "BannedPhrase",  label: "CONTAINS_BANNED_PHRASE",           color: "#e8547a" },
+  { from: "ClauseType",    to: "Rule",          label: "VALIDATED_BY",                     color: "#6e8efb" },
+  { from: "BannedPhrase",  to: "Rule",          label: "DEFINED_BY",                       color: "#6e8efb" },
+  { from: "Rule",          to: "Risk",          label: "TRIGGERS",                         color: "#e8547a" },
+  { from: "EsapLevel",     to: "Persona",       label: "REQUIRES_APPROVER",                color: "#54c9a8" },
+  { from: "Persona",       to: "ChecklistItem", label: "HAS_CHECKLIST_ITEM",               color: "#6e8efb" },
+  { from: "Persona",       to: "ApprovalStage", label: "REVIEWS_AT",                       color: "#54c9a8" },
+  { from: "Methodology",   to: "Term",          label: "REQUIRES_KEYWORD",                 color: "#9b6ef3" },
+  { from: "Methodology",   to: "Requirement",   label: "REQUIRES_CUSTOMER_RESPONSIBILITY", color: "#9b6ef3" },
+  { from: "Methodology",   to: "Rule",          label: "HAS_WARNING",                      color: "#6e8efb" },
+  { from: "ClauseType",    to: "Rule",          label: "REQUIRES_ELEMENT",                 color: "#6e8efb" },
+  { from: "EsapLevel",     to: "Rule",          label: "HAS_ADDITIONAL_CHECK",             color: "#6e8efb" },
+  { from: "ApprovalStage", to: "Rule",          label: "GATED_BY",                         color: "#6e8efb" },
+];
+
+const GROUPS = [
+  { id: "document", label: "Document", color: "#e8c547" },
+  { id: "risk",     label: "Risk",     color: "#e8547a" },
+  { id: "rules",    label: "Rules",    color: "#6e8efb" },
+  { id: "process",  label: "Process",  color: "#54c9a8" },
+  { id: "taxonomy", label: "Taxonomy", color: "#9b6ef3" },
+];
+
+const NODE_W = 130, NODE_H = 36;
+const nodeById = Object.fromEntries(NODES.map(n => [n.id, n]));
+
+let active = null;
+let selected = null;
+let pan = { x: 60, y: 40 };
+let zoom = 0.95;
+let dragging = false;
+let dragStart = null;
+
+const legend = document.getElementById('legend');
+GROUPS.forEach(g => {
+  legend.innerHTML += `
+    <div class="legend-item">
+      <div class="legend-dot" style="background:${g.color}"></div>
+      <span class="legend-label">${g.label}</span>
+    </div>`;
+});
+legend.innerHTML += `<span class="legend-hint">scroll · drag · click</span>`;
+
+const svg = document.getElementById('canvas');
+const NS = 'http://www.w3.org/2000/svg';
+
+function el(tag, attrs = {}, parent = null) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+function edgePath(from, to, idx) {
+  const fx = from.x, fy = from.y, tx = to.x, ty = to.y;
+  const dx = tx - fx, dy = ty - fy;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const ux = dx/len, uy = dy/len;
+  const parallels = EDGES.filter(e =>
+    (e.from === from.id && e.to === to.id) ||
+    (e.from === to.id   && e.to === from.id)
+  );
+  const offset = parallels.length > 1
+    ? (idx % parallels.length - (parallels.length-1)/2) * 18 : 0;
+  const sx = fx + ux*(NODE_W/2), sy = fy + uy*(NODE_H/2);
+  const ex = tx - ux*(NODE_W/2), ey = ty - uy*(NODE_H/2);
+  const mx = (sx+ex)/2 - uy*offset, my = (sy+ey)/2 + ux*offset;
+  return `M ${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}`;
+}
+
+const defs = el('defs', {}, svg);
+
+el('marker', { id:'arr-base', markerWidth:7, markerHeight:7, refX:6, refY:3.5, orient:'auto' }, defs);
+document.querySelector('#arr-base').innerHTML = `<polygon points="0 0,7 3.5,0 7" fill="#333"/>`;
+
+GROUPS.forEach(g => {
+  const m = el('marker', {
+    id: `arr-${g.id}`, markerWidth:7, markerHeight:7, refX:6, refY:3.5, orient:'auto'
+  }, defs);
+  m.innerHTML = `<polygon points="0 0,7 3.5,0 7" fill="${g.color}" opacity="0.6"/>`;
+});
+
+defs.innerHTML += `
+  <filter id="glow">
+    <feGaussianBlur stdDeviation="3" result="blur"/>
+    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>`;
+
+const g = el('g', { id:'scene' }, svg);
+
+for (let row = 0; row < 40; row++) {
+  for (let col = 0; col < 60; col++) {
+    el('circle', { cx: col*40, cy: row*40, r: 0.8, fill: '#1a1a22' }, g);
+  }
+}
+
+const edgeLayer = el('g', { id:'edges' }, g);
+const nodeLayer = el('g', { id:'nodes' }, g);
+
+const edgeEls = EDGES.map((edge, i) => {
+  const fn = nodeById[edge.from], tn = nodeById[edge.to];
+  if (!fn || !tn) return null;
+  const grp = el('g', { opacity: 0.35 }, edgeLayer);
+
+  const path = el('path', {
+    d: edgePath(fn, tn, i),
+    fill: 'none',
+    stroke: '#2a2a35',
+    'stroke-width': 1.2,
+    'marker-end': `url(#arr-${fn.group})`
+  }, grp);
+
+  const mid = { x: (fn.x+tn.x)/2, y: (fn.y+tn.y)/2 };
+  const lbl = el('text', {
+    x: mid.x, y: mid.y - 6,
+    'text-anchor': 'middle',
+    fill: edge.color,
+    'font-size': 8.5,
+    'font-family': "'IBM Plex Mono', monospace",
+    'letter-spacing': 0.5,
+    opacity: 0,
+    style: 'user-select:none'
+  }, grp);
+  lbl.textContent = edge.label;
+
+  return { grp, path, lbl, edge, fn, tn };
+});
+
+const nodeEls = NODES.map(node => {
+  const grp = el('g', {
+    transform: `translate(${node.x - NODE_W/2}, ${node.y - NODE_H/2})`,
+    style: 'cursor:pointer'
+  }, nodeLayer);
+
+  const glow = el('rect', {
+    x:-4, y:-4, width: NODE_W+8, height: NODE_H+8,
+    rx:6, ry:6, fill: node.color, opacity:0,
+    filter: 'url(#glow)'
+  }, grp);
+
+  const rect = el('rect', {
+    width: NODE_W, height: NODE_H,
+    rx:4, ry:4,
+    fill: '#161620',
+    stroke: node.color,
+    'stroke-width': 0.8,
+    opacity: 0.9
+  }, grp);
+
+  const txt = el('text', {
+    x: NODE_W/2, y: NODE_H/2 + 1,
+    'text-anchor': 'middle',
+    'dominant-baseline': 'middle',
+    'font-size': 11,
+    'font-weight': 600,
+    'font-family': "'IBM Plex Mono', monospace",
+    fill: node.color,
+    'letter-spacing': -0.2,
+    style: 'user-select:none'
+  }, grp);
+  txt.textContent = node.id;
+
+  const dot = el('circle', {
+    cx: NODE_W-10, cy: NODE_H/2, r:3, fill: node.color, opacity:0.5
+  }, grp);
+
+  grp.addEventListener('mouseenter', () => { if (!selected) setActive(node.id, false); });
+  grp.addEventListener('mouseleave', () => { if (!selected) setActive(null, false); });
+  grp.addEventListener('click', e => {
+    e.stopPropagation();
+    if (selected === node.id) { selected = null; setActive(null, false); }
+    else { selected = node.id; setActive(node.id, true); }
+  });
+
+  return { grp, glow, rect, txt, dot, node };
+});
+
+svg.addEventListener('click', () => { selected = null; setActive(null, false); });
+
+function setActive(id, isSelected) {
+  active = id;
+
+  const connectedEdges = id ? EDGES.filter(e => e.from === id || e.to === id) : [];
+  const connectedIds = new Set(connectedEdges.flatMap(e => [e.from, e.to]));
+
+  edgeEls.forEach((ee, i) => {
+    if (!ee) return;
+    const hot = id && (ee.edge.from === id || ee.edge.to === id);
+    const dim = id && !hot;
+    ee.grp.setAttribute('opacity', dim ? 0.04 : hot ? 1 : 0.35);
+    ee.path.setAttribute('stroke', hot ? ee.edge.color : '#2a2a35');
+    ee.path.setAttribute('stroke-width', hot ? 1.8 : 1.2);
+    ee.path.setAttribute('filter', hot ? 'url(#glow)' : 'none');
+    ee.lbl.setAttribute('opacity', hot ? 0.9 : 0);
+  });
+
+  nodeEls.forEach(ne => {
+    const isActive = id === ne.node.id;
+    const dim = id && !connectedIds.has(ne.node.id) && ne.node.id !== id;
+    ne.grp.setAttribute('opacity', dim ? 0.08 : 1);
+    ne.glow.setAttribute('opacity', isActive ? 0.15 : 0);
+    ne.rect.setAttribute('fill', isActive ? ne.node.color : '#161620');
+    ne.rect.setAttribute('stroke-width', isSelected && isActive ? 2 : isActive ? 1.5 : 0.8);
+    ne.txt.setAttribute('fill', isActive ? ne.node.text : ne.node.color);
+    ne.txt.setAttribute('font-weight', isActive ? 700 : 600);
+    ne.dot.setAttribute('opacity', isActive ? 0 : 0.5);
+  });
+
+  const panel = document.getElementById('info-panel');
+  if (id) {
+    const node = nodeById[id];
+    panel.style.display = 'block';
+    panel.style.borderColor = node.color;
+    panel.style.boxShadow = `0 0 40px ${node.color}11`;
+    document.getElementById('ip-dot').style.background = node.color;
+    document.getElementById('ip-name').textContent = node.id;
+    document.getElementById('ip-group').textContent = node.group;
+    document.getElementById('ip-desc').textContent = node.desc;
+
+    const edgesEl = document.getElementById('ip-edges');
+    edgesEl.innerHTML = '';
+    const shown = connectedEdges.slice(0, 8);
+    shown.forEach(e => {
+      const isOut = e.from === id;
+      const other = isOut ? e.to : e.from;
+      const otherNode = nodeById[other];
+      edgesEl.innerHTML += `
+        <div class="info-edge">
+          <span class="edge-dir">${isOut ? '→' : '←'}</span>
+          <span class="edge-label" style="color:${e.color}">${e.label}</span>
+          <span class="edge-target" style="color:${otherNode?.color||'#666'}">${other}</span>
+        </div>`;
+    });
+    if (connectedEdges.length > 8) {
+      edgesEl.innerHTML += `<div class="info-more">+${connectedEdges.length-8} more</div>`;
+    }
+    document.getElementById('ip-hint').textContent = isSelected ? 'CLICK ELSEWHERE TO DESELECT' : '';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function applyTransform() {
+  g.setAttribute('transform', `translate(${pan.x},${pan.y}) scale(${zoom})`);
+  document.getElementById('zoom-label').textContent = Math.round(zoom*100) + '%';
+}
+applyTransform();
+
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoom = Math.min(2, Math.max(0.35, zoom - e.deltaY * 0.001));
+  applyTransform();
+}, { passive: false });
+
+svg.addEventListener('mousedown', e => {
+  if (e.target === svg || e.target === g) {
+    dragging = true;
+    dragStart = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+    svg.style.cursor = 'grabbing';
+  }
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  pan = { x: e.clientX - dragStart.x, y: e.clientY - dragStart.y };
+  applyTransform();
+});
+window.addEventListener('mouseup', () => {
+  dragging = false;
+  svg.style.cursor = 'grab';
+});
+svg.style.cursor = 'grab';
+</script>
+</body>
+</html>
