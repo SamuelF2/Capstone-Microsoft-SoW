@@ -8,14 +8,14 @@ Guide documents (SOW_Writing_Guide, Risk Framework, etc.)
   -> ClauseType nodes, Rule nodes, Term nodes (reference/knowledge layer)
 """
 
-import re
 import hashlib
+import re
 from pathlib import Path
+
 from neo4j import Driver
 from rich.console import Console
 
 console = Console()
-
 
 
 def _stable_id(text: str, prefix: str = "") -> str:
@@ -28,10 +28,22 @@ def _detect_methodology(content: str) -> str:
     """Infer methodology from document content."""
     content_lower = content.lower()
     scores = {
-        "agile":          sum(content_lower.count(kw) for kw in ["sprint", "backlog", "scrum", "iteration", "product owner"]),
-        "waterfall":      sum(content_lower.count(kw) for kw in ["phase gate", "requirements phase", "design phase", "uat"]),
-        "sure-step-365":  sum(content_lower.count(kw) for kw in ["sure step", "fit-gap", "dynamics", "diagnostic phase"]),
-        "cloud-adoption": sum(content_lower.count(kw) for kw in ["landing zone", "migration wave", "azure caf", "workload assessment"]),
+        "agile": sum(
+            content_lower.count(kw)
+            for kw in ["sprint", "backlog", "scrum", "iteration", "product owner"]
+        ),
+        "waterfall": sum(
+            content_lower.count(kw)
+            for kw in ["phase gate", "requirements phase", "design phase", "uat"]
+        ),
+        "sure-step-365": sum(
+            content_lower.count(kw)
+            for kw in ["sure step", "fit-gap", "dynamics", "diagnostic phase"]
+        ),
+        "cloud-adoption": sum(
+            content_lower.count(kw)
+            for kw in ["landing zone", "migration wave", "azure caf", "workload assessment"]
+        ),
     }
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "unknown"
@@ -45,71 +57,71 @@ def _extract_sections(content: str) -> list[dict]:
     # First match wins
     SECTION_MAP = [
         # Scope
-        ("areas in scope",                    "scope"),
-        ("targeted scope",                    "scope"),
-        ("general project scope",             "scope"),
-        ("project objectives and scope",      "scope"),
-        ("engagement overview",               "scope"),
-        ("customer desired business",         "scope"),
-        ("customer goals and engagement",     "scope"),
-        ("goals and engagement outcomes",     "scope"),
-        ("project scope",                     "scope"),
+        ("areas in scope", "scope"),
+        ("targeted scope", "scope"),
+        ("general project scope", "scope"),
+        ("project objectives and scope", "scope"),
+        ("engagement overview", "scope"),
+        ("customer desired business", "scope"),
+        ("customer goals and engagement", "scope"),
+        ("goals and engagement outcomes", "scope"),
+        ("project scope", "scope"),
         # Out of scope
-        ("out of scope",                      "outOfScope"),
-        ("exclusion",                         "outOfScope"),
+        ("out of scope", "outOfScope"),
+        ("exclusion", "outOfScope"),
         # Deliverables
-        ("project artifact",                  "deliverables"),
-        ("deliverable",                       "deliverables"),
-        ("work product",                      "deliverables"),
-        ("backlog item acceptance",           "deliverables"),
+        ("project artifact", "deliverables"),
+        ("deliverable", "deliverables"),
+        ("work product", "deliverables"),
+        ("backlog item acceptance", "deliverables"),
         # Approach
-        ("sprint process",                    "approach"),
-        ("scrum approach",                    "approach"),
-        ("delivery approach",                 "approach"),
-        ("delivery overview",                 "approach"),
-        ("delivery sprint",                   "approach"),
-        ("engagement initiation",             "approach"),
-        ("product baseline planning",         "approach"),
-        ("baseline planning",                 "approach"),
-        ("testing and defect",                "approach"),
+        ("sprint process", "approach"),
+        ("scrum approach", "approach"),
+        ("delivery approach", "approach"),
+        ("delivery overview", "approach"),
+        ("delivery sprint", "approach"),
+        ("engagement initiation", "approach"),
+        ("product baseline planning", "approach"),
+        ("baseline planning", "approach"),
+        ("testing and defect", "approach"),
         # Customer responsibilities
-        ("customer responsibilities",         "customerResponsibilities"),
-        ("responsibilities",                  "customerResponsibilities"),
-        ("customer staffing",                 "customerResponsibilities"),
-        ("responsibilities and engagement",   "customerResponsibilities"),
+        ("customer responsibilities", "customerResponsibilities"),
+        ("responsibilities", "customerResponsibilities"),
+        ("customer staffing", "customerResponsibilities"),
+        ("responsibilities and engagement", "customerResponsibilities"),
         # Assumptions — specific first so "engagement assumption" beats "engagement"
-        ("engagement assumption",             "assumptions"),
-        ("project assumption",                "assumptions"),
-        ("scope assumption",                  "assumptions"),
-        ("technical assumption",              "assumptions"),
+        ("engagement assumption", "assumptions"),
+        ("project assumption", "assumptions"),
+        ("scope assumption", "assumptions"),
+        ("technical assumption", "assumptions"),
         # Risks
-        ("risk and issue",                    "risks"),
-        ("risk register",                     "risks"),
+        ("risk and issue", "risks"),
+        ("risk register", "risks"),
         # Support / transition
-        ("engagement completion",             "supportTransitionPlan"),
-        ("support transition",                "supportTransitionPlan"),
+        ("engagement completion", "supportTransitionPlan"),
+        ("support transition", "supportTransitionPlan"),
         ("completion and definition of done", "supportTransitionPlan"),
         # Staffing
-        ("engagement staffing",               "staffing"),
-        ("project staffing",                  "staffing"),
-        ("project capacity",                  "staffing"),
-        ("feature team",                      "staffing"),
-        ("project organization",              "staffing"),
-        ("engagement organization",           "staffing"),
+        ("engagement staffing", "staffing"),
+        ("project staffing", "staffing"),
+        ("project capacity", "staffing"),
+        ("feature team", "staffing"),
+        ("project organization", "staffing"),
+        ("engagement organization", "staffing"),
         # Intro / summary
-        ("executive summary",                 "executiveSummary"),
-        ("introduction",                      "introduction"),
+        ("executive summary", "executiveSummary"),
+        ("introduction", "introduction"),
         # Governance
-        ("change management",                 "changeManagement"),
-        ("escalation",                        "governance"),
-        ("engagement communication",          "governance"),
-        ("project communication",             "governance"),
-        ("governance",                        "governance"),
+        ("change management", "changeManagement"),
+        ("escalation", "governance"),
+        ("engagement communication", "governance"),
+        ("project communication", "governance"),
+        ("governance", "governance"),
         # Misc
-        ("timeline",                          "milestones"),
-        ("milestone",                         "milestones"),
-        ("billing",                           "billing"),
-        ("payment",                           "billing"),
+        ("timeline", "milestones"),
+        ("milestone", "milestones"),
+        ("billing", "billing"),
+        ("payment", "billing"),
     ]
 
     sections = []
@@ -119,26 +131,30 @@ def _extract_sections(content: str) -> list[dict]:
 
     for i, match in enumerate(matches):
         heading = match.group(2).strip()
-        level   = len(match.group(1))
-        start   = match.end()
-        end     = matches[i + 1].start() if i + 1 < len(matches) else len(content)
-        body    = content[start:end].strip()
+        level = len(match.group(1))
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        body = content[start:end].strip()
 
         section_type = "other"
-        heading_lower = heading.lower().rstrip(".")  # strip trailing period e.g. "Customer responsibilities."
+        heading_lower = heading.lower().rstrip(
+            "."
+        )  # strip trailing period e.g. "Customer responsibilities."
         for key, stype in SECTION_MAP:
             if key in heading_lower:
                 section_type = stype
                 break
 
         if body:
-            sections.append({
-                "heading":      heading,
-                "level":        level,
-                "content":      body,
-                "section_type": section_type,
-                "char_count":   len(body),
-            })
+            sections.append(
+                {
+                    "heading": heading,
+                    "level": level,
+                    "content": body,
+                    "section_type": section_type,
+                    "char_count": len(body),
+                }
+            )
 
     return sections
 
@@ -161,19 +177,19 @@ def _extract_risks(content: str) -> list[dict]:
         if not headers:
             headers = [c.lower() for c in cells]
             continue
-        if set(cells) <= {"-", "---", "----", ""}:
+        if all(re.match(r"^-+$", c) or c == "" for c in cells):
             continue
 
         def col(names):
             for n in names:
-                for i, h in enumerate(headers):
-                    if n in h and i < len(cells):
-                        return cells[i]
+                for i, h in enumerate(headers):  # noqa: B023
+                    if n in h and i < len(cells):  # noqa: B023
+                        return cells[i]  # noqa: B023
             return ""
 
         desc = col(["risk", "description", "issue", "concern"])
-        sev  = col(["severity", "priority", "impact", "level"])
-        mit  = col(["mitigation", "response", "action", "owner"])
+        sev = col(["severity", "priority", "impact", "level"])
+        mit = col(["mitigation", "response", "action", "owner"])
 
         if not desc or desc.lower() in ("risk", "description", "issue", ""):
             continue
@@ -189,12 +205,14 @@ def _extract_risks(content: str) -> list[dict]:
                 sev_norm = level
                 break
 
-        risks.append({
-            "description":    desc,
-            "severity":       sev_norm,
-            "mitigation":     mit,
-            "has_mitigation": len(mit) > 5,
-        })
+        risks.append(
+            {
+                "description": desc,
+                "severity": sev_norm,
+                "mitigation": mit,
+                "has_mitigation": len(mit) > 5,
+            }
+        )
 
     # Bullet: - **High** - description  or  - Identify – ...
     bullet_sev = re.compile(
@@ -206,17 +224,27 @@ def _extract_risks(content: str) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        risks.append({
-            "description":    m.group(2).strip(),
-            "severity":       m.group(1).lower(),
-            "mitigation":     "",
-            "has_mitigation": False,
-        })
+        risks.append(
+            {
+                "description": m.group(2).strip(),
+                "severity": m.group(1).lower(),
+                "mitigation": "",
+                "has_mitigation": False,
+            }
+        )
 
     # Prose bullets — each bullet is a risk step/item (infer medium)
     PROCESS_PREFIXES = {
-        "identify", "analyze", "analyse", "plan and", "track and",
-        "escalate", "control", "monitor", "review the", "active issue",
+        "identify",
+        "analyze",
+        "analyse",
+        "plan and",
+        "track and",
+        "escalate",
+        "control",
+        "monitor",
+        "review the",
+        "active issue",
     }
     if not risks:
         prose = re.findall(r"^[-*]\s+(.{20,200})$", content, re.MULTILINE)
@@ -227,12 +255,14 @@ def _extract_risks(content: str) -> list[dict]:
             if key in seen:
                 continue
             seen.add(key)
-            risks.append({
-                "description":    p.strip(),
-                "severity":       "medium",
-                "mitigation":     "",
-                "has_mitigation": False,
-            })
+            risks.append(
+                {
+                    "description": p.strip(),
+                    "severity": "medium",
+                    "mitigation": "",
+                    "has_mitigation": False,
+                }
+            )
 
     return risks
 
@@ -254,19 +284,19 @@ def _extract_deliverables(content: str) -> list[dict]:
         if not headers:
             headers = [c.lower() for c in cells]
             continue
-        if set(cells) <= {"-", "---", "----", ""}:
+        if all(re.match(r"^-+$", c) or c == "" for c in cells):
             continue
 
         def col(names):
             for n in names:
-                for i, h in enumerate(headers):
-                    if n in h and i < len(cells):
-                        return cells[i]
+                for i, h in enumerate(headers):  # noqa: B023
+                    if n in h and i < len(cells):  # noqa: B023
+                        return cells[i]  # noqa: B023
             return ""
 
         title = col(["name", "deliverable", "work product", "title", "output"])
-        desc  = col(["description", "detail", "content", "summary"])
-        ac    = col(["acceptance", "criteria", "required", "sign"])
+        desc = col(["description", "detail", "content", "summary"])
+        ac = col(["acceptance", "criteria", "required", "sign"])
 
         if title.lower() in SKIP_TITLES:
             continue
@@ -274,12 +304,14 @@ def _extract_deliverables(content: str) -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
-        deliverables.append({
-            "title":               title,
-            "description":         desc,
-            "acceptance_criteria": ac,
-            "has_ac":              len(ac) > 10,
-        })
+        deliverables.append(
+            {
+                "title": title,
+                "description": desc,
+                "acceptance_criteria": ac,
+                "has_ac": len(ac) > 10,
+            }
+        )
 
     # Bullet fallback
     if not deliverables:
@@ -289,12 +321,14 @@ def _extract_deliverables(content: str) -> list[dict]:
             if key in seen:
                 continue
             seen.add(key)
-            deliverables.append({
-                "title":               b.strip(),
-                "description":         "",
-                "acceptance_criteria": "",
-                "has_ac":              False,
-            })
+            deliverables.append(
+                {
+                    "title": b.strip(),
+                    "description": "",
+                    "acceptance_criteria": "",
+                    "has_ac": False,
+                }
+            )
 
     return deliverables
 
@@ -307,7 +341,6 @@ def _check_banned_phrases(content: str, banned: list[dict]) -> list[str]:
         if bp["phrase"].lower() in content_lower:
             found.append(bp["phrase"])
     return found
-
 
 
 _KNOWN_SOW_FILES = {
@@ -334,24 +367,27 @@ _KNOWN_GUIDE_FILES = {
 
 def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
     """Parse a SOW markdown file and write all nodes/edges to Neo4j."""
-    content  = path.read_text(encoding="utf-8", errors="replace")
+    content = path.read_text(encoding="utf-8", errors="replace")
     filename = path.name
-    sow_id   = _stable_id(filename, "sow")
+    sow_id = _stable_id(filename, "sow")
 
     methodology = _detect_methodology(content)
-    sections    = _extract_sections(content)
-    title       = filename.replace(".md", "").replace("_", " ")
+    sections = _extract_sections(content)
+    title = filename.replace(".md", "").replace("_", " ")
 
     # Try to get title from first H1
     h1 = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     if h1:
         title = h1.group(1).strip()
 
-    console.print(f"  [dim]→ SOW:[/] [yellow]{filename}[/] | methodology=[cyan]{methodology}[/] | sections={len(sections)}")
+    console.print(
+        f"  [dim]→ SOW:[/] [yellow]{filename}[/] | methodology=[cyan]{methodology}[/] | sections={len(sections)}"
+    )
 
     with driver.session() as session:
         # SOW node
-        session.run("""
+        session.run(
+            """
             MERGE (s:SOW {id: $sow_id})
             SET s.title        = $title,
                 s.filename     = $filename,
@@ -360,21 +396,29 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                 s.outcome      = null,
                 s.source       = 'markdown-sow'
         """,
-            sow_id=sow_id, title=title, filename=filename,
-            methodology=methodology, char_count=len(content),
+            sow_id=sow_id,
+            title=title,
+            filename=filename,
+            methodology=methodology,
+            char_count=len(content),
         )
 
         # Link to Methodology node
-        session.run("""
+        session.run(
+            """
             MATCH (s:SOW {id: $sow_id})
             MERGE (m:Methodology {method_id: $method_id})
             MERGE (s)-[:USES_METHODOLOGY]->(m)
-        """, sow_id=sow_id, method_id=methodology)
+        """,
+            sow_id=sow_id,
+            method_id=methodology,
+        )
 
         # Section nodes
         for sec in sections:
             sec_id = _stable_id(sow_id + sec["heading"], "sec")
-            session.run("""
+            session.run(
+                """
                 MERGE (sec:Section {id: $sec_id})
                 SET sec.heading      = $heading,
                     sec.section_type = $section_type,
@@ -385,34 +429,47 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                 MATCH (s:SOW {id: $sow_id})
                 MERGE (s)-[:HAS_SECTION]->(sec)
             """,
-                sec_id=sec_id, heading=sec["heading"], section_type=sec["section_type"],
+                sec_id=sec_id,
+                heading=sec["heading"],
+                section_type=sec["section_type"],
                 content=sec["content"][:2000],  # cap for Neo4j property size
-                char_count=sec["char_count"], level=sec["level"], sow_id=sow_id,
+                char_count=sec["char_count"],
+                level=sec["level"],
+                sow_id=sow_id,
             )
 
             # Link Section to ClauseType if it maps to a known section
             if sec["section_type"] != "other":
-                session.run("""
+                session.run(
+                    """
                     MATCH (sec:Section {id: $sec_id})
                     MERGE (ct:ClauseType {type_id: $type_id})
                     MERGE (sec)-[:INSTANCE_OF]->(ct)
-                """, sec_id=sec_id, type_id=sec["section_type"])
+                """,
+                    sec_id=sec_id,
+                    type_id=sec["section_type"],
+                )
 
             # Check for banned phrases in this section
             found_banned = _check_banned_phrases(sec["content"], banned_phrases)
             for phrase in found_banned:
-                session.run("""
+                session.run(
+                    """
                     MATCH (sec:Section {id: $sec_id})
                     MATCH (b:BannedPhrase {phrase: $phrase})
                     MERGE (sec)-[:CONTAINS_BANNED_PHRASE]->(b)
-                """, sec_id=sec_id, phrase=phrase)
+                """,
+                    sec_id=sec_id,
+                    phrase=phrase,
+                )
 
             # Extract risks from risk sections
             if sec["section_type"] == "risks":
                 risks = _extract_risks(sec["content"])
                 for risk in risks:
                     risk_id = _stable_id(sow_id + risk["description"], "risk")
-                    session.run("""
+                    session.run(
+                        """
                         MERGE (r:Risk {id: $risk_id})
                         SET r.description    = $description,
                             r.severity       = $severity,
@@ -423,7 +480,8 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                         MATCH (s:SOW {id: $sow_id})
                         MERGE (s)-[:HAS_RISK]->(r)
                     """,
-                        risk_id=risk_id, sow_id=sow_id,
+                        risk_id=risk_id,
+                        sow_id=sow_id,
                         description=risk["description"][:500],
                         severity=risk["severity"],
                         mitigation=risk["mitigation"][:500],
@@ -435,7 +493,8 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                 deliverables = _extract_deliverables(sec["content"])
                 for deliv in deliverables:
                     d_id = _stable_id(sow_id + deliv["title"], "del")
-                    session.run("""
+                    session.run(
+                        """
                         MERGE (d:Deliverable {id: $d_id})
                         SET d.title              = $title,
                             d.description        = $description,
@@ -445,7 +504,8 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                         MATCH (s:SOW {id: $sow_id})
                         MERGE (s)-[:HAS_DELIVERABLE]->(d)
                     """,
-                        d_id=d_id, sow_id=sow_id,
+                        d_id=d_id,
+                        sow_id=sow_id,
                         title=deliv["title"][:200],
                         description=deliv["description"][:500],
                         ac=deliv["acceptance_criteria"][:500],
@@ -456,11 +516,15 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                     if deliv["has_ac"]:
                         found = _check_banned_phrases(deliv["acceptance_criteria"], banned_phrases)
                         for phrase in found:
-                            session.run("""
+                            session.run(
+                                """
                                 MATCH (d:Deliverable {id: $d_id})
                                 MATCH (b:BannedPhrase {phrase: $phrase})
                                 MERGE (d)-[:CONTAINS_BANNED_PHRASE]->(b)
-                            """, d_id=d_id, phrase=phrase)
+                            """,
+                                d_id=d_id,
+                                phrase=phrase,
+                            )
 
 
 def ingest_guide_document(driver: Driver, path: Path):
@@ -469,7 +533,7 @@ def ingest_guide_document(driver: Driver, path: Path):
     These don't become SOW nodes — they enrich ClauseType and Rule nodes
     with reference content and link Term nodes for semantic search.
     """
-    content  = path.read_text(encoding="utf-8", errors="replace")
+    content = path.read_text(encoding="utf-8", errors="replace")
     filename = path.name
     sections = _extract_sections(content)
 
@@ -481,7 +545,8 @@ def ingest_guide_document(driver: Driver, path: Path):
                 continue  # skip tiny/noise sections
 
             ct_id = _stable_id(filename + sec["heading"], "guide")
-            session.run("""
+            session.run(
+                """
                 MERGE (ct:ClauseType {type_id: $type_id})
                 SET ct.display_name  = $heading,
                     ct.description   = $content,
@@ -498,23 +563,26 @@ def ingest_guide_document(driver: Driver, path: Path):
             terms = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b", sec["content"])
             unique_terms = set(terms)
             for term in list(unique_terms)[:20]:  # cap per section
-                session.run("""
+                session.run(
+                    """
                     MERGE (t:Term {text: $text})
                     WITH t
                     MATCH (ct:ClauseType {type_id: $type_id})
                     MERGE (ct)-[:MENTIONS_TERM]->(t)
-                """, text=term, type_id=ct_id)
-
+                """,
+                    text=term,
+                    type_id=ct_id,
+                )
 
 
 def ingest_all_markdown(driver: Driver, data_dir: Path, banned_phrases: list[dict]):
     """Ingest all markdown files, SOWs then guides."""
     console.rule("[bold]Markdown Document Ingestion")
 
-    sow_dir   = data_dir / "sow-md"
+    sow_dir = data_dir / "sow-md"
     guide_dir = data_dir / "SOW Guides MD"
 
-    sow_count   = 0
+    sow_count = 0
     guide_count = 0
 
     if sow_dir.exists():
@@ -529,11 +597,20 @@ def ingest_all_markdown(driver: Driver, data_dir: Path, banned_phrases: list[dic
 
     for md in sorted(data_dir.glob("*.md")):
         content = md.read_text(errors="replace")
-        sow_signals = sum(1 for kw in [
-            "statement of work", "in scope", "out of scope",
-            "acceptance criteria", "customer responsibilities",
-            "deliverable", "prepared for", "prepared by",
-        ] if kw in content.lower())
+        sow_signals = sum(
+            1
+            for kw in [
+                "statement of work",
+                "in scope",
+                "out of scope",
+                "acceptance criteria",
+                "customer responsibilities",
+                "deliverable",
+                "prepared for",
+                "prepared by",
+            ]
+            if kw in content.lower()
+        )
         if sow_signals >= 3:
             ingest_sow_document(driver, md, banned_phrases)
             sow_count += 1
@@ -541,4 +618,6 @@ def ingest_all_markdown(driver: Driver, data_dir: Path, banned_phrases: list[dic
             ingest_guide_document(driver, md)
             guide_count += 1
 
-    console.print(f"\n[bold green] {sow_count} SOW documents, {guide_count} guide documents ingested[/]")
+    console.print(
+        f"\n[bold green] {sow_count} SOW documents, {guide_count} guide documents ingested[/]"
+    )
