@@ -2,6 +2,7 @@
 Cocoon Backend API - FastAPI with Neo4j + PostgreSQL
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -28,14 +29,30 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global neo4j_driver, pg_pool
 
-    # --- Start Neo4j driver ---
+    # --- Start Neo4j driver (retry up to 30s) ---
     neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    neo4j_driver.verify_connectivity()
-    print("Neo4j connected")
+    for attempt in range(15):
+        try:
+            neo4j_driver.verify_connectivity()
+            print("Neo4j connected")
+            break
+        except Exception:
+            if attempt == 14:
+                raise
+            print(f"Neo4j not ready, retrying ({attempt + 1}/15)...")
+            await asyncio.sleep(2)
 
-    # --- Start PostgreSQL pool ---
-    pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    print("PostgreSQL connected")
+    # --- Start PostgreSQL pool (retry up to 30s) ---
+    for attempt in range(15):
+        try:
+            pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+            print("PostgreSQL connected")
+            break
+        except Exception:
+            if attempt == 14:
+                raise
+            print(f"PostgreSQL not ready, retrying ({attempt + 1}/15)...")
+            await asyncio.sleep(2)
 
     # --- Create initial tables if needed ---
     async with pg_pool.acquire() as conn:
