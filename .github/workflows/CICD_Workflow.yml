@@ -69,19 +69,3 @@ jobs:
 
       - name: Build Docker images
         run: docker compose build
-
-  azure-deploy:
-    runs-on: ubuntu-latest
-    needs: docker-build
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install azd
-        uses: Azure/setup-azd@v1.0.0
-
-      # Need to add azure login stuff here, might need to implement github secrets for this :(
-
-      # And then add azure deployment stuff here too
