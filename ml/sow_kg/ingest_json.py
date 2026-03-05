@@ -9,9 +9,10 @@ Sources:
   - required-elements.json     Rule nodes (required section/deliverable rules)
 """
 
-import json
 import hashlib
+import json
 from pathlib import Path
+
 from neo4j import Driver
 from rich.console import Console
 
@@ -33,7 +34,6 @@ def _rule_id(prefix: str, *parts: str) -> str:
     return f"{prefix}_{digest}"
 
 
-
 def ingest_banned_phrases(driver: Driver, path: Path):
     data = _load(path)
     console.print("[bold cyan]Ingesting banned phrases[/]")
@@ -41,7 +41,8 @@ def ingest_banned_phrases(driver: Driver, path: Path):
     with driver.session() as session:
         for bp in data.get("bannedPhrases", []):
             rule_id = _rule_id("bp", bp["phrase"])
-            session.run("""
+            session.run(
+                """
                 MERGE (b:BannedPhrase {phrase: $phrase})
                 SET b.severity   = $severity,
                     b.reason     = $reason,
@@ -68,7 +69,8 @@ def ingest_banned_phrases(driver: Driver, path: Path):
 
         for i, pat in enumerate(data.get("additionalPatterns", [])):
             rule_id = _rule_id("bp_pattern", str(i), pat["pattern"])
-            session.run("""
+            session.run(
+                """
                 MERGE (r:Rule {rule_id: $rule_id})
                 SET r.pattern     = $pattern,
                     r.description = $description,
@@ -97,15 +99,20 @@ def ingest_esap_workflow(driver: Driver, path: Path):
     with driver.session() as session:
         # EsapLevel nodes
         for level_id, level in data["esapLevels"].items():
-            session.run("""
+            session.run(
+                """
                 MERGE (e:EsapLevel {level_id: $level_id})
                 SET e.name   = $name,
                     e.source = 'esap-workflow.json'
-            """, level_id=level_id, name=level["name"])
+            """,
+                level_id=level_id,
+                name=level["name"],
+            )
 
             for trigger in level["triggers"]:
                 rule_id = _rule_id("esap_trigger", level_id, trigger["condition"])
-                session.run("""
+                session.run(
+                    """
                     MATCH (e:EsapLevel {level_id: $level_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.condition   = $condition,
@@ -122,7 +129,8 @@ def ingest_esap_workflow(driver: Driver, path: Path):
                 )
 
             for approver in level["requiredApprovers"]:
-                session.run("""
+                session.run(
+                    """
                     MATCH (e:EsapLevel {level_id: $level_id})
                     MERGE (p:Persona {role: $role})
                     ON CREATE SET p.source = 'esap-workflow.json'
@@ -137,7 +145,8 @@ def ingest_esap_workflow(driver: Driver, path: Path):
 
             for check in level.get("additionalChecks", []):
                 rule_id = _rule_id("esap_check", level_id, check)
-                session.run("""
+                session.run(
+                    """
                     MATCH (e:EsapLevel {level_id: $level_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.description = $check,
@@ -145,21 +154,31 @@ def ingest_esap_workflow(driver: Driver, path: Path):
                         r.is_regex    = false,
                         r.source      = 'esap-workflow.json'
                     MERGE (e)-[:HAS_ADDITIONAL_CHECK]->(r)
-                """, level_id=level_id, rule_id=rule_id, check=check)
+                """,
+                    level_id=level_id,
+                    rule_id=rule_id,
+                    check=check,
+                )
 
         # ApprovalStage nodes
         stage_order = list(data["workflowStages"].keys())
         for stage_id, stage in data["workflowStages"].items():
-            session.run("""
+            session.run(
+                """
                 MERGE (s:ApprovalStage {stage_id: $stage_id})
                 SET s.name        = $name,
                     s.description = $description,
                     s.source      = 'esap-workflow.json'
-            """, stage_id=stage_id, name=stage["name"], description=stage["description"])
+            """,
+                stage_id=stage_id,
+                name=stage["name"],
+                description=stage["description"],
+            )
 
             for criterion in stage.get("exitCriteria", []):
                 rule_id = _rule_id("exit", stage_id, criterion)
-                session.run("""
+                session.run(
+                    """
                     MATCH (s:ApprovalStage {stage_id: $stage_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.description = $criterion,
@@ -167,11 +186,16 @@ def ingest_esap_workflow(driver: Driver, path: Path):
                         r.is_regex    = false,
                         r.source      = 'esap-workflow.json'
                     MERGE (s)-[:HAS_EXIT_CRITERION]->(r)
-                """, stage_id=stage_id, rule_id=rule_id, criterion=criterion)
+                """,
+                    stage_id=stage_id,
+                    rule_id=rule_id,
+                    criterion=criterion,
+                )
 
             for gate in stage.get("gatingRules", []):
                 rule_id = _rule_id("gate", stage_id, gate["rule"])
-                session.run("""
+                session.run(
+                    """
                     MATCH (s:ApprovalStage {stage_id: $stage_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.description = $rule,
@@ -193,11 +217,15 @@ def ingest_esap_workflow(driver: Driver, path: Path):
         terminal = {"approved", "finalized", "rejected"}
         non_terminal = [s for s in stage_order if s not in terminal]
         for i in range(len(non_terminal) - 1):
-            session.run("""
+            session.run(
+                """
                 MATCH (a:ApprovalStage {stage_id: $from_id})
                 MATCH (b:ApprovalStage {stage_id: $to_id})
                 MERGE (a)-[:PRECEDES]->(b)
-            """, from_id=non_terminal[i], to_id=non_terminal[i + 1])
+            """,
+                from_id=non_terminal[i],
+                to_id=non_terminal[i + 1],
+            )
 
     console.print(
         f"  [green][/] {len(data['esapLevels'])} ESAP levels, "
@@ -209,6 +237,7 @@ def ingest_esap_workflow(driver: Driver, path: Path):
 # review-checklists.json
 # ---------------------------------------------------------------------------
 
+
 def ingest_review_checklists(driver: Driver, path: Path):
     data = _load(path)
     console.print("[bold cyan]Ingesting review checklists[/]")
@@ -216,7 +245,8 @@ def ingest_review_checklists(driver: Driver, path: Path):
 
     with driver.session() as session:
         for role, persona_data in data["personas"].items():
-            session.run("""
+            session.run(
+                """
                 MERGE (p:Persona {role: $role})
                 SET p.display_name  = $display_name,
                     p.review_stage  = $review_stage,
@@ -230,14 +260,19 @@ def ingest_review_checklists(driver: Driver, path: Path):
             )
 
             if persona_data["reviewStage"] not in ("none", ""):
-                session.run("""
+                session.run(
+                    """
                     MATCH (p:Persona {role: $role})
                     MATCH (s:ApprovalStage {stage_id: $stage_id})
                     MERGE (p)-[:REVIEWS_AT]->(s)
-                """, role=role, stage_id=persona_data["reviewStage"])
+                """,
+                    role=role,
+                    stage_id=persona_data["reviewStage"],
+                )
 
             for item in persona_data.get("checklist", []):
-                session.run("""
+                session.run(
+                    """
                     MERGE (c:ChecklistItem {item_id: $item_id})
                     SET c.text      = $text,
                         c.required  = $required,
@@ -260,7 +295,6 @@ def ingest_review_checklists(driver: Driver, path: Path):
     console.print(f"  [green][/] {len(data['personas'])} personas, {total_items} checklist items")
 
 
-
 def ingest_methodology_alignment(driver: Driver, path: Path):
     data = _load(path)
     console.print("[bold cyan]Ingesting methodology alignment[/]")
@@ -268,7 +302,8 @@ def ingest_methodology_alignment(driver: Driver, path: Path):
     with driver.session() as session:
         for method_id, method in data["methodologies"].items():
             # MERGE on the constrained key (method_id), not name
-            session.run("""
+            session.run(
+                """
                 MERGE (m:Methodology {method_id: $method_id})
                 SET m.name                = $name,
                     m.min_approach_length = $min_length,
@@ -280,16 +315,21 @@ def ingest_methodology_alignment(driver: Driver, path: Path):
             )
 
             for kw in method.get("requiredKeywords", []):
-                session.run("""
+                session.run(
+                    """
                     MATCH (m:Methodology {method_id: $method_id})
                     MERGE (t:Term {text: $text})
                     ON CREATE SET t.is_milestone = false
                     MERGE (m)-[:REQUIRES_KEYWORD]->(t)
-                """, method_id=method_id, text=kw)
+                """,
+                    method_id=method_id,
+                    text=kw,
+                )
 
             for phrase in method["approachRequirements"].get("mustInclude", []):
                 rule_id = _rule_id("method_must", method_id, phrase)
-                session.run("""
+                session.run(
+                    """
                     MATCH (m:Methodology {method_id: $method_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.description = $phrase,
@@ -297,19 +337,28 @@ def ingest_methodology_alignment(driver: Driver, path: Path):
                         r.is_regex    = false,
                         r.source      = 'methodology-alignment.json'
                     MERGE (m)-[:REQUIRES_CONTENT]->(r)
-                """, method_id=method_id, rule_id=rule_id, phrase=phrase)
+                """,
+                    method_id=method_id,
+                    rule_id=rule_id,
+                    phrase=phrase,
+                )
 
             for resp in method.get("customerResponsibilities", []):
-                session.run("""
+                session.run(
+                    """
                     MATCH (m:Methodology {method_id: $method_id})
                     MERGE (req:Requirement {text: $text})
                     ON CREATE SET req.source = 'methodology-alignment.json'
                     MERGE (m)-[:REQUIRES_CUSTOMER_RESPONSIBILITY]->(req)
-                """, method_id=method_id, text=resp)
+                """,
+                    method_id=method_id,
+                    text=resp,
+                )
 
             for warning in method.get("warnings", []):
                 rule_id = _rule_id("method_warn", method_id, warning["condition"])
-                session.run("""
+                session.run(
+                    """
                     MATCH (m:Methodology {method_id: $method_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.condition   = $condition,
@@ -328,12 +377,16 @@ def ingest_methodology_alignment(driver: Driver, path: Path):
                 )
 
             for milestone in method["deliverableFormat"].get("preferredMilestones", []):
-                session.run("""
+                session.run(
+                    """
                     MATCH (m:Methodology {method_id: $method_id})
                     MERGE (t:Term {text: $text})
                     SET t.is_milestone = true
                     MERGE (m)-[:PREFERS_MILESTONE]->(t)
-                """, method_id=method_id, text=milestone)
+                """,
+                    method_id=method_id,
+                    text=milestone,
+                )
 
     console.print(f"  [green][/] {len(data['methodologies'])} methodologies")
 
@@ -346,7 +399,8 @@ def ingest_required_elements(driver: Driver, path: Path):
         for section in data["requiredSections"]:
             type_id = section["section"]
             rule_id = _rule_id("req_section", type_id)
-            session.run("""
+            session.run(
+                """
                 MERGE (ct:ClauseType {type_id: $type_id})
                 SET ct.display_name = $display_name,
                     ct.description  = $description,
@@ -377,7 +431,8 @@ def ingest_required_elements(driver: Driver, path: Path):
 
             for elem in section.get("requiredElements", []):
                 elem_rule_id = _rule_id("req_elem", type_id, elem)
-                session.run("""
+                session.run(
+                    """
                     MATCH (ct:ClauseType {type_id: $type_id})
                     MERGE (r:Rule {rule_id: $rule_id})
                     SET r.description = $elem,
@@ -385,10 +440,15 @@ def ingest_required_elements(driver: Driver, path: Path):
                         r.is_regex    = false,
                         r.source      = 'required-elements.json'
                     MERGE (ct)-[:REQUIRES_ELEMENT]->(r)
-                """, type_id=type_id, rule_id=elem_rule_id, elem=elem)
+                """,
+                    type_id=type_id,
+                    rule_id=elem_rule_id,
+                    elem=elem,
+                )
 
         ac = data["deliverableRequirements"]["acceptanceCriteria"]
-        session.run("""
+        session.run(
+            """
             MERGE (r:Rule {rule_id: 'deliverable_acceptance_criteria'})
             SET r.description   = $error_message,
                 r.required      = $required,
@@ -407,17 +467,21 @@ def ingest_required_elements(driver: Driver, path: Path):
         )
 
         for term in ac.get("forbiddenVagueTerms", []):
-            session.run("""
+            session.run(
+                """
                 MERGE (b:BannedPhrase {phrase: $phrase})
                 SET b.category = 'vague-acceptance-criteria',
                     b.severity = 'error'
                 WITH b
                 MATCH (r:Rule {rule_id: 'deliverable_acceptance_criteria'})
                 MERGE (r)-[:FORBIDS]->(b)
-            """, phrase=term)
+            """,
+                phrase=term,
+            )
 
         risk_req = data["riskRequirements"]
-        session.run("""
+        session.run(
+            """
             MERGE (r:Rule {rule_id: 'risk_severity_required'})
             SET r.description    = $error_message,
                 r.allowed_values = $allowed_values,
@@ -435,7 +499,6 @@ def ingest_required_elements(driver: Driver, path: Path):
     )
 
 
-
 def ingest_all_json(driver: Driver, data_dir: Path):
     """Run all JSON ingestion in dependency order."""
     console.rule("[bold]JSON Rules Ingestion")
@@ -443,11 +506,11 @@ def ingest_all_json(driver: Driver, data_dir: Path):
     rules_dir = data_dir / "rules"
 
     file_map = {
-        "banned-phrases.json":        ingest_banned_phrases,
-        "required-elements.json":     ingest_required_elements,
+        "banned-phrases.json": ingest_banned_phrases,
+        "required-elements.json": ingest_required_elements,
         "methodology-alignment.json": ingest_methodology_alignment,
-        "esap-workflow.json":         ingest_esap_workflow,
-        "review-checklists.json":     ingest_review_checklists,
+        "esap-workflow.json": ingest_esap_workflow,
+        "review-checklists.json": ingest_review_checklists,
     }
 
     all_json = {p.name: p for p in rules_dir.rglob("*.json")}

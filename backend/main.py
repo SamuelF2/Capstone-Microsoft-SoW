@@ -2,29 +2,22 @@
 Cocoon Backend API - FastAPI with Neo4j + PostgreSQL
 """
 
-import os
+import asyncio
 from contextlib import asynccontextmanager
 
 import asyncpg
-from dotenv import load_dotenv
+from config import DATABASE_URL, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from status import router as status_router
-
-load_dotenv()
-
-# ── Config ──────────────────────────────────────────────
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ["NEO4J_PASSWORD"]
-
-PG_USER = os.environ["POSTGRES_USER"]
-PG_PASSWORD = os.environ["POSTGRES_PASSWORD"]
-PG_DB = os.environ["POSTGRES_DB"]
-PG_HOST = os.getenv("POSTGRES_HOST", "postgres")
-PG_PORT = os.getenv("POSTGRES_PORT", "5432")
-DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
+from validators import (
+    build_health_status,
+    format_graph_stats,
+    format_knowledge_result,
+    validate_knowledge_payload,
+    validate_sow_payload,
+)
 
 # ── Database clients ────────────────────────────────────
 neo4j_driver = None
@@ -36,14 +29,30 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     global neo4j_driver, pg_pool
 
-    # --- Start Neo4j driver ---
+    # --- Start Neo4j driver (retry up to 30s) ---
     neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    neo4j_driver.verify_connectivity()
-    print("Neo4j connected")
+    for attempt in range(15):
+        try:
+            neo4j_driver.verify_connectivity()
+            print("Neo4j connected")
+            break
+        except Exception:
+            if attempt == 14:
+                raise
+            print(f"Neo4j not ready, retrying ({attempt + 1}/15)...")
+            await asyncio.sleep(2)
 
-    # --- Start PostgreSQL pool ---
-    pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    print("PostgreSQL connected")
+    # --- Start PostgreSQL pool (retry up to 30s) ---
+    for attempt in range(15):
+        try:
+            pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+            print("PostgreSQL connected")
+            break
+        except Exception:
+            if attempt == 14:
+                raise
+            print(f"PostgreSQL not ready, retrying ({attempt + 1}/15)...")
+            await asyncio.sleep(2)
 
     # --- Create initial tables if needed ---
     async with pg_pool.acquire() as conn:
@@ -103,26 +112,21 @@ app.include_router(status_router)
 @app.get("/health")
 async def health():
     """Check connectivity to both databases."""
-    status = {"status": "healthy", "neo4j": "unknown", "postgres": "unknown"}
+    neo4j_ok, neo4j_error = True, None
+    pg_ok, pg_error = True, None
 
-    # Neo4j check
     try:
         neo4j_driver.verify_connectivity()
-        status["neo4j"] = "connected"
     except Exception as e:
-        status["neo4j"] = f"error: {e}"
-        status["status"] = "degraded"
+        neo4j_ok, neo4j_error = False, str(e)
 
-    # PostgreSQL check
     try:
         async with pg_pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        status["postgres"] = "connected"
     except Exception as e:
-        status["postgres"] = f"error: {e}"
-        status["status"] = "degraded"
+        pg_ok, pg_error = False, str(e)
 
-    return status
+    return build_health_status(neo4j_ok, neo4j_error, pg_ok, pg_error)
 
 
 # ── SoW CRUD (PostgreSQL) ──────────────────────────────
@@ -139,9 +143,7 @@ async def list_sows():
 @app.post("/api/sow")
 async def create_sow(payload: dict):
     """Create a new SoW document."""
-    title = payload.get("title")
-    if not title:
-        raise HTTPException(status_code=400, detail="title is required")
+    title = validate_sow_payload(payload)
 
     async with pg_pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -183,11 +185,7 @@ async def graph_stats():
         labels = session.run(
             "CALL db.labels() YIELD label RETURN collect(label) AS labels"
         ).single()["labels"]
-    return {
-        "nodes": node_count,
-        "relationships": rel_count,
-        "labels": labels,
-    }
+    return format_graph_stats(node_count, rel_count, labels)
 
 
 @app.post("/api/graph/sow-knowledge")
@@ -206,9 +204,7 @@ async def add_sow_knowledge(payload: dict):
         ]
     }
     """
-    sow_id = payload.get("sow_id")
-    entities = payload.get("entities", [])
-    relationships = payload.get("relationships", [])
+    sow_id, entities, relationships = validate_knowledge_payload(payload)
 
     with neo4j_driver.session() as session:
         # Create or merge entities
@@ -231,8 +227,4 @@ async def add_sow_knowledge(payload: dict):
                 sow_id=sow_id,
             )
 
-    return {
-        "status": "ok",
-        "entities_added": len(entities),
-        "relationships_added": len(relationships),
-    }
+    return format_knowledge_result(len(entities), len(relationships))
