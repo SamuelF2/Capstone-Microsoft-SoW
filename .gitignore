@@ -62,3 +62,9 @@ htmlcov/
 # Ruff / Linting
 # ======================
 .ruff_cache/
+
+# ======================
+# Claude Code
+# ======================
+CLAUDE.md
+.claude/
