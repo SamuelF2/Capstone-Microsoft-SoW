@@ -18,26 +18,26 @@ Usage:
 
 from __future__ import annotations
 
-import time
 import hashlib
-from datetime import datetime, timezone
-from typing import Generator
+import time
+from collections.abc import Generator
+from datetime import UTC, datetime
 
 from neo4j import Driver
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 console = Console()
 
-EMBED_DIM  = 384
+EMBED_DIM = 384
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 VECTOR_INDEXES = [
-    ("section_embeddings",     "Section",     "embedding"),
+    ("section_embeddings", "Section", "embedding"),
     ("deliverable_embeddings", "Deliverable", "embedding"),
-    ("risk_embeddings",        "Risk",        "embedding"),
-    ("rule_embeddings",        "Rule",        "embedding"),
-    ("clausetype_embeddings",  "ClauseType",  "embedding"),
+    ("risk_embeddings", "Risk", "embedding"),
+    ("rule_embeddings", "Rule", "embedding"),
+    ("clausetype_embeddings", "ClauseType", "embedding"),
 ]
 
 # Queries return id + text only hashing is done in Python
@@ -80,10 +80,10 @@ NODE_TEXT_QUERIES = {
 }
 
 WRITE_QUERIES = {
-    "Section":    "MATCH (n:Section {id: $id})           SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
-    "Deliverable":"MATCH (n:Deliverable {id: $id})        SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
-    "Risk":       "MATCH (n:Risk {id: $id})               SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
-    "Rule":       "MATCH (n:Rule {rule_id: $id})          SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
+    "Section": "MATCH (n:Section {id: $id})           SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
+    "Deliverable": "MATCH (n:Deliverable {id: $id})        SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
+    "Risk": "MATCH (n:Risk {id: $id})               SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
+    "Rule": "MATCH (n:Rule {rule_id: $id})          SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
     "ClauseType": "MATCH (n:ClauseType {type_id: $id})    SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
 }
 
@@ -120,6 +120,7 @@ def _batched(items: list, size: int) -> Generator[list, None, None]:
 def _load_model():
     try:
         from sentence_transformers import SentenceTransformer
+
         console.print(f"  Loading [cyan]{MODEL_NAME}[/]")
         model = SentenceTransformer(MODEL_NAME)
         console.print("  [green][/] Model loaded")
@@ -137,9 +138,9 @@ def enrich_label(
     batch_size: int = 64,
     force: bool = False,
 ) -> dict:
-    read_query  = NODE_TEXT_QUERIES[label]
+    read_query = NODE_TEXT_QUERIES[label]
     write_query = WRITE_QUERIES[label]
-    ts          = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
 
     with driver.session() as session:
         rows = session.run(read_query, force=force).data()
@@ -177,7 +178,7 @@ def enrich_label(
             )
 
             with driver.session() as session:
-                for row, vec in zip(batch, vecs):
+                for row, vec in zip(batch, vecs, strict=True):
                     session.run(
                         write_query,
                         id=row["id"],
@@ -233,12 +234,17 @@ def semantic_search(
     query_vec = model.encode(query, normalize_embeddings=True).tolist()
 
     with driver.session() as session:
-        rows = session.run("""
+        rows = session.run(
+            """
             CALL db.index.vector.queryNodes($index_name, $top_k, $query_vec)
             YIELD node, score
             RETURN score, properties(node) AS props
             ORDER BY score DESC
-        """, index_name=index_name, top_k=top_k, query_vec=query_vec).data()
+        """,
+            index_name=index_name,
+            top_k=top_k,
+            query_vec=query_vec,
+        ).data()
 
     for row in rows:
         row["props"].pop("embedding", None)

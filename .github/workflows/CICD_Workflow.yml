@@ -11,9 +11,14 @@ jobs:
   lint-and-unit-tests:
     name: Lint & Unit Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -35,7 +40,15 @@ jobs:
       - name: Install pre-commit
         run: uv tool install pre-commit
 
-      - name: Run pre-commit hooks
+      - name: Run pre-commit hooks (auto-fix)
+        run: pre-commit run --all-files || true
+
+      - name: Commit lint fixes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-fix lint/format [skip ci]"
+
+      - name: Verify lint is clean
         run: pre-commit run --all-files
 
       - name: Backend Unit Tests
