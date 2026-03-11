@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useState } from 'react';
+import { useAuth } from '../lib/auth';
 
 export default function Navigation() {
   const router = useRouter();
+  const { user, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const isActive = (path) => router.pathname === path;
 
@@ -15,6 +19,22 @@ export default function Navigation() {
     paddingBottom: '2px',
     borderBottom: isActive(path) ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
   });
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    await logout();
+    router.replace('/login');
+  };
+
+  // Derive display name: full_name → email prefix
+  const displayName = user?.full_name || user?.email?.split('@')[0] || 'User';
+  // Initials for the avatar
+  const initials = displayName
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 
   return (
     <nav
@@ -88,29 +108,70 @@ export default function Navigation() {
           </Link>
         </div>
 
-        {/* Account Button */}
-        <Link href="/account" style={{ textDecoration: 'none' }}>
+        {/* User section */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
+          {/* Avatar + name */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: 'var(--radius-full)',
+                backgroundColor: 'var(--color-accent-blue)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.75rem',
+                fontWeight: 'var(--font-weight-semibold)',
+                color: '#fff',
+                flexShrink: 0,
+              }}
+            >
+              {initials}
+            </div>
+            <span
+              className="text-sm"
+              style={{
+                color: 'var(--color-text-secondary)',
+                maxWidth: '120px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {displayName}
+            </span>
+          </div>
+
+          {/* Logout */}
           <button
+            onClick={handleLogout}
+            disabled={loggingOut}
             style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: 'var(--radius-full)',
-              backgroundColor: isActive('/account')
-                ? 'var(--color-accent-blue)'
-                : 'var(--color-bg-secondary)',
-              border: `1px solid ${isActive('/account') ? 'var(--color-accent-blue)' : 'var(--color-border-default)'}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1rem',
-              cursor: 'pointer',
-              transition:
-                'background-color var(--transition-base), border-color var(--transition-base)',
+              background: 'none',
+              border: '1px solid var(--color-border-default)',
+              borderRadius: 'var(--radius-md)',
+              padding: '4px 10px',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--color-text-secondary)',
+              cursor: loggingOut ? 'default' : 'pointer',
+              opacity: loggingOut ? 0.5 : 1,
+              transition: 'border-color var(--transition-base), color var(--transition-base)',
+            }}
+            onMouseEnter={(e) => {
+              if (!loggingOut) {
+                e.currentTarget.style.borderColor = 'var(--color-error)';
+                e.currentTarget.style.color = 'var(--color-error)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--color-border-default)';
+              e.currentTarget.style.color = 'var(--color-text-secondary)';
             }}
           >
-            👤
+            {loggingOut ? 'Signing out…' : 'Sign out'}
           </button>
-        </Link>
+        </div>
       </div>
     </nav>
   );
