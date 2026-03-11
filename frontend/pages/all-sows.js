@@ -9,6 +9,7 @@ const SEED_SOWS = [
     opportunityId: 'OPP-20240112',
     customer: 'Contoso Ltd.',
     methodology: 'Cloud Adoption',
+    cycle: 2,
     dealValue: '$240,000',
     status: 'In Review',
     updatedAt: 'Feb 15, 2026',
@@ -20,6 +21,7 @@ const SEED_SOWS = [
     opportunityId: 'OPP-20240098',
     customer: 'Fabrikam Inc.',
     methodology: 'Agile Sprint Delivery',
+    cycle: 1,
     dealValue: '$185,000',
     status: 'Approved',
     updatedAt: 'Feb 10, 2026',
@@ -31,6 +33,7 @@ const SEED_SOWS = [
     opportunityId: 'OPP-20240077',
     customer: 'Northwind Traders',
     methodology: 'Sure Step 365',
+    cycle: 3,
     dealValue: '$310,000',
     status: 'In Review',
     updatedAt: 'Feb 8, 2026',
@@ -42,6 +45,7 @@ const SEED_SOWS = [
     opportunityId: 'OPP-20240055',
     customer: 'Alpine Ski House',
     methodology: 'Waterfall',
+    cycle: 1,
     dealValue: '$95,000',
     status: 'Draft',
     updatedAt: 'Feb 3, 2026',
@@ -53,6 +57,7 @@ const SEED_SOWS = [
     opportunityId: 'OPP-20240041',
     customer: 'Tailspin Toys',
     methodology: 'Cloud Adoption',
+    cycle: 2,
     dealValue: '$175,000',
     status: 'Approved',
     updatedAt: 'Jan 29, 2026',
@@ -96,6 +101,7 @@ function loadLocalSoWs() {
             customer: sow.customerName || '—',
             methodology: sow.deliveryMethodology || '—',
             dealValue: formatDealValue(sow.dealValue),
+            cycle: sow.cycle || null,
             status: sow.status || 'Draft',
             updatedAt: formatDate(sow.updatedAt),
             isLocal: true,
@@ -238,23 +244,30 @@ export default function AllSoWs() {
                     backgroundColor: 'var(--color-bg-tertiary)',
                   }}
                 >
-                  {['Title', 'Customer', 'Methodology', 'Value', 'Status', 'Updated', ''].map(
-                    (h) => (
-                      <th
-                        key={h}
-                        style={{
-                          padding: 'var(--spacing-md) var(--spacing-lg)',
-                          textAlign: 'left',
-                          fontSize: 'var(--font-size-sm)',
-                          fontWeight: 'var(--font-weight-semibold)',
-                          color: 'var(--color-text-secondary)',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {h}
-                      </th>
-                    )
-                  )}
+                  {[
+                    'Title',
+                    'Customer',
+                    'Methodology',
+                    'Cycle',
+                    'Value',
+                    'Status',
+                    'Updated',
+                    '',
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: 'var(--spacing-md) var(--spacing-lg)',
+                        textAlign: 'left',
+                        fontSize: 'var(--font-size-sm)',
+                        fontWeight: 'var(--font-weight-semibold)',
+                        color: 'var(--color-text-secondary)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -281,7 +294,7 @@ export default function AllSoWs() {
                         style={{ display: 'flex', gap: 'var(--spacing-sm)', alignItems: 'center' }}
                       >
                         <p className="text-xs text-tertiary">{sow.opportunityId}</p>
-                        {sow.isLocal && (
+                        {sow.isLocal && typeof sow.id === 'number' && (
                           <span
                             style={{
                               fontSize: '10px',
@@ -292,7 +305,7 @@ export default function AllSoWs() {
                               fontWeight: 'var(--font-weight-semibold)',
                             }}
                           >
-                            Local
+                            #{sow.id}
                           </span>
                         )}
                       </div>
@@ -308,6 +321,12 @@ export default function AllSoWs() {
                       className="text-sm text-secondary"
                     >
                       {sow.methodology}
+                    </td>
+                    <td
+                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                      className="text-sm text-secondary"
+                    >
+                      {sow.cycle ? `Cycle ${sow.cycle}` : '—'}
                     </td>
                     <td
                       style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
