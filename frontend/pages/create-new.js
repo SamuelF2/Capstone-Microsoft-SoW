@@ -23,10 +23,36 @@ export default function CreateNew() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    // Simulate submission — in production, POST to your API here
-    setTimeout(() => {
-      router.push('/all-sows');
-    }, 1000);
+
+    // Generate a unique SoW ID
+    // TODO: Fetch the unique ID after creating the entry in backend. This is just for stubbing!
+    const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Build the SoW record and persist to localStorage
+    const sowRecord = {
+      id,
+      sowTitle: form.sowTitle,
+      opportunityId: form.opportunityId,
+      workOrderNumber: form.workOrderNumber,
+      dealValue: form.dealValue,
+      estimatedMargin: form.estimatedMargin,
+      customerName: form.customerName,
+      customerLegalName: form.customerLegalName,
+      deliveryMethodology: form.deliveryMethodology,
+      status: 'Draft',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    localStorage.setItem(`sow-${id}`, JSON.stringify(sowRecord));
+
+    // Keep a registry of all SoW IDs so the list page can enumerate them
+    const registry = JSON.parse(localStorage.getItem('sow-registry') || '[]');
+    registry.unshift(id);
+    localStorage.setItem('sow-registry', JSON.stringify(registry));
+
+    // Navigate to the draft page
+    router.push(`/draft/${id}`);
   };
 
   const isValid =
