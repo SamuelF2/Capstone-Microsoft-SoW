@@ -22,8 +22,8 @@ async def _noop_lifespan(app):
 _UNSET = object()
 
 
-def _mock_pg_acquire(main, *, fetchval=_UNSET, fetch=_UNSET, fetchrow=_UNSET, execute=_UNSET):
-    """Wire up main.pg_pool.acquire() to return an async-context mock connection."""
+def _mock_pg_acquire(db, *, fetchval=_UNSET, fetch=_UNSET, fetchrow=_UNSET, execute=_UNSET):
+    """Wire up database.pg_pool.acquire() to return an async-context mock connection."""
     conn = AsyncMock()
     if fetchval is not _UNSET:
         conn.fetchval.return_value = fetchval
@@ -34,15 +34,22 @@ def _mock_pg_acquire(main, *, fetchval=_UNSET, fetch=_UNSET, fetchrow=_UNSET, ex
     if execute is not _UNSET:
         conn.execute.return_value = execute
 
+    # Support `async with conn.transaction():`
+    # transaction() is a sync call that returns an async context manager
+    tx_ctx = MagicMock()
+    tx_ctx.__aenter__ = AsyncMock(return_value=None)
+    tx_ctx.__aexit__ = AsyncMock(return_value=None)
+    conn.transaction = MagicMock(return_value=tx_ctx)
+
     ctx = AsyncMock()
     ctx.__aenter__.return_value = conn
     ctx.__aexit__.return_value = None
-    main.pg_pool.acquire.return_value = ctx
+    db.pg_pool.acquire.return_value = ctx
     return conn
 
 
-def _mock_neo4j_session(main, run_side_effect=None):
-    """Wire up main.neo4j_driver.session() to return a sync-context mock session."""
+def _mock_neo4j_session(db, run_side_effect=None):
+    """Wire up database.neo4j_driver.session() to return a sync-context mock session."""
     session = MagicMock()
     if run_side_effect is not None:
         session.run.side_effect = run_side_effect
@@ -50,7 +57,7 @@ def _mock_neo4j_session(main, run_side_effect=None):
     ctx = MagicMock()
     ctx.__enter__ = MagicMock(return_value=session)
     ctx.__exit__ = MagicMock(return_value=False)
-    main.neo4j_driver.session.return_value = ctx
+    db.neo4j_driver.session.return_value = ctx
     return session
 
 
@@ -60,12 +67,13 @@ def _mock_neo4j_session(main, run_side_effect=None):
 @pytest.fixture()
 def client():
     """Create a TestClient with mocked database connections."""
+    import database
     import main
 
     original_lifespan = main.app.router.lifespan_context
     main.app.router.lifespan_context = _noop_lifespan
-    main.neo4j_driver = MagicMock()
-    main.pg_pool = MagicMock()
+    database.neo4j_driver = MagicMock()
+    database.pg_pool = MagicMock()
 
     with TestClient(main.app) as c:
         yield c
@@ -78,10 +86,10 @@ def client():
 
 class TestHealth:
     def test_all_healthy(self, client):
-        import main
+        import database
 
-        main.neo4j_driver.verify_connectivity.return_value = None
-        _mock_pg_acquire(main, fetchval=1)
+        database.neo4j_driver.verify_connectivity.return_value = None
+        _mock_pg_acquire(database, fetchval=1)
 
         resp = client.get("/health")
         assert resp.status_code == 200
@@ -91,10 +99,10 @@ class TestHealth:
         assert data["postgres"] == "connected"
 
     def test_neo4j_down(self, client):
-        import main
+        import database
 
-        main.neo4j_driver.verify_connectivity.side_effect = Exception("refused")
-        _mock_pg_acquire(main, fetchval=1)
+        database.neo4j_driver.verify_connectivity.side_effect = Exception("refused")
+        _mock_pg_acquire(database, fetchval=1)
 
         resp = client.get("/health")
         assert resp.status_code == 200
@@ -103,12 +111,12 @@ class TestHealth:
         assert "error" in data["neo4j"]
 
     def test_postgres_down(self, client):
-        import main
+        import database
 
-        main.neo4j_driver.verify_connectivity.return_value = None
+        database.neo4j_driver.verify_connectivity.return_value = None
         ctx = AsyncMock()
         ctx.__aenter__.side_effect = Exception("refused")
-        main.pg_pool.acquire.return_value = ctx
+        database.pg_pool.acquire.return_value = ctx
 
         resp = client.get("/health")
         assert resp.status_code == 200
@@ -122,10 +130,10 @@ class TestHealth:
 
 class TestListSows:
     def test_returns_documents(self, client):
-        import main
+        import database
 
         _mock_pg_acquire(
-            main,
+            database,
             fetch=[
                 {
                     "id": 1,
@@ -144,9 +152,9 @@ class TestListSows:
         assert data[0]["title"] == "SoW A"
 
     def test_returns_empty_list(self, client):
-        import main
+        import database
 
-        _mock_pg_acquire(main, fetch=[])
+        _mock_pg_acquire(database, fetch=[])
 
         resp = client.get("/api/sow")
         assert resp.status_code == 200
@@ -158,36 +166,54 @@ class TestListSows:
 
 class TestCreateSow:
     def test_success(self, client):
-        import main
+        import database
 
         _mock_pg_acquire(
-            main,
+            database,
+            fetchval=1,
             fetchrow={
                 "id": 1,
                 "title": "New SoW",
                 "status": "draft",
-                "uploaded_at": "2026-01-01",
-                "updated_at": "2026-01-01",
+                "cycle": 1,
+                "content_id": 1,
+                "ai_suggestion_id": None,
+                "uploaded_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "client_id": None,
+                "methodology": None,
+                "customer_name": None,
+                "opportunity_id": None,
+                "deal_value": None,
                 "content": None,
                 "metadata": None,
             },
         )
 
         resp = client.post("/api/sow", json={"title": "New SoW"})
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         assert resp.json()["title"] == "New SoW"
 
     def test_with_content_and_metadata(self, client):
-        import main
+        import database
 
         _mock_pg_acquire(
-            main,
+            database,
+            fetchval=1,
             fetchrow={
                 "id": 2,
                 "title": "Full SoW",
                 "status": "draft",
-                "uploaded_at": "2026-01-01",
-                "updated_at": "2026-01-01",
+                "cycle": 1,
+                "content_id": 1,
+                "ai_suggestion_id": None,
+                "uploaded_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "client_id": None,
+                "methodology": None,
+                "customer_name": None,
+                "opportunity_id": None,
+                "deal_value": None,
                 "content": {"sections": ["scope"]},
                 "metadata": {"version": 1},
             },
@@ -201,17 +227,16 @@ class TestCreateSow:
                 "metadata": {"version": 1},
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
         assert resp.json()["content"] == {"sections": ["scope"]}
 
-    def test_missing_title_returns_400(self, client):
+    def test_missing_title_returns_422(self, client):
         resp = client.post("/api/sow", json={})
-        assert resp.status_code == 400
-        assert "title" in resp.json()["detail"].lower()
+        assert resp.status_code == 422
 
-    def test_empty_title_returns_400(self, client):
+    def test_empty_title_returns_422(self, client):
         resp = client.post("/api/sow", json={"title": ""})
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
 
 # ── GET /api/sow/{sow_id} ───────────────────────────────
@@ -219,10 +244,10 @@ class TestCreateSow:
 
 class TestGetSow:
     def test_found(self, client):
-        import main
+        import database
 
         _mock_pg_acquire(
-            main,
+            database,
             fetchrow={
                 "id": 1,
                 "title": "Found",
@@ -239,9 +264,9 @@ class TestGetSow:
         assert resp.json()["title"] == "Found"
 
     def test_not_found(self, client):
-        import main
+        import database
 
-        _mock_pg_acquire(main, fetchrow=None)
+        _mock_pg_acquire(database, fetchrow=None)
 
         resp = client.get("/api/sow/999")
         assert resp.status_code == 404
@@ -252,18 +277,18 @@ class TestGetSow:
 
 class TestDeleteSow:
     def test_success(self, client):
-        import main
+        import database
 
-        _mock_pg_acquire(main, execute="DELETE 1")
+        _mock_pg_acquire(database, execute="DELETE 1")
 
         resp = client.delete("/api/sow/1")
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 1
 
     def test_not_found(self, client):
-        import main
+        import database
 
-        _mock_pg_acquire(main, execute="DELETE 0")
+        _mock_pg_acquire(database, execute="DELETE 0")
 
         resp = client.delete("/api/sow/999")
         assert resp.status_code == 404
@@ -274,10 +299,10 @@ class TestDeleteSow:
 
 class TestGraphStats:
     def test_returns_stats(self, client):
-        import main
+        import database
 
         _mock_neo4j_session(
-            main,
+            database,
             run_side_effect=[
                 MagicMock(single=lambda: {"count": 42}),
                 MagicMock(single=lambda: {"count": 10}),
@@ -298,9 +323,9 @@ class TestGraphStats:
 
 class TestAddSowKnowledge:
     def test_add_entities_and_relationships(self, client):
-        import main
+        import database
 
-        _mock_neo4j_session(main)
+        _mock_neo4j_session(database)
 
         payload = {
             "sow_id": 1,
@@ -321,9 +346,9 @@ class TestAddSowKnowledge:
         assert data["relationships_added"] == 1
 
     def test_empty_payload(self, client):
-        import main
+        import database
 
-        _mock_neo4j_session(main)
+        _mock_neo4j_session(database)
 
         resp = client.post("/api/graph/sow-knowledge", json={})
         assert resp.status_code == 200

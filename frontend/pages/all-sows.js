@@ -1,59 +1,120 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 
-const ALL_SOWS = [
+const SEED_SOWS = [
   {
-    id: 1,
+    id: 'seed-1',
     title: 'Contoso Cloud Migration Phase 1',
     opportunityId: 'OPP-20240112',
     customer: 'Contoso Ltd.',
     methodology: 'Cloud Adoption',
+    cycle: 2,
     dealValue: '$240,000',
     status: 'In Review',
     updatedAt: 'Feb 15, 2026',
+    isLocal: false,
   },
   {
-    id: 2,
+    id: 'seed-2',
     title: 'Fabrikam Agile Transformation',
     opportunityId: 'OPP-20240098',
     customer: 'Fabrikam Inc.',
     methodology: 'Agile Sprint Delivery',
+    cycle: 1,
     dealValue: '$185,000',
     status: 'Approved',
     updatedAt: 'Feb 10, 2026',
+    isLocal: false,
   },
   {
-    id: 3,
+    id: 'seed-3',
     title: 'Northwind ERP Implementation',
     opportunityId: 'OPP-20240077',
     customer: 'Northwind Traders',
     methodology: 'Sure Step 365',
+    cycle: 3,
     dealValue: '$310,000',
     status: 'In Review',
     updatedAt: 'Feb 8, 2026',
+    isLocal: false,
   },
   {
-    id: 4,
+    id: 'seed-4',
     title: 'Alpine Ski House Deployment',
     opportunityId: 'OPP-20240055',
     customer: 'Alpine Ski House',
     methodology: 'Waterfall',
+    cycle: 1,
     dealValue: '$95,000',
     status: 'Draft',
     updatedAt: 'Feb 3, 2026',
+    isLocal: false,
   },
   {
-    id: 5,
+    id: 'seed-5',
     title: 'Tailspin Toys Cloud Adoption',
     opportunityId: 'OPP-20240041',
     customer: 'Tailspin Toys',
     methodology: 'Cloud Adoption',
+    cycle: 2,
     dealValue: '$175,000',
     status: 'Approved',
     updatedAt: 'Jan 29, 2026',
+    isLocal: false,
   },
 ];
+
+function formatDealValue(raw) {
+  if (!raw) return '—';
+  const num = parseFloat(raw);
+  if (isNaN(num)) return raw;
+  return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function loadLocalSoWs() {
+  try {
+    const registry = JSON.parse(localStorage.getItem('sow-registry') || '[]');
+    return registry
+      .map((id) => {
+        try {
+          const raw = localStorage.getItem(`sow-${id}`);
+          if (!raw) return null;
+          const sow = JSON.parse(raw);
+          return {
+            id: sow.id,
+            title: sow.sowTitle || 'Untitled SoW',
+            opportunityId: sow.opportunityId || '—',
+            customer: sow.customerName || '—',
+            methodology: sow.deliveryMethodology || '—',
+            dealValue: formatDealValue(sow.dealValue),
+            cycle: sow.cycle || null,
+            status: sow.status || 'Draft',
+            updatedAt: formatDate(sow.updatedAt),
+            isLocal: true,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 const STATUS_COLOR = {
   Draft: 'var(--color-text-secondary)',
@@ -67,8 +128,15 @@ export default function AllSoWs() {
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [allSows, setAllSows] = useState(SEED_SOWS);
 
-  const filtered = ALL_SOWS.filter((s) => {
+  // Merge localStorage SoWs on mount
+  useEffect(() => {
+    const localSows = loadLocalSoWs();
+    setAllSows([...localSows, ...SEED_SOWS]);
+  }, []);
+
+  const filtered = allSows.filter((s) => {
     const matchSearch =
       s.title.toLowerCase().includes(search.toLowerCase()) ||
       s.customer.toLowerCase().includes(search.toLowerCase()) ||
@@ -77,6 +145,14 @@ export default function AllSoWs() {
     const matchStatus = filterStatus === 'All' || s.status === filterStatus;
     return matchSearch && matchMethod && matchStatus;
   });
+
+  const handleRowClick = (sow) => {
+    if (sow.isLocal) {
+      router.push(`/draft/${sow.id}`);
+    } else {
+      router.push(`/review/${sow.id}`);
+    }
+  };
 
   return (
     <>
@@ -168,30 +244,37 @@ export default function AllSoWs() {
                     backgroundColor: 'var(--color-bg-tertiary)',
                   }}
                 >
-                  {['Title', 'Customer', 'Methodology', 'Value', 'Status', 'Updated', ''].map(
-                    (h) => (
-                      <th
-                        key={h}
-                        style={{
-                          padding: 'var(--spacing-md) var(--spacing-lg)',
-                          textAlign: 'left',
-                          fontSize: 'var(--font-size-sm)',
-                          fontWeight: 'var(--font-weight-semibold)',
-                          color: 'var(--color-text-secondary)',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {h}
-                      </th>
-                    )
-                  )}
+                  {[
+                    'Title',
+                    'Customer',
+                    'Methodology',
+                    'Cycle',
+                    'Value',
+                    'Status',
+                    'Updated',
+                    '',
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: 'var(--spacing-md) var(--spacing-lg)',
+                        textAlign: 'left',
+                        fontSize: 'var(--font-size-sm)',
+                        fontWeight: 'var(--font-weight-semibold)',
+                        color: 'var(--color-text-secondary)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((sow, i) => (
                   <tr
                     key={sow.id}
-                    onClick={() => router.push(`/review/${sow.id}`)}
+                    onClick={() => handleRowClick(sow)}
                     style={{
                       borderBottom:
                         i < filtered.length - 1 ? '1px solid var(--color-border-default)' : 'none',
@@ -207,7 +290,25 @@ export default function AllSoWs() {
                       <p className="font-medium" style={{ marginBottom: '2px' }}>
                         {sow.title}
                       </p>
-                      <p className="text-xs text-tertiary">{sow.opportunityId}</p>
+                      <div
+                        style={{ display: 'flex', gap: 'var(--spacing-sm)', alignItems: 'center' }}
+                      >
+                        <p className="text-xs text-tertiary">{sow.opportunityId}</p>
+                        {sow.isLocal && typeof sow.id === 'number' && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              padding: '1px 6px',
+                              borderRadius: 'var(--radius-full)',
+                              backgroundColor: 'rgba(0,120,212,0.15)',
+                              color: 'var(--color-accent-blue)',
+                              fontWeight: 'var(--font-weight-semibold)',
+                            }}
+                          >
+                            #{sow.id}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td
                       style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
@@ -223,6 +324,12 @@ export default function AllSoWs() {
                     </td>
                     <td
                       style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                      className="text-sm text-secondary"
+                    >
+                      {sow.cycle ? `Cycle ${sow.cycle}` : '—'}
+                    </td>
+                    <td
+                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
                       className="text-sm font-medium"
                     >
                       {sow.dealValue}
@@ -230,7 +337,7 @@ export default function AllSoWs() {
                     <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
                       <span
                         style={{
-                          color: STATUS_COLOR[sow.status],
+                          color: STATUS_COLOR[sow.status] || 'var(--color-text-secondary)',
                           fontWeight: 'var(--font-weight-medium)',
                           fontSize: 'var(--font-size-sm)',
                         }}
@@ -251,7 +358,7 @@ export default function AllSoWs() {
                           fontSize: 'var(--font-size-sm)',
                         }}
                       >
-                        View →
+                        {sow.isLocal ? 'Edit →' : 'View →'}
                       </span>
                     </td>
                   </tr>
