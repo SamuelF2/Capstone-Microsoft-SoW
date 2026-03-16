@@ -43,6 +43,7 @@ from models import SoWCreate, SoWResponse, SoWStatusUpdate, SoWSummary, SoWUpdat
 router = APIRouter(prefix="/api/sow", tags=["sow"])
 
 _VALID_STATUSES = {"draft", "in_review", "approved", "rejected"}
+_VALID_METHODOLOGIES = {"Agile Sprint Delivery", "Sure Step 365", "Waterfall", "Cloud Adoption"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -150,6 +151,12 @@ async def create_sow(payload: SoWCreate) -> SoWResponse:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"A SoW with client_id '{payload.client_id}' already exists (id={existing})",
             )
+
+    if payload.methodology is not None and payload.methodology not in _VALID_METHODOLOGIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid methodology '{payload.methodology}'. Must be one of: {sorted(_VALID_METHODOLOGIES)}",
+        )
 
     content_json = json.dumps(payload.content) if payload.content else None
     metadata_json = json.dumps(payload.metadata) if payload.metadata else None
@@ -262,6 +269,12 @@ async def update_sow(sow_id: int, payload: SoWUpdate) -> SoWResponse:
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
         return _row_to_response(dict(row))
+
+    if "methodology" in updates and updates["methodology"] not in _VALID_METHODOLOGIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid methodology '{updates['methodology']}'. Must be one of: {sorted(_VALID_METHODOLOGIES)}",
+        )
 
     if "content" in updates and updates["content"] is not None:
         updates["content"] = json.dumps(updates["content"])
