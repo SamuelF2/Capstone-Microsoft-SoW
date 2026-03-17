@@ -6,7 +6,7 @@ run without Neo4j or PostgreSQL.
 
 from contextlib import asynccontextmanager
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -544,6 +544,93 @@ class TestUpdateSowStatus:
         assert resp.status_code == 404
 
 
+# ── POST /api/sow/upload ────────────────────────────────
+
+
+class TestUploadSow:
+    def test_success_pdf(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchval=1,
+            fetchrow=_full_sow_row(
+                methodology="Waterfall",
+                metadata='{"file_path": "1_test.pdf", "original_filename": "test.pdf"}',
+            ),
+        )
+
+        with patch("builtins.open", mock_open()):
+            resp = client.post(
+                "/api/sow/upload",
+                data={"methodology": "Waterfall"},
+                files={"file": ("test.pdf", b"fake pdf content", "application/pdf")},
+            )
+
+        assert resp.status_code == 201
+        assert resp.json()["methodology"] == "Waterfall"
+
+    def test_success_docx(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchval=1,
+            fetchrow=_full_sow_row(
+                title="report",
+                methodology="Agile Sprint Delivery",
+                metadata='{"file_path": "1_report.docx", "original_filename": "report.docx"}',
+            ),
+        )
+
+        with patch("builtins.open", mock_open()):
+            resp = client.post(
+                "/api/sow/upload",
+                data={"methodology": "Agile Sprint Delivery"},
+                files={
+                    "file": (
+                        "report.docx",
+                        b"fake docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+
+        assert resp.status_code == 201
+
+    def test_invalid_methodology_returns_400(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            data={"methodology": "BadMethod"},
+            files={"file": ("test.pdf", b"content", "application/pdf")},
+        )
+        assert resp.status_code == 400
+        assert "Invalid methodology" in resp.json()["detail"]
+
+    def test_invalid_extension_returns_400(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            data={"methodology": "Waterfall"},
+            files={"file": ("test.txt", b"content", "text/plain")},
+        )
+        assert resp.status_code == 400
+        assert "Invalid file type" in resp.json()["detail"]
+
+    def test_missing_file_returns_422(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            data={"methodology": "Waterfall"},
+        )
+        assert resp.status_code == 422
+
+    def test_missing_methodology_returns_422(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            files={"file": ("test.pdf", b"content", "application/pdf")},
+        )
+        assert resp.status_code == 422
+
+
 # ── POST /api/auth/register ─────────────────────────────
 
 
@@ -553,7 +640,7 @@ class TestRegister:
 
         _mock_pg_acquire(
             database,
-            fetchval=None,  # no existing user
+            fetchval=None,
             fetchrow={
                 "id": 1,
                 "email": "new@example.com",
@@ -579,7 +666,7 @@ class TestRegister:
     def test_duplicate_email_returns_409(self, client):
         import database
 
-        _mock_pg_acquire(database, fetchval=1)  # existing user found
+        _mock_pg_acquire(database, fetchval=1)
 
         resp = client.post(
             "/api/auth/register",
@@ -710,7 +797,7 @@ class TestLogin:
 # ── Protected auth endpoints ─────────────────────────────
 
 
-_fake_user = None  # lazily built to avoid import-time side effects
+_fake_user = None
 
 
 def _get_fake_user():

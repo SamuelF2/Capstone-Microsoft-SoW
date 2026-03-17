@@ -33,17 +33,24 @@ When a SoW is created via POST, skeleton records are also inserted into
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import database
-from fastapi import APIRouter, HTTPException, Query, status
+from config import MAX_UPLOAD_SIZE_MB, UPLOAD_DIR
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from models import SoWCreate, SoWResponse, SoWStatusUpdate, SoWSummary, SoWUpdate
 
 router = APIRouter(prefix="/api/sow", tags=["sow"])
 
 _VALID_STATUSES = {"draft", "in_review", "approved", "rejected"}
 _VALID_METHODOLOGIES = {"Agile Sprint Delivery", "Sure Step 365", "Waterfall", "Cloud Adoption"}
+_VALID_EXTENSIONS = {".pdf", ".docx"}
+_MAX_UPLOAD_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+_FILE_FIELD = File(...)
+_METHODOLOGY_FIELD = Form(...)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -200,6 +207,106 @@ async def create_sow(payload: SoWCreate) -> SoWResponse:
             payload.deal_value,
             content_json,
             metadata_json,
+        )
+
+    return _row_to_response(dict(row))
+
+
+# ── Upload ───────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/upload",
+    response_model=SoWResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a SoW file and create a new SoW record",
+)
+async def upload_sow(
+    file: UploadFile = _FILE_FIELD,
+    methodology: str = _METHODOLOGY_FIELD,
+) -> SoWResponse:
+    """Upload a PDF or DOCX file and create a SoW record.
+
+    The file is saved to the uploads directory. A sow_documents row is
+    created with the filename (sans extension) as the title, status='draft',
+    and the selected methodology. The file path is stored in the metadata
+    JSONB field. No text extraction or LLM processing happens here.
+    """
+    # ── Validate methodology ──────────────────────────────────────────────
+    if methodology not in _VALID_METHODOLOGIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid methodology '{methodology}'. Must be one of: {sorted(_VALID_METHODOLOGIES)}",
+        )
+
+    # ── Validate file extension ───────────────────────────────────────────
+    original_filename = file.filename or "unnamed"
+    ext = Path(original_filename).suffix.lower()
+    if ext not in _VALID_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid file type '{ext}'. Must be one of: {sorted(_VALID_EXTENSIONS)}",
+        )
+
+    # ── Read file and check size ──────────────────────────────────────────
+    contents = await file.read()
+    if len(contents) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds {MAX_UPLOAD_SIZE_MB} MB limit",
+        )
+
+    # ── Derive title from filename ────────────────────────────────────────
+    title = Path(original_filename).stem
+
+    # ── Create DB record (same skeleton pattern as create_sow) ────────────
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        scope_id = await conn.fetchval("INSERT INTO scope DEFAULT VALUES RETURNING id")
+        price_id = await conn.fetchval("INSERT INTO pricing DEFAULT VALUES RETURNING id")
+        assumption_id = await conn.fetchval("INSERT INTO assumptions DEFAULT VALUES RETURNING id")
+        resource_id = await conn.fetchval("INSERT INTO resources DEFAULT VALUES RETURNING id")
+
+        content_id = await conn.fetchval(
+            """
+            INSERT INTO content (scope_id, price_id, assumption_id, resource_id)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            scope_id,
+            price_id,
+            assumption_id,
+            resource_id,
+        )
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO sow_documents
+                (title, cycle, content_id, methodology, metadata)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            RETURNING *
+            """,
+            title,
+            1,
+            content_id,
+            methodology,
+            "{}",
+        )
+
+        sow_id = row["id"]
+
+    # ── Save file to disk ─────────────────────────────────────────────────
+    safe_filename = f"{sow_id}_{original_filename}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    # ── Update metadata with file path ────────────────────────────────────
+    metadata_json = json.dumps({"file_path": safe_filename, "original_filename": original_filename})
+    async with database.pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE sow_documents SET metadata = $1::jsonb WHERE id = $2 RETURNING *",
+            metadata_json,
+            sow_id,
         )
 
     return _row_to_response(dict(row))

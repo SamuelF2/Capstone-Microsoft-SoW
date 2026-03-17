@@ -37,6 +37,8 @@ export default function AIReview() {
   const [methodology, setMethodology] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [errors, setErrors] = useState({ file: '', methodology: '' });
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState(null);
 
   const processSelectedFile = (selected) => {
     const fileError = validateFile(selected);
@@ -70,7 +72,7 @@ export default function AIReview() {
     }
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     const newErrors = { file: '', methodology: '' };
     if (!file) {
       newErrors.file = 'Please upload a SoW document.';
@@ -82,8 +84,32 @@ export default function AIReview() {
       setErrors(newErrors);
       return;
     }
-    // In production: upload file and redirect to the resulting review ID
-    router.push('/review/1');
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('methodology', methodology);
+
+      const res = await fetch('/api/sow/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Upload failed (${res.status})`);
+      }
+
+      const sow = await res.json();
+      router.push(`/review/${sow.id}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const methodologies = ['Agile Sprint Delivery', 'Sure Step 365', 'Waterfall', 'Cloud Adoption'];
@@ -112,6 +138,23 @@ export default function AIReview() {
               expert AI recommendations.
             </p>
           </div>
+
+          {/* Error banner */}
+          {error && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--color-error)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
+              <strong>Upload failed:</strong> {error}
+            </div>
+          )}
 
           {/* Upload Card */}
           <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
@@ -244,10 +287,10 @@ export default function AIReview() {
             <button
               onClick={handleUpload}
               className="btn btn-primary btn-lg"
-              disabled={!isValid}
-              style={{ opacity: isValid ? 1 : 0.6 }}
+              disabled={!isValid || isUploading}
+              style={{ opacity: isValid && !isUploading ? 1 : 0.6 }}
             >
-              Upload & Analyze
+              {isUploading ? 'Uploading…' : 'Upload & Analyze'}
             </button>
           </div>
         </div>
