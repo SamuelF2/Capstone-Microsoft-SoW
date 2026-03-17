@@ -56,34 +56,47 @@ async def lifespan(app: FastAPI):
     """Initialise and tear down database connections."""
 
     # ── Neo4j ────────────────────────────────────────────────────────────────
-    database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    for attempt in range(15):
-        try:
-            database.neo4j_driver.verify_connectivity()
-            print("Neo4j connected")
-            break
-        except Exception:
-            if attempt == 14:
-                raise
-            print(f"Neo4j not ready, retrying ({attempt + 1}/15)...")
-            await asyncio.sleep(2)
+    try:
+        database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        for attempt in range(15):
+            try:
+                database.neo4j_driver.verify_connectivity()
+                print("Neo4j connected")
+                break
+            except Exception:
+                if attempt == 14:
+                    raise
+                print(f"Neo4j not ready, retrying ({attempt + 1}/15)...")
+                await asyncio.sleep(2)
+    except Exception as e:
+        print(f"Neo4j connection failed, starting in degraded mode: {e}")
+        database.neo4j_driver = None
 
     # ── PostgreSQL ───────────────────────────────────────────────────────────
-    for attempt in range(15):
-        try:
-            database.pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-            print("PostgreSQL connected")
-            break
-        except Exception:
-            if attempt == 14:
-                raise
-            print(f"PostgreSQL not ready, retrying ({attempt + 1}/15)...")
-            await asyncio.sleep(2)
+    try:
+        for attempt in range(15):
+            try:
+                database.pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+                print("PostgreSQL connected")
+                break
+            except Exception:
+                if attempt == 14:
+                    raise
+                print(f"PostgreSQL not ready, retrying ({attempt + 1}/15)...")
+                await asyncio.sleep(2)
+    except Exception as e:
+        print(f"PostgreSQL connection failed, starting in degraded mode: {e}")
+        database.pg_pool = None
 
     # ── Schema bootstrap ─────────────────────────────────────────────────────
     # Core tables from infrastructure/postgres/init/01-init.sql are created on
     # first container start.  Everything below is idempotent and aligns the
     # schema with the Database Schema for PostgreSQL.pdf specification.
+    if not database.pg_pool:
+        print("Skipping schema bootstrap — PostgreSQL not available")
+        yield
+        return
+
     async with database.pg_pool.acquire() as conn:
         # ------------------------------------------------------------------ #
         # 1. USERS                                                            #
