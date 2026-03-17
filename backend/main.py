@@ -56,34 +56,37 @@ async def lifespan(app: FastAPI):
     """Initialise and tear down database connections."""
 
     # ── Neo4j ────────────────────────────────────────────────────────────────
+    max_retries = 5
+    retry_delay = 2
+
     try:
         database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        for attempt in range(15):
+        for attempt in range(max_retries):
             try:
                 database.neo4j_driver.verify_connectivity()
                 print("Neo4j connected")
                 break
             except Exception:
-                if attempt == 14:
+                if attempt == max_retries - 1:
                     raise
-                print(f"Neo4j not ready, retrying ({attempt + 1}/15)...")
-                await asyncio.sleep(2)
+                print(f"Neo4j not ready, retrying ({attempt + 1}/{max_retries})...")
+                await asyncio.sleep(retry_delay)
     except Exception as e:
         print(f"Neo4j connection failed, starting in degraded mode: {e}")
         database.neo4j_driver = None
 
     # ── PostgreSQL ───────────────────────────────────────────────────────────
     try:
-        for attempt in range(15):
+        for attempt in range(max_retries):
             try:
                 database.pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
                 print("PostgreSQL connected")
                 break
             except Exception:
-                if attempt == 14:
+                if attempt == max_retries - 1:
                     raise
-                print(f"PostgreSQL not ready, retrying ({attempt + 1}/15)...")
-                await asyncio.sleep(2)
+                print(f"PostgreSQL not ready, retrying ({attempt + 1}/{max_retries})...")
+                await asyncio.sleep(retry_delay)
     except Exception as e:
         print(f"PostgreSQL connection failed, starting in degraded mode: {e}")
         database.pg_pool = None
