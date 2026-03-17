@@ -29,7 +29,6 @@ review_results  — review findings (id, sow_id, reviewer, score, findings, revi
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -55,38 +54,28 @@ from validators import (
 async def lifespan(app: FastAPI):
     """Initialise and tear down database connections."""
 
-    # ── Neo4j ────────────────────────────────────────────────────────────────
-    max_retries = 5
-    retry_delay = 2
+    # ── Connect databases (non-blocking) ─────────────────────────────────────
+    # Try once quickly. If it fails, start in degraded mode so the container
+    # passes Azure's startup probe. The /health endpoint reports status.
 
+    # Neo4j
     try:
         database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        for attempt in range(max_retries):
-            try:
-                database.neo4j_driver.verify_connectivity()
-                print("Neo4j connected")
-                break
-            except Exception:
-                if attempt == max_retries - 1:
-                    raise
-                print(f"Neo4j not ready, retrying ({attempt + 1}/{max_retries})...")
-                await asyncio.sleep(retry_delay)
+        database.neo4j_driver.verify_connectivity()
+        print("Neo4j connected")
     except Exception as e:
         print(f"Neo4j connection failed, starting in degraded mode: {e}")
         database.neo4j_driver = None
 
-    # ── PostgreSQL ───────────────────────────────────────────────────────────
+    # PostgreSQL
     try:
-        for attempt in range(max_retries):
-            try:
-                database.pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-                print("PostgreSQL connected")
-                break
-            except Exception:
-                if attempt == max_retries - 1:
-                    raise
-                print(f"PostgreSQL not ready, retrying ({attempt + 1}/{max_retries})...")
-                await asyncio.sleep(retry_delay)
+        database.pg_pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            timeout=5,
+        )
+        print("PostgreSQL connected")
     except Exception as e:
         print(f"PostgreSQL connection failed, starting in degraded mode: {e}")
         database.pg_pool = None
