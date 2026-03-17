@@ -5,7 +5,8 @@ run without Neo4j or PostgreSQL.
 """
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -238,6 +239,40 @@ class TestCreateSow:
         resp = client.post("/api/sow", json={"title": ""})
         assert resp.status_code == 422
 
+    def test_invalid_methodology_returns_400(self, client):
+        resp = client.post("/api/sow", json={"title": "Test", "methodology": "InvalidMethod"})
+        assert resp.status_code == 400
+        assert "Invalid methodology" in resp.json()["detail"]
+
+    def test_valid_methodology_succeeds(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchval=1,
+            fetchrow={
+                "id": 1,
+                "title": "Test",
+                "status": "draft",
+                "cycle": 1,
+                "content_id": 1,
+                "ai_suggestion_id": None,
+                "uploaded_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "client_id": None,
+                "methodology": "Waterfall",
+                "customer_name": None,
+                "opportunity_id": None,
+                "deal_value": None,
+                "content": None,
+                "metadata": None,
+            },
+        )
+
+        resp = client.post("/api/sow", json={"title": "Test", "methodology": "Waterfall"})
+        assert resp.status_code == 201
+        assert resp.json()["methodology"] == "Waterfall"
+
 
 # ── GET /api/sow/{sow_id} ───────────────────────────────
 
@@ -366,3 +401,459 @@ class TestStatusPage:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "System Status" in resp.text
+
+
+# ── Shared mock data ────────────────────────────────────
+
+
+def _full_sow_row(**overrides):
+    """Return a complete sow_documents row dict for mocking."""
+    row = {
+        "id": 1,
+        "title": "Test SoW",
+        "status": "draft",
+        "cycle": 1,
+        "content_id": 1,
+        "ai_suggestion_id": None,
+        "uploaded_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "client_id": None,
+        "methodology": None,
+        "customer_name": None,
+        "opportunity_id": None,
+        "deal_value": None,
+        "content": None,
+        "metadata": None,
+    }
+    row.update(overrides)
+    return row
+
+
+# ── GET /api/sow/by-client/{client_id} ──────────────────
+
+
+class TestGetSowByClientId:
+    def test_found(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow=_full_sow_row(client_id="abc-123", title="Client SoW"),
+        )
+
+        resp = client.get("/api/sow/by-client/abc-123")
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Client SoW"
+        assert resp.json()["client_id"] == "abc-123"
+
+    def test_not_found(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchrow=None)
+
+        resp = client.get("/api/sow/by-client/nonexistent")
+        assert resp.status_code == 404
+
+
+# ── PATCH /api/sow/{sow_id} ─────────────────────────────
+
+
+class TestUpdateSow:
+    def test_partial_update_title(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow=_full_sow_row(title="Updated Title"),
+        )
+
+        resp = client.patch("/api/sow/1", json={"title": "Updated Title"})
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Updated Title"
+
+    def test_not_found(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchrow=None)
+
+        resp = client.patch("/api/sow/999", json={"title": "X"})
+        assert resp.status_code == 404
+
+    def test_empty_payload_returns_current(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchrow=_full_sow_row())
+
+        resp = client.patch("/api/sow/1", json={})
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "Test SoW"
+
+    def test_empty_payload_not_found(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchrow=None)
+
+        resp = client.patch("/api/sow/999", json={})
+        assert resp.status_code == 404
+
+    def test_invalid_methodology_returns_400(self, client):
+        resp = client.patch("/api/sow/1", json={"methodology": "BadMethod"})
+        assert resp.status_code == 400
+        assert "Invalid methodology" in resp.json()["detail"]
+
+    def test_valid_methodology(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow=_full_sow_row(methodology="Sure Step 365"),
+        )
+
+        resp = client.patch("/api/sow/1", json={"methodology": "Sure Step 365"})
+        assert resp.status_code == 200
+        assert resp.json()["methodology"] == "Sure Step 365"
+
+
+# ── PUT /api/sow/{sow_id}/status ────────────────────────
+
+
+class TestUpdateSowStatus:
+    def test_valid_status(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow=_full_sow_row(status="approved"),
+        )
+
+        resp = client.put("/api/sow/1/status", json={"status": "approved"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+
+    def test_invalid_status_returns_400(self, client):
+        resp = client.put("/api/sow/1/status", json={"status": "bogus"})
+        assert resp.status_code == 400
+        assert "Invalid status" in resp.json()["detail"]
+
+    def test_not_found(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchrow=None)
+
+        resp = client.put("/api/sow/999/status", json={"status": "draft"})
+        assert resp.status_code == 404
+
+
+# ── POST /api/sow/upload ────────────────────────────────
+
+
+class TestUploadSow:
+    def test_success_pdf(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchval=1,
+            fetchrow=_full_sow_row(
+                methodology="Waterfall",
+                metadata='{"file_path": "1_test.pdf", "original_filename": "test.pdf"}',
+            ),
+        )
+
+        with patch("builtins.open", mock_open()):
+            resp = client.post(
+                "/api/sow/upload",
+                data={"methodology": "Waterfall"},
+                files={"file": ("test.pdf", b"fake pdf content", "application/pdf")},
+            )
+
+        assert resp.status_code == 201
+        assert resp.json()["methodology"] == "Waterfall"
+
+    def test_success_docx(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchval=1,
+            fetchrow=_full_sow_row(
+                title="report",
+                methodology="Agile Sprint Delivery",
+                metadata='{"file_path": "1_report.docx", "original_filename": "report.docx"}',
+            ),
+        )
+
+        with patch("builtins.open", mock_open()):
+            resp = client.post(
+                "/api/sow/upload",
+                data={"methodology": "Agile Sprint Delivery"},
+                files={
+                    "file": (
+                        "report.docx",
+                        b"fake docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
+            )
+
+        assert resp.status_code == 201
+
+    def test_invalid_methodology_returns_400(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            data={"methodology": "BadMethod"},
+            files={"file": ("test.pdf", b"content", "application/pdf")},
+        )
+        assert resp.status_code == 400
+        assert "Invalid methodology" in resp.json()["detail"]
+
+    def test_invalid_extension_returns_400(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            data={"methodology": "Waterfall"},
+            files={"file": ("test.txt", b"content", "text/plain")},
+        )
+        assert resp.status_code == 400
+        assert "Invalid file type" in resp.json()["detail"]
+
+    def test_missing_file_returns_422(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            data={"methodology": "Waterfall"},
+        )
+        assert resp.status_code == 422
+
+    def test_missing_methodology_returns_422(self, client):
+        resp = client.post(
+            "/api/sow/upload",
+            files={"file": ("test.pdf", b"content", "application/pdf")},
+        )
+        assert resp.status_code == 422
+
+
+# ── POST /api/auth/register ─────────────────────────────
+
+
+class TestRegister:
+    def test_success(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchval=None,
+            fetchrow={
+                "id": 1,
+                "email": "new@example.com",
+                "full_name": "New User",
+                "username": None,
+                "name": None,
+                "role": "consultant",
+                "is_active": True,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+
+        with patch("routers.auth.hash_password", return_value="fakehash"):
+            resp = client.post(
+                "/api/auth/register",
+                json={"email": "new@example.com", "password": "securepass123"},
+            )
+
+        assert resp.status_code == 201
+        assert resp.json()["email"] == "new@example.com"
+
+    def test_duplicate_email_returns_409(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchval=1)
+
+        resp = client.post(
+            "/api/auth/register",
+            json={"email": "exists@example.com", "password": "securepass123"},
+        )
+        assert resp.status_code == 409
+
+    def test_missing_email_returns_422(self, client):
+        resp = client.post("/api/auth/register", json={"password": "securepass123"})
+        assert resp.status_code == 422
+
+    def test_short_password_returns_422(self, client):
+        resp = client.post(
+            "/api/auth/register",
+            json={"email": "a@b.com", "password": "short"},
+        )
+        assert resp.status_code == 422
+
+    def test_invalid_email_returns_422(self, client):
+        resp = client.post(
+            "/api/auth/register",
+            json={"email": "not-an-email", "password": "securepass123"},
+        )
+        assert resp.status_code == 422
+
+
+# ── POST /api/auth/login ────────────────────────────────
+
+
+class TestLogin:
+    def test_success(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow={
+                "id": 1,
+                "email": "user@example.com",
+                "hashed_password": "fakehash",
+                "full_name": "Test User",
+                "username": None,
+                "name": None,
+                "role": "consultant",
+                "is_active": True,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+
+        with patch("routers.auth.verify_password", return_value=True):
+            resp = client.post(
+                "/api/auth/login",
+                json={"email": "user@example.com", "password": "correctpass"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["token_type"] == "bearer"
+        assert "access_token" in data
+        assert data["user"]["email"] == "user@example.com"
+
+    def test_wrong_password_returns_401(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow={
+                "id": 1,
+                "email": "user@example.com",
+                "hashed_password": "fakehash",
+                "full_name": "Test User",
+                "username": None,
+                "name": None,
+                "role": "consultant",
+                "is_active": True,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+
+        with patch("routers.auth.verify_password", return_value=False):
+            resp = client.post(
+                "/api/auth/login",
+                json={"email": "user@example.com", "password": "wrongpass"},
+            )
+
+        assert resp.status_code == 401
+
+    def test_user_not_found_returns_401(self, client):
+        import database
+
+        _mock_pg_acquire(database, fetchrow=None)
+
+        resp = client.post(
+            "/api/auth/login",
+            json={"email": "nobody@example.com", "password": "whatever"},
+        )
+        assert resp.status_code == 401
+
+    def test_inactive_user_returns_403(self, client):
+        import database
+
+        _mock_pg_acquire(
+            database,
+            fetchrow={
+                "id": 1,
+                "email": "user@example.com",
+                "hashed_password": "fakehash",
+                "full_name": "Test User",
+                "username": None,
+                "name": None,
+                "role": "consultant",
+                "is_active": False,
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+
+        with patch("routers.auth.verify_password", return_value=True):
+            resp = client.post(
+                "/api/auth/login",
+                json={"email": "user@example.com", "password": "correctpass"},
+            )
+
+        assert resp.status_code == 403
+
+
+# ── Protected auth endpoints ─────────────────────────────
+
+
+_fake_user = None
+
+
+def _get_fake_user():
+    global _fake_user
+    if _fake_user is None:
+        from models import UserResponse
+
+        _fake_user = UserResponse(
+            id=1,
+            email="test@example.com",
+            full_name="Test User",
+            username=None,
+            name=None,
+            role="consultant",
+            is_active=True,
+            created_at=datetime(2026, 1, 1),
+        )
+    return _fake_user
+
+
+@pytest.fixture()
+def auth_client(client):
+    """TestClient with get_current_user overridden to return a fake user."""
+    import main
+    from auth import get_current_user
+
+    main.app.dependency_overrides[get_current_user] = _get_fake_user
+    yield client
+    main.app.dependency_overrides.pop(get_current_user, None)
+
+
+# ── POST /api/auth/logout ───────────────────────────────
+
+
+class TestLogout:
+    def test_success(self, auth_client):
+        resp = auth_client.post("/api/auth/logout")
+        assert resp.status_code == 200
+        assert "message" in resp.json()
+
+    def test_unauthenticated_returns_401(self, client):
+        resp = client.post("/api/auth/logout")
+        assert resp.status_code in (401, 403)
+
+
+# ── GET /api/auth/me ─────────────────────────────────────
+
+
+class TestMe:
+    def test_success(self, auth_client):
+        resp = auth_client.get("/api/auth/me")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["email"] == "test@example.com"
+        assert data["role"] == "consultant"
+
+    def test_unauthenticated_returns_401(self, client):
+        resp = client.get("/api/auth/me")
+        assert resp.status_code in (401, 403)

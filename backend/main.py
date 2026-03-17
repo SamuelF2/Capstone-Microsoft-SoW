@@ -269,6 +269,14 @@ async def lifespan(app: FastAPI):
 
     print("PostgreSQL schema ready")
 
+    # ── Upload directory ──────────────────────────────────────────────────────
+    from pathlib import Path
+
+    from config import UPLOAD_DIR
+
+    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    print(f"Upload directory ready: {UPLOAD_DIR}")
+
     yield
 
     # ── Cleanup ──────────────────────────────────────────────────────────────
