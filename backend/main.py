@@ -29,6 +29,7 @@ review_results  — review findings (id, sow_id, reviewer, score, findings, revi
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -58,7 +59,7 @@ async def lifespan(app: FastAPI):
     # Try once quickly. If it fails, start in degraded mode so the container
     # passes Azure's startup probe. The /health endpoint reports status.
 
-    # Neo4j
+    # Neo4j — 5s hard timeout
     try:
         database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
         database.neo4j_driver.verify_connectivity()
@@ -67,12 +68,10 @@ async def lifespan(app: FastAPI):
         print(f"Neo4j connection failed, starting in degraded mode: {e}")
         database.neo4j_driver = None
 
-    # PostgreSQL
+    # PostgreSQL — 5s hard timeout (asyncpg timeout alone can hang on DNS)
     try:
-        database.pg_pool = await asyncpg.create_pool(
-            DATABASE_URL,
-            min_size=1,
-            max_size=10,
+        database.pg_pool = await asyncio.wait_for(
+            asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10),
             timeout=5,
         )
         print("PostgreSQL connected")
