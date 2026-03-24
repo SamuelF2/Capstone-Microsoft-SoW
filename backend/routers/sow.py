@@ -502,7 +502,9 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
     response_model=SoWResponse,
     summary="Update SoW status",
 )
-async def update_sow_status(sow_id: int, payload: SoWStatusUpdate, current_user: CurrentUser) -> SoWResponse:
+async def update_sow_status(
+    sow_id: int, payload: SoWStatusUpdate, current_user: CurrentUser
+) -> SoWResponse:
     """Change the workflow status of a SoW.
 
     Valid values: ``draft`` | ``in_review`` | ``approved`` | ``rejected``

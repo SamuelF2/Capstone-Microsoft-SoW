@@ -17,10 +17,10 @@ import { useAuth } from '../lib/auth';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_COLOR = {
-  draft:     'var(--color-text-secondary)',
+  draft: 'var(--color-text-secondary)',
   in_review: 'var(--color-warning)',
-  approved:  'var(--color-success)',
-  rejected:  'var(--color-error)',
+  approved: 'var(--color-success)',
+  rejected: 'var(--color-error)',
 };
 
 function formatDealValue(raw) {
@@ -47,8 +47,8 @@ function formatDate(iso) {
 export default function AllSoWs() {
   const router = useRouter();
   const { token } = useAuth();
-  const [sows, setSows]                 = useState([]);
-  const [loading, setLoading]           = useState(true);
+  const [sows, setSows] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
@@ -115,7 +115,6 @@ export default function AllSoWs() {
         }}
       >
         <div style={{ maxWidth: 'var(--container-lg)', margin: '0 auto' }}>
-
           {/* Header */}
           <div
             style={{
@@ -208,7 +207,16 @@ export default function AllSoWs() {
                       backgroundColor: 'var(--color-bg-tertiary)',
                     }}
                   >
-                    {['Title', 'Customer', 'Methodology', 'Cycle', 'Value', 'Status', 'Updated', ''].map((h) => (
+                    {[
+                      'Title',
+                      'Customer',
+                      'Methodology',
+                      'Cycle',
+                      'Value',
+                      'Status',
+                      'Updated',
+                      '',
+                    ].map((h) => (
                       <th
                         key={h}
                         style={{
@@ -242,9 +250,7 @@ export default function AllSoWs() {
                       onMouseEnter={(e) =>
                         (e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)')
                       }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.backgroundColor = 'transparent')
-                      }
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                     >
                       <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
                         <p className="font-medium" style={{ marginBottom: '2px' }}>
@@ -324,7 +330,6 @@ export default function AllSoWs() {
               )}
             </div>
           )}
-
         </div>
       </div>
     </>

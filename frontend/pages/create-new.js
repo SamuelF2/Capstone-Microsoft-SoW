@@ -33,7 +33,7 @@ export default function CreateNew() {
       // POST to backend — backend generates the canonical integer ID
       const res = await fetch('/api/sow', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`,},
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           title: form.sowTitle,
           cycle: parseInt(form.cycle, 10) || 1,
