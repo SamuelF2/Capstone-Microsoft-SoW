@@ -28,6 +28,13 @@ Content creation
 When a SoW is created via POST, skeleton records are also inserted into
 ``scope``, ``pricing``, ``assumptions``, ``resources``, and ``content``
 (per PDF §2.2).  The ``content_id`` FK is stored on ``sow_documents``.
+
+Collaboration seeding
+---------------------
+Whenever a SoW is created (POST /api/sow or POST /api/sow/upload) the
+authenticated user is automatically inserted into the ``collaboration``
+table with role ``'author'``.  This is what makes the SoW visible under
+GET /api/my-sows and grants access to GET /api/my-sows/{id}.
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import database
+from auth import CurrentUser
 from config import MAX_UPLOAD_SIZE_MB, UPLOAD_DIR
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from models import SoWCreate, SoWResponse, SoWStatusUpdate, SoWSummary, SoWUpdate
@@ -70,6 +78,49 @@ def _row_to_summary(row: dict) -> SoWSummary:
     return SoWSummary(**dict(row))
 
 
+async def _require_collaborator(conn, sow_id: int, user_id: int) -> None:
+    """Raise 404 if the user is not a collaborator on this SoW.
+
+    Uses 404 rather than 403 so outsiders cannot confirm whether a SoW with
+    a given ID exists at all.  Must be called with an already-acquired
+    connection so it can share a transaction with the caller's query.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+        FROM   collaboration
+        WHERE  sow_id  = $1
+        AND    user_id = $2
+        LIMIT  1
+        """,
+        sow_id,
+        user_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+
+async def _seed_collaboration(conn, sow_id: int, user_id: int, role: str = "author") -> None:
+    """Insert the creating user as a collaborator on the new SoW.
+
+    Called inside the same transaction as the SoW insert so the row is
+    always present — a SoW can never exist without at least one collaborator.
+
+    Uses INSERT ... ON CONFLICT DO NOTHING so re-entrant calls are safe
+    (e.g. if the endpoint is retried after a partial failure).
+    """
+    await conn.execute(
+        """
+        INSERT INTO collaboration (sow_id, user_id, role)
+        VALUES ($1, $2, $3)
+        ON CONFLICT DO NOTHING
+        """,
+        sow_id,
+        user_id,
+        role,
+    )
+
+
 # ── List ──────────────────────────────────────────────────────────────────────
 
 
@@ -79,45 +130,50 @@ def _row_to_summary(row: dict) -> SoWSummary:
     summary="List all SoW documents",
 )
 async def list_sows(
+    current_user: CurrentUser,
     status_filter: str | None = Query(default=None, alias="status"),
     methodology: str | None = Query(default=None),
     cycle: int | None = Query(default=None, ge=1, le=4),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[SoWSummary]:
-    """Return a paginated list of SoW summaries.
+    """Return a paginated list of SoW summaries for the current user.
 
-    Optional query parameters:
+    Only SoWs where the authenticated user appears in the ``collaboration``
+    table are returned.  Optional query parameters:
+
     - ``status``      — filter by status (e.g. ``draft``, ``approved``)
     - ``methodology`` — filter by methodology name
     - ``cycle``       — filter by deal cycle (1–4)
     - ``limit``       — page size (default 100, max 500)
     - ``offset``      — pagination offset
     """
-    conditions: list[str] = []
-    params: list[Any] = []
+    conditions: list[str] = ["c.user_id = $1"]
+    params: list[Any] = [current_user.id]
 
     if status_filter:
         params.append(status_filter)
-        conditions.append(f"status = ${len(params)}")
+        conditions.append(f"s.status = ${len(params)}")
 
     if methodology:
         params.append(methodology)
-        conditions.append(f"methodology = ${len(params)}")
+        conditions.append(f"s.methodology = ${len(params)}")
 
     if cycle is not None:
         params.append(cycle)
-        conditions.append(f"cycle = ${len(params)}")
+        conditions.append(f"s.cycle = ${len(params)}")
 
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where = "WHERE " + " AND ".join(conditions)
     params.extend([limit, offset])
 
     query = f"""
-        SELECT id, title, status, cycle, methodology, customer_name, opportunity_id,
-               deal_value, client_id, updated_at
-        FROM sow_documents
+        SELECT  s.id, s.title, s.status, s.cycle, s.methodology,
+                s.customer_name, s.opportunity_id, s.deal_value,
+                s.client_id, s.updated_at
+        FROM    sow_documents s
+        JOIN    collaboration c ON c.sow_id = s.id
         {where}
-        ORDER BY updated_at DESC
+        ORDER BY s.updated_at DESC
         LIMIT ${len(params) - 1} OFFSET ${len(params)}
     """
 
@@ -136,7 +192,7 @@ async def list_sows(
     status_code=status.HTTP_201_CREATED,
     summary="Create a new SoW document",
 )
-async def create_sow(payload: SoWCreate) -> SoWResponse:
+async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWResponse:
     """Create a new SoW and its normalised content skeleton.
 
     Flow (PDF §2.2):
@@ -144,6 +200,8 @@ async def create_sow(payload: SoWCreate) -> SoWResponse:
        ``resources`` (no data yet — populated via PATCH auto-save later).
     2. Insert a ``content`` row linking all four child records.
     3. Insert the ``sow_documents`` row with the ``content_id`` FK.
+    4. Insert the creating user into ``collaboration`` with role ``'author'``
+       so they can access the SoW via GET /api/my-sows/{id}.
 
     Returns the full SoW response including the backend integer ``id``.
     Raises **409** if a SoW with the same ``client_id`` already exists.
@@ -209,6 +267,9 @@ async def create_sow(payload: SoWCreate) -> SoWResponse:
             metadata_json,
         )
 
+        # 4. Seed collaboration so the creator can access this SoW via /api/my-sows
+        await _seed_collaboration(conn, sow_id=row["id"], user_id=current_user.id)
+
     return _row_to_response(dict(row))
 
 
@@ -222,6 +283,7 @@ async def create_sow(payload: SoWCreate) -> SoWResponse:
     summary="Upload a SoW file and create a new SoW record",
 )
 async def upload_sow(
+    current_user: CurrentUser,
     file: UploadFile = _FILE_FIELD,
     methodology: str = _METHODOLOGY_FIELD,
 ) -> SoWResponse:
@@ -231,6 +293,9 @@ async def upload_sow(
     created with the filename (sans extension) as the title, status='draft',
     and the selected methodology. The file path is stored in the metadata
     JSONB field. No text extraction or LLM processing happens here.
+
+    The uploading user is added to ``collaboration`` with role ``'author'``
+    so they can access the SoW via GET /api/my-sows/{id}.
     """
     # ── Validate methodology ──────────────────────────────────────────────
     if methodology not in _VALID_METHODOLOGIES:
@@ -294,6 +359,9 @@ async def upload_sow(
 
         sow_id = row["id"]
 
+        # Seed collaboration so the uploader can access via /api/my-sows
+        await _seed_collaboration(conn, sow_id=sow_id, user_id=current_user.id)
+
     # ── Save file to disk ─────────────────────────────────────────────────
     safe_filename = f"{sow_id}_{original_filename}"
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
@@ -320,14 +388,25 @@ async def upload_sow(
     response_model=SoWResponse,
     summary="Look up a SoW by frontend-generated client ID (legacy)",
 )
-async def get_sow_by_client_id(client_id: str) -> SoWResponse:
+async def get_sow_by_client_id(client_id: str, current_user: CurrentUser) -> SoWResponse:
     """Resolve the frontend string ``client_id`` to the full SoW record.
 
-    Use this during migration if the frontend still holds a locally generated
-    string ID and needs to locate the matching backend integer record.
+    Raises **404** if the SoW does not exist or the current user is not a
+    collaborator on it.
     """
     async with database.pg_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE client_id = $1", client_id)
+        row = await conn.fetchrow(
+            """
+            SELECT  s.*
+            FROM    sow_documents s
+            JOIN    collaboration  c ON c.sow_id = s.id
+            WHERE   s.client_id = $1
+            AND     c.user_id   = $2
+            LIMIT   1
+            """,
+            client_id,
+            current_user.id,
+        )
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -344,9 +423,14 @@ async def get_sow_by_client_id(client_id: str) -> SoWResponse:
     response_model=SoWResponse,
     summary="Get a SoW document by its backend integer ID",
 )
-async def get_sow(sow_id: int) -> SoWResponse:
-    """Return the full SoW document including ``content`` (section data)."""
+async def get_sow(sow_id: int, current_user: CurrentUser) -> SoWResponse:
+    """Return the full SoW document including ``content`` (section data).
+
+    Raises **404** if the SoW does not exist or the current user is not a
+    collaborator on it.
+    """
     async with database.pg_pool.acquire() as conn:
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -361,17 +445,19 @@ async def get_sow(sow_id: int) -> SoWResponse:
     response_model=SoWResponse,
     summary="Partially update a SoW document",
 )
-async def update_sow(sow_id: int, payload: SoWUpdate) -> SoWResponse:
+async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser) -> SoWResponse:
     """Apply a partial update to a SoW.
 
     Only non-None fields are updated.  Designed for the frontend's auto-save —
     send only changed section data in ``content``.
 
-    Raises **404** if the SoW does not exist.
+    Raises **404** if the SoW does not exist or the current user is not a
+    collaborator on it.
     """
     updates: dict[str, Any] = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         async with database.pg_pool.acquire() as conn:
+            await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
             row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -397,6 +483,7 @@ async def update_sow(sow_id: int, payload: SoWUpdate) -> SoWResponse:
     )
 
     async with database.pg_pool.acquire() as conn:
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow(
             f"UPDATE sow_documents SET {set_clause} WHERE id = ${len(params)} RETURNING *",
             *params,
@@ -415,13 +502,14 @@ async def update_sow(sow_id: int, payload: SoWUpdate) -> SoWResponse:
     response_model=SoWResponse,
     summary="Update SoW status",
 )
-async def update_sow_status(sow_id: int, payload: SoWStatusUpdate) -> SoWResponse:
+async def update_sow_status(sow_id: int, payload: SoWStatusUpdate, current_user: CurrentUser) -> SoWResponse:
     """Change the workflow status of a SoW.
 
     Valid values: ``draft`` | ``in_review`` | ``approved`` | ``rejected``
 
     Raises **400** for unrecognised statuses.
-    Raises **404** if the SoW does not exist.
+    Raises **404** if the SoW does not exist or the current user is not a
+    collaborator on it.
     """
     if payload.status not in _VALID_STATUSES:
         raise HTTPException(
@@ -430,6 +518,7 @@ async def update_sow_status(sow_id: int, payload: SoWStatusUpdate) -> SoWRespons
         )
 
     async with database.pg_pool.acquire() as conn:
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow(
             """
             UPDATE sow_documents
@@ -454,14 +543,16 @@ async def update_sow_status(sow_id: int, payload: SoWStatusUpdate) -> SoWRespons
     status_code=status.HTTP_200_OK,
     summary="Delete a SoW document",
 )
-async def delete_sow(sow_id: int) -> dict:
+async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
     """Permanently delete a SoW and its cascaded records.
 
     Cascades to: review_results, history, collaboration.
 
-    Raises **404** if the SoW does not exist.
+    Raises **404** if the SoW does not exist or the current user is not a
+    collaborator on it.
     """
     async with database.pg_pool.acquire() as conn:
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         result = await conn.execute("DELETE FROM sow_documents WHERE id = $1", sow_id)
 
     if result == "DELETE 0":

@@ -1,75 +1,32 @@
+/**
+ * pages/all-sows.js
+ *
+ * Lists every SoW the authenticated user is a collaborator on.
+ * Data comes from GET /api/sow which enforces the collaboration filter
+ * server-side — no seed data, no localStorage reads.
+ *
+ * Unauthenticated users will see an empty list (the useEffect guard skips
+ * the fetch if no token is present, and the app-level auth redirects them).
+ */
+
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { useAuth } from '../lib/auth';
 
-const SEED_SOWS = [
-  {
-    id: 'seed-1',
-    title: 'Contoso Cloud Migration Phase 1',
-    opportunityId: 'OPP-20240112',
-    customer: 'Contoso Ltd.',
-    methodology: 'Cloud Adoption',
-    cycle: 2,
-    dealValue: '$240,000',
-    status: 'In Review',
-    updatedAt: 'Feb 15, 2026',
-    isLocal: false,
-  },
-  {
-    id: 'seed-2',
-    title: 'Fabrikam Agile Transformation',
-    opportunityId: 'OPP-20240098',
-    customer: 'Fabrikam Inc.',
-    methodology: 'Agile Sprint Delivery',
-    cycle: 1,
-    dealValue: '$185,000',
-    status: 'Approved',
-    updatedAt: 'Feb 10, 2026',
-    isLocal: false,
-  },
-  {
-    id: 'seed-3',
-    title: 'Northwind ERP Implementation',
-    opportunityId: 'OPP-20240077',
-    customer: 'Northwind Traders',
-    methodology: 'Sure Step 365',
-    cycle: 3,
-    dealValue: '$310,000',
-    status: 'In Review',
-    updatedAt: 'Feb 8, 2026',
-    isLocal: false,
-  },
-  {
-    id: 'seed-4',
-    title: 'Alpine Ski House Deployment',
-    opportunityId: 'OPP-20240055',
-    customer: 'Alpine Ski House',
-    methodology: 'Waterfall',
-    cycle: 1,
-    dealValue: '$95,000',
-    status: 'Draft',
-    updatedAt: 'Feb 3, 2026',
-    isLocal: false,
-  },
-  {
-    id: 'seed-5',
-    title: 'Tailspin Toys Cloud Adoption',
-    opportunityId: 'OPP-20240041',
-    customer: 'Tailspin Toys',
-    methodology: 'Cloud Adoption',
-    cycle: 2,
-    dealValue: '$175,000',
-    status: 'Approved',
-    updatedAt: 'Jan 29, 2026',
-    isLocal: false,
-  },
-];
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const STATUS_COLOR = {
+  draft:     'var(--color-text-secondary)',
+  in_review: 'var(--color-warning)',
+  approved:  'var(--color-success)',
+  rejected:  'var(--color-error)',
+};
 
 function formatDealValue(raw) {
-  if (!raw) return '—';
+  if (raw == null) return '—';
   const num = parseFloat(raw);
-  if (isNaN(num)) return raw;
-  return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return isNaN(num) ? '—' : '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0 });
 }
 
 function formatDate(iso) {
@@ -85,74 +42,64 @@ function formatDate(iso) {
   }
 }
 
-function loadLocalSoWs() {
-  try {
-    const registry = JSON.parse(localStorage.getItem('sow-registry') || '[]');
-    return registry
-      .map((id) => {
-        try {
-          const raw = localStorage.getItem(`sow-${id}`);
-          if (!raw) return null;
-          const sow = JSON.parse(raw);
-          return {
-            id: sow.id,
-            title: sow.sowTitle || 'Untitled SoW',
-            opportunityId: sow.opportunityId || '—',
-            customer: sow.customerName || '—',
-            methodology: sow.deliveryMethodology || '—',
-            dealValue: formatDealValue(sow.dealValue),
-            cycle: sow.cycle || null,
-            status: sow.status || 'Draft',
-            updatedAt: formatDate(sow.updatedAt),
-            isLocal: true,
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-const STATUS_COLOR = {
-  Draft: 'var(--color-text-secondary)',
-  'In Review': 'var(--color-warning)',
-  Approved: 'var(--color-success)',
-  Rejected: 'var(--color-error)',
-};
+// ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AllSoWs() {
   const router = useRouter();
+  const { token } = useAuth();
+  const [sows, setSows]                 = useState([]);
+  const [loading, setLoading]           = useState(true);
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
-  const [allSows, setAllSows] = useState(SEED_SOWS);
 
-  // Merge localStorage SoWs on mount
   useEffect(() => {
-    const localSows = loadLocalSoWs();
-    setAllSows([...localSows, ...SEED_SOWS]);
-  }, []);
+    if (!token) return;
+    fetch('/api/sow', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .catch(() => [])
+      .then((data) => {
+        setSows(data);
+        setLoading(false);
+      });
+  }, [token]);
 
-  const filtered = allSows.filter((s) => {
+  const filtered = sows.filter((s) => {
+    const q = search.toLowerCase();
     const matchSearch =
-      s.title.toLowerCase().includes(search.toLowerCase()) ||
-      s.customer.toLowerCase().includes(search.toLowerCase()) ||
-      s.opportunityId.toLowerCase().includes(search.toLowerCase());
+      (s.title ?? '').toLowerCase().includes(q) ||
+      (s.customer_name ?? '').toLowerCase().includes(q) ||
+      (s.opportunity_id ?? '').toLowerCase().includes(q);
     const matchMethod = filterMethod === 'All' || s.methodology === filterMethod;
     const matchStatus = filterStatus === 'All' || s.status === filterStatus;
     return matchSearch && matchMethod && matchStatus;
   });
 
   const handleRowClick = (sow) => {
-    if (sow.isLocal) {
+    if (sow.status === 'draft') {
       router.push(`/draft/${sow.id}`);
     } else {
       router.push(`/review/${sow.id}`);
     }
   };
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div className="text-secondary">Loading…</div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -168,6 +115,8 @@ export default function AllSoWs() {
         }}
       >
         <div style={{ maxWidth: 'var(--container-lg)', margin: '0 auto' }}>
+
+          {/* Header */}
           <div
             style={{
               display: 'flex',
@@ -179,7 +128,7 @@ export default function AllSoWs() {
             <div>
               <h1 className="text-4xl font-bold mb-sm">All SoWs</h1>
               <p className="text-secondary">
-                Browse and manage all Statements of Work across your organisation.
+                Browse and manage all Statements of Work you are a collaborator on.
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => router.push('/create-new')}>
@@ -223,10 +172,10 @@ export default function AllSoWs() {
               style={{ flex: '1', minWidth: '140px' }}
             >
               <option value="All">All Statuses</option>
-              <option>Draft</option>
-              <option>In Review</option>
-              <option>Approved</option>
-              <option>Rejected</option>
+              <option value="draft">Draft</option>
+              <option value="in_review">In Review</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
             </select>
           </div>
 
@@ -234,144 +183,148 @@ export default function AllSoWs() {
             {filtered.length} SoW{filtered.length !== 1 ? 's' : ''} found
           </p>
 
-          {/* Table */}
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '1px solid var(--color-border-default)',
-                    backgroundColor: 'var(--color-bg-tertiary)',
-                  }}
-                >
-                  {[
-                    'Title',
-                    'Customer',
-                    'Methodology',
-                    'Cycle',
-                    'Value',
-                    'Status',
-                    'Updated',
-                    '',
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        padding: 'var(--spacing-md) var(--spacing-lg)',
-                        textAlign: 'left',
-                        fontSize: 'var(--font-size-sm)',
-                        fontWeight: 'var(--font-weight-semibold)',
-                        color: 'var(--color-text-secondary)',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((sow, i) => (
-                  <tr
-                    key={sow.id}
-                    onClick={() => handleRowClick(sow)}
-                    style={{
-                      borderBottom:
-                        i < filtered.length - 1 ? '1px solid var(--color-border-default)' : 'none',
-                      cursor: 'pointer',
-                      transition: 'background-color var(--transition-base)',
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)')
-                    }
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                  >
-                    <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
-                      <p className="font-medium" style={{ marginBottom: '2px' }}>
-                        {sow.title}
-                      </p>
-                      <div
-                        style={{ display: 'flex', gap: 'var(--spacing-sm)', alignItems: 'center' }}
-                      >
-                        <p className="text-xs text-tertiary">{sow.opportunityId}</p>
-                        {sow.isLocal && typeof sow.id === 'number' && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '1px 6px',
-                              borderRadius: 'var(--radius-full)',
-                              backgroundColor: 'rgba(0,120,212,0.15)',
-                              color: 'var(--color-accent-blue)',
-                              fontWeight: 'var(--font-weight-semibold)',
-                            }}
-                          >
-                            #{sow.id}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td
-                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
-                      className="text-sm text-secondary"
-                    >
-                      {sow.customer}
-                    </td>
-                    <td
-                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
-                      className="text-sm text-secondary"
-                    >
-                      {sow.methodology}
-                    </td>
-                    <td
-                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
-                      className="text-sm text-secondary"
-                    >
-                      {sow.cycle ? `Cycle ${sow.cycle}` : '—'}
-                    </td>
-                    <td
-                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
-                      className="text-sm font-medium"
-                    >
-                      {sow.dealValue}
-                    </td>
-                    <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
-                      <span
-                        style={{
-                          color: STATUS_COLOR[sow.status] || 'var(--color-text-secondary)',
-                          fontWeight: 'var(--font-weight-medium)',
-                          fontSize: 'var(--font-size-sm)',
-                        }}
-                      >
-                        ● {sow.status}
-                      </span>
-                    </td>
-                    <td
-                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
-                      className="text-sm text-secondary"
-                    >
-                      {sow.updatedAt}
-                    </td>
-                    <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
-                      <span
-                        style={{
-                          color: 'var(--color-accent-blue)',
-                          fontSize: 'var(--font-size-sm)',
-                        }}
-                      >
-                        {sow.isLocal ? 'Edit →' : 'View →'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Empty state */}
+          {sows.length === 0 && (
+            <div className="card text-center" style={{ padding: 'var(--spacing-3xl)' }}>
+              <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>📄</div>
+              <h3 className="text-xl font-semibold mb-sm">No SoWs yet</h3>
+              <p className="text-secondary" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                You haven't been added as a collaborator on any SoW.
+              </p>
+              <button className="btn btn-primary" onClick={() => router.push('/create-new')}>
+                Create New SoW
+              </button>
+            </div>
+          )}
 
-            {filtered.length === 0 && (
-              <div style={{ padding: 'var(--spacing-3xl)', textAlign: 'center' }}>
-                <p className="text-secondary">No SoWs match your search.</p>
-              </div>
-            )}
-          </div>
+          {/* Table */}
+          {sows.length > 0 && (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr
+                    style={{
+                      borderBottom: '1px solid var(--color-border-default)',
+                      backgroundColor: 'var(--color-bg-tertiary)',
+                    }}
+                  >
+                    {['Title', 'Customer', 'Methodology', 'Cycle', 'Value', 'Status', 'Updated', ''].map((h) => (
+                      <th
+                        key={h}
+                        style={{
+                          padding: 'var(--spacing-md) var(--spacing-lg)',
+                          textAlign: 'left',
+                          fontSize: 'var(--font-size-sm)',
+                          fontWeight: 'var(--font-weight-semibold)',
+                          color: 'var(--color-text-secondary)',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filtered.map((sow, i) => (
+                    <tr
+                      key={sow.id}
+                      onClick={() => handleRowClick(sow)}
+                      style={{
+                        borderBottom:
+                          i < filtered.length - 1
+                            ? '1px solid var(--color-border-default)'
+                            : 'none',
+                        cursor: 'pointer',
+                        transition: 'background-color var(--transition-base)',
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)')
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.backgroundColor = 'transparent')
+                      }
+                    >
+                      <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
+                        <p className="font-medium" style={{ marginBottom: '2px' }}>
+                          {sow.title}
+                        </p>
+                        {sow.opportunity_id && (
+                          <p className="text-xs text-tertiary">{sow.opportunity_id}</p>
+                        )}
+                      </td>
+
+                      <td
+                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        className="text-sm text-secondary"
+                      >
+                        {sow.customer_name ?? '—'}
+                      </td>
+
+                      <td
+                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        className="text-sm text-secondary"
+                      >
+                        {sow.methodology ?? '—'}
+                      </td>
+
+                      <td
+                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        className="text-sm text-secondary"
+                      >
+                        {sow.cycle != null ? `Cycle ${sow.cycle}` : '—'}
+                      </td>
+
+                      <td
+                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        className="text-sm font-medium"
+                      >
+                        {formatDealValue(sow.deal_value)}
+                      </td>
+
+                      <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
+                        <span
+                          style={{
+                            color: STATUS_COLOR[sow.status] ?? 'var(--color-text-secondary)',
+                            fontWeight: 'var(--font-weight-medium)',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                        >
+                          ● {sow.status ?? '—'}
+                        </span>
+                      </td>
+
+                      <td
+                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        className="text-sm text-secondary"
+                      >
+                        {formatDate(sow.updated_at)}
+                      </td>
+
+                      <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
+                        <span
+                          style={{
+                            color: 'var(--color-accent-blue)',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                        >
+                          {sow.status === 'draft' ? 'Edit →' : 'View →'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {filtered.length === 0 && sows.length > 0 && (
+                <div style={{ padding: 'var(--spacing-3xl)', textAlign: 'center' }}>
+                  <p className="text-secondary">No SoWs match your filters.</p>
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       </div>
     </>

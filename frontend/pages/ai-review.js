@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { useAuth } from '../lib/auth';
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
 
@@ -33,6 +34,7 @@ function validateFile(file) {
 
 export default function AIReview() {
   const router = useRouter();
+  const { token } = useAuth();
   const [file, setFile] = useState(null);
   const [methodology, setMethodology] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -95,6 +97,9 @@ export default function AIReview() {
 
       const res = await fetch('/api/sow/upload', {
         method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         body: formData,
       });
 

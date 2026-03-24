@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { useAuth } from '../lib/auth';
 
 export default function CreateNew() {
   const router = useRouter();
+  const { token } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({
@@ -31,7 +33,7 @@ export default function CreateNew() {
       // POST to backend — backend generates the canonical integer ID
       const res = await fetch('/api/sow', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {'Content-Type': 'application/json', Authorization: `Bearer ${token}`,},
         body: JSON.stringify({
           title: form.sowTitle,
           cycle: parseInt(form.cycle, 10) || 1,
