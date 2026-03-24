@@ -9,7 +9,8 @@ const nextConfig = {
    * In Docker Compose the service name is "backend" on port 8000.
    */
   async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000';
+    const backendUrl =
+      process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     return [
       {
         source: '/api/:path*',
