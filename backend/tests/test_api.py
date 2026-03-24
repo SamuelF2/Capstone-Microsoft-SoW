@@ -130,7 +130,7 @@ class TestHealth:
 
 
 class TestListSows:
-    def test_returns_documents(self, client):
+    def test_returns_documents(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -146,18 +146,18 @@ class TestListSows:
             ],
         )
 
-        resp = client.get("/api/sow")
+        resp = auth_client.get("/api/sow")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]["title"] == "SoW A"
 
-    def test_returns_empty_list(self, client):
+    def test_returns_empty_list(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetch=[])
 
-        resp = client.get("/api/sow")
+        resp = auth_client.get("/api/sow")
         assert resp.status_code == 200
         assert resp.json() == []
 
@@ -166,7 +166,7 @@ class TestListSows:
 
 
 class TestCreateSow:
-    def test_success(self, client):
+    def test_success(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -191,11 +191,11 @@ class TestCreateSow:
             },
         )
 
-        resp = client.post("/api/sow", json={"title": "New SoW"})
+        resp = auth_client.post("/api/sow", json={"title": "New SoW"})
         assert resp.status_code == 201
         assert resp.json()["title"] == "New SoW"
 
-    def test_with_content_and_metadata(self, client):
+    def test_with_content_and_metadata(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -220,7 +220,7 @@ class TestCreateSow:
             },
         )
 
-        resp = client.post(
+        resp = auth_client.post(
             "/api/sow",
             json={
                 "title": "Full SoW",
@@ -231,20 +231,20 @@ class TestCreateSow:
         assert resp.status_code == 201
         assert resp.json()["content"] == {"sections": ["scope"]}
 
-    def test_missing_title_returns_422(self, client):
-        resp = client.post("/api/sow", json={})
+    def test_missing_title_returns_422(self, auth_client):
+        resp = auth_client.post("/api/sow", json={})
         assert resp.status_code == 422
 
-    def test_empty_title_returns_422(self, client):
-        resp = client.post("/api/sow", json={"title": ""})
+    def test_empty_title_returns_422(self, auth_client):
+        resp = auth_client.post("/api/sow", json={"title": ""})
         assert resp.status_code == 422
 
-    def test_invalid_methodology_returns_400(self, client):
-        resp = client.post("/api/sow", json={"title": "Test", "methodology": "InvalidMethod"})
+    def test_invalid_methodology_returns_400(self, auth_client):
+        resp = auth_client.post("/api/sow", json={"title": "Test", "methodology": "InvalidMethod"})
         assert resp.status_code == 400
         assert "Invalid methodology" in resp.json()["detail"]
 
-    def test_valid_methodology_succeeds(self, client):
+    def test_valid_methodology_succeeds(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -269,7 +269,7 @@ class TestCreateSow:
             },
         )
 
-        resp = client.post("/api/sow", json={"title": "Test", "methodology": "Waterfall"})
+        resp = auth_client.post("/api/sow", json={"title": "Test", "methodology": "Waterfall"})
         assert resp.status_code == 201
         assert resp.json()["methodology"] == "Waterfall"
 
@@ -278,7 +278,7 @@ class TestCreateSow:
 
 
 class TestGetSow:
-    def test_found(self, client):
+    def test_found(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -294,16 +294,16 @@ class TestGetSow:
             },
         )
 
-        resp = client.get("/api/sow/1")
+        resp = auth_client.get("/api/sow/1")
         assert resp.status_code == 200
         assert resp.json()["title"] == "Found"
 
-    def test_not_found(self, client):
+    def test_not_found(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetchrow=None)
 
-        resp = client.get("/api/sow/999")
+        resp = auth_client.get("/api/sow/999")
         assert resp.status_code == 404
 
 
@@ -311,21 +311,21 @@ class TestGetSow:
 
 
 class TestDeleteSow:
-    def test_success(self, client):
+    def test_success(self, auth_client):
         import database
 
         _mock_pg_acquire(database, execute="DELETE 1")
 
-        resp = client.delete("/api/sow/1")
+        resp = auth_client.delete("/api/sow/1")
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 1
 
-    def test_not_found(self, client):
+    def test_not_found(self, auth_client):
         import database
 
         _mock_pg_acquire(database, execute="DELETE 0")
 
-        resp = client.delete("/api/sow/999")
+        resp = auth_client.delete("/api/sow/999")
         assert resp.status_code == 404
 
 
@@ -433,7 +433,7 @@ def _full_sow_row(**overrides):
 
 
 class TestGetSowByClientId:
-    def test_found(self, client):
+    def test_found(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -441,17 +441,17 @@ class TestGetSowByClientId:
             fetchrow=_full_sow_row(client_id="abc-123", title="Client SoW"),
         )
 
-        resp = client.get("/api/sow/by-client/abc-123")
+        resp = auth_client.get("/api/sow/by-client/abc-123")
         assert resp.status_code == 200
         assert resp.json()["title"] == "Client SoW"
         assert resp.json()["client_id"] == "abc-123"
 
-    def test_not_found(self, client):
+    def test_not_found(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetchrow=None)
 
-        resp = client.get("/api/sow/by-client/nonexistent")
+        resp = auth_client.get("/api/sow/by-client/nonexistent")
         assert resp.status_code == 404
 
 
@@ -459,7 +459,7 @@ class TestGetSowByClientId:
 
 
 class TestUpdateSow:
-    def test_partial_update_title(self, client):
+    def test_partial_update_title(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -467,41 +467,41 @@ class TestUpdateSow:
             fetchrow=_full_sow_row(title="Updated Title"),
         )
 
-        resp = client.patch("/api/sow/1", json={"title": "Updated Title"})
+        resp = auth_client.patch("/api/sow/1", json={"title": "Updated Title"})
         assert resp.status_code == 200
         assert resp.json()["title"] == "Updated Title"
 
-    def test_not_found(self, client):
+    def test_not_found(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetchrow=None)
 
-        resp = client.patch("/api/sow/999", json={"title": "X"})
+        resp = auth_client.patch("/api/sow/999", json={"title": "X"})
         assert resp.status_code == 404
 
-    def test_empty_payload_returns_current(self, client):
+    def test_empty_payload_returns_current(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetchrow=_full_sow_row())
 
-        resp = client.patch("/api/sow/1", json={})
+        resp = auth_client.patch("/api/sow/1", json={})
         assert resp.status_code == 200
         assert resp.json()["title"] == "Test SoW"
 
-    def test_empty_payload_not_found(self, client):
+    def test_empty_payload_not_found(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetchrow=None)
 
-        resp = client.patch("/api/sow/999", json={})
+        resp = auth_client.patch("/api/sow/999", json={})
         assert resp.status_code == 404
 
-    def test_invalid_methodology_returns_400(self, client):
-        resp = client.patch("/api/sow/1", json={"methodology": "BadMethod"})
+    def test_invalid_methodology_returns_400(self, auth_client):
+        resp = auth_client.patch("/api/sow/1", json={"methodology": "BadMethod"})
         assert resp.status_code == 400
         assert "Invalid methodology" in resp.json()["detail"]
 
-    def test_valid_methodology(self, client):
+    def test_valid_methodology(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -509,7 +509,7 @@ class TestUpdateSow:
             fetchrow=_full_sow_row(methodology="Sure Step 365"),
         )
 
-        resp = client.patch("/api/sow/1", json={"methodology": "Sure Step 365"})
+        resp = auth_client.patch("/api/sow/1", json={"methodology": "Sure Step 365"})
         assert resp.status_code == 200
         assert resp.json()["methodology"] == "Sure Step 365"
 
@@ -518,7 +518,7 @@ class TestUpdateSow:
 
 
 class TestUpdateSowStatus:
-    def test_valid_status(self, client):
+    def test_valid_status(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -526,21 +526,21 @@ class TestUpdateSowStatus:
             fetchrow=_full_sow_row(status="approved"),
         )
 
-        resp = client.put("/api/sow/1/status", json={"status": "approved"})
+        resp = auth_client.put("/api/sow/1/status", json={"status": "approved"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "approved"
 
-    def test_invalid_status_returns_400(self, client):
-        resp = client.put("/api/sow/1/status", json={"status": "bogus"})
+    def test_invalid_status_returns_400(self, auth_client):
+        resp = auth_client.put("/api/sow/1/status", json={"status": "bogus"})
         assert resp.status_code == 400
         assert "Invalid status" in resp.json()["detail"]
 
-    def test_not_found(self, client):
+    def test_not_found(self, auth_client):
         import database
 
         _mock_pg_acquire(database, fetchrow=None)
 
-        resp = client.put("/api/sow/999/status", json={"status": "draft"})
+        resp = auth_client.put("/api/sow/999/status", json={"status": "draft"})
         assert resp.status_code == 404
 
 
@@ -548,7 +548,7 @@ class TestUpdateSowStatus:
 
 
 class TestUploadSow:
-    def test_success_pdf(self, client):
+    def test_success_pdf(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -561,7 +561,7 @@ class TestUploadSow:
         )
 
         with patch("builtins.open", mock_open()):
-            resp = client.post(
+            resp = auth_client.post(
                 "/api/sow/upload",
                 data={"methodology": "Waterfall"},
                 files={"file": ("test.pdf", b"fake pdf content", "application/pdf")},
@@ -570,7 +570,7 @@ class TestUploadSow:
         assert resp.status_code == 201
         assert resp.json()["methodology"] == "Waterfall"
 
-    def test_success_docx(self, client):
+    def test_success_docx(self, auth_client):
         import database
 
         _mock_pg_acquire(
@@ -584,7 +584,7 @@ class TestUploadSow:
         )
 
         with patch("builtins.open", mock_open()):
-            resp = client.post(
+            resp = auth_client.post(
                 "/api/sow/upload",
                 data={"methodology": "Agile Sprint Delivery"},
                 files={
@@ -598,8 +598,8 @@ class TestUploadSow:
 
         assert resp.status_code == 201
 
-    def test_invalid_methodology_returns_400(self, client):
-        resp = client.post(
+    def test_invalid_methodology_returns_400(self, auth_client):
+        resp = auth_client.post(
             "/api/sow/upload",
             data={"methodology": "BadMethod"},
             files={"file": ("test.pdf", b"content", "application/pdf")},
@@ -607,8 +607,8 @@ class TestUploadSow:
         assert resp.status_code == 400
         assert "Invalid methodology" in resp.json()["detail"]
 
-    def test_invalid_extension_returns_400(self, client):
-        resp = client.post(
+    def test_invalid_extension_returns_400(self, auth_client):
+        resp = auth_client.post(
             "/api/sow/upload",
             data={"methodology": "Waterfall"},
             files={"file": ("test.txt", b"content", "text/plain")},
@@ -616,182 +616,19 @@ class TestUploadSow:
         assert resp.status_code == 400
         assert "Invalid file type" in resp.json()["detail"]
 
-    def test_missing_file_returns_422(self, client):
-        resp = client.post(
+    def test_missing_file_returns_422(self, auth_client):
+        resp = auth_client.post(
             "/api/sow/upload",
             data={"methodology": "Waterfall"},
         )
         assert resp.status_code == 422
 
-    def test_missing_methodology_returns_422(self, client):
-        resp = client.post(
+    def test_missing_methodology_returns_422(self, auth_client):
+        resp = auth_client.post(
             "/api/sow/upload",
             files={"file": ("test.pdf", b"content", "application/pdf")},
         )
         assert resp.status_code == 422
-
-
-# ── POST /api/auth/register ─────────────────────────────
-
-
-class TestRegister:
-    def test_success(self, client):
-        import database
-
-        _mock_pg_acquire(
-            database,
-            fetchval=None,
-            fetchrow={
-                "id": 1,
-                "email": "new@example.com",
-                "full_name": "New User",
-                "username": None,
-                "name": None,
-                "role": "consultant",
-                "is_active": True,
-                "created_at": "2026-01-01T00:00:00+00:00",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            },
-        )
-
-        with patch("routers.auth.hash_password", return_value="fakehash"):
-            resp = client.post(
-                "/api/auth/register",
-                json={"email": "new@example.com", "password": "securepass123"},
-            )
-
-        assert resp.status_code == 201
-        assert resp.json()["email"] == "new@example.com"
-
-    def test_duplicate_email_returns_409(self, client):
-        import database
-
-        _mock_pg_acquire(database, fetchval=1)
-
-        resp = client.post(
-            "/api/auth/register",
-            json={"email": "exists@example.com", "password": "securepass123"},
-        )
-        assert resp.status_code == 409
-
-    def test_missing_email_returns_422(self, client):
-        resp = client.post("/api/auth/register", json={"password": "securepass123"})
-        assert resp.status_code == 422
-
-    def test_short_password_returns_422(self, client):
-        resp = client.post(
-            "/api/auth/register",
-            json={"email": "a@b.com", "password": "short"},
-        )
-        assert resp.status_code == 422
-
-    def test_invalid_email_returns_422(self, client):
-        resp = client.post(
-            "/api/auth/register",
-            json={"email": "not-an-email", "password": "securepass123"},
-        )
-        assert resp.status_code == 422
-
-
-# ── POST /api/auth/login ────────────────────────────────
-
-
-class TestLogin:
-    def test_success(self, client):
-        import database
-
-        _mock_pg_acquire(
-            database,
-            fetchrow={
-                "id": 1,
-                "email": "user@example.com",
-                "hashed_password": "fakehash",
-                "full_name": "Test User",
-                "username": None,
-                "name": None,
-                "role": "consultant",
-                "is_active": True,
-                "created_at": "2026-01-01T00:00:00+00:00",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            },
-        )
-
-        with patch("routers.auth.verify_password", return_value=True):
-            resp = client.post(
-                "/api/auth/login",
-                json={"email": "user@example.com", "password": "correctpass"},
-            )
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["token_type"] == "bearer"
-        assert "access_token" in data
-        assert data["user"]["email"] == "user@example.com"
-
-    def test_wrong_password_returns_401(self, client):
-        import database
-
-        _mock_pg_acquire(
-            database,
-            fetchrow={
-                "id": 1,
-                "email": "user@example.com",
-                "hashed_password": "fakehash",
-                "full_name": "Test User",
-                "username": None,
-                "name": None,
-                "role": "consultant",
-                "is_active": True,
-                "created_at": "2026-01-01T00:00:00+00:00",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            },
-        )
-
-        with patch("routers.auth.verify_password", return_value=False):
-            resp = client.post(
-                "/api/auth/login",
-                json={"email": "user@example.com", "password": "wrongpass"},
-            )
-
-        assert resp.status_code == 401
-
-    def test_user_not_found_returns_401(self, client):
-        import database
-
-        _mock_pg_acquire(database, fetchrow=None)
-
-        resp = client.post(
-            "/api/auth/login",
-            json={"email": "nobody@example.com", "password": "whatever"},
-        )
-        assert resp.status_code == 401
-
-    def test_inactive_user_returns_403(self, client):
-        import database
-
-        _mock_pg_acquire(
-            database,
-            fetchrow={
-                "id": 1,
-                "email": "user@example.com",
-                "hashed_password": "fakehash",
-                "full_name": "Test User",
-                "username": None,
-                "name": None,
-                "role": "consultant",
-                "is_active": False,
-                "created_at": "2026-01-01T00:00:00+00:00",
-                "updated_at": "2026-01-01T00:00:00+00:00",
-            },
-        )
-
-        with patch("routers.auth.verify_password", return_value=True):
-            resp = client.post(
-                "/api/auth/login",
-                json={"email": "user@example.com", "password": "correctpass"},
-            )
-
-        assert resp.status_code == 403
 
 
 # ── Protected auth endpoints ─────────────────────────────
@@ -814,6 +651,7 @@ def _get_fake_user():
             role="consultant",
             is_active=True,
             created_at=datetime(2026, 1, 1),
+            oid="fake-entra-oid-123",
         )
     return _fake_user
 

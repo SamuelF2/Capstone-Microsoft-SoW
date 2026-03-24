@@ -5,44 +5,20 @@ import { useAuth } from '../lib/auth';
 
 export default function Login() {
   const router = useRouter();
-  const { user, login, register } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
+  const { user, loading, login } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
-
-  const [form, setForm] = useState({
-    email: '',
-    password: '',
-    fullName: '',
-    confirmPassword: '',
-  });
 
   // Already logged in — bounce to home
   useEffect(() => {
     if (user) router.replace('/');
   }, [user, router]);
 
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+  const handleLogin = async () => {
     setError(null);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!isLogin && form.password !== form.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
     setIsSubmitting(true);
     try {
-      if (isLogin) {
-        await login(form.email, form.password);
-      } else {
-        await register(form.email, form.password, form.fullName);
-      }
+      await login();
       router.replace('/');
     } catch (err) {
       setError(err.message);
@@ -50,20 +26,25 @@ export default function Login() {
     }
   };
 
-  const switchMode = () => {
-    setIsLogin(!isLogin);
-    setError(null);
-    setForm({ email: '', password: '', fullName: '', confirmPassword: '' });
-  };
-
-  const isValid = isLogin
-    ? form.email && form.password
-    : form.email && form.password && form.confirmPassword;
+  if (loading) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <p className="text-secondary">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <>
       <Head>
-        <title>{isLogin ? 'Sign In' : 'Create Account'} – Cocoon</title>
+        <title>Sign In – Cocoon</title>
       </Head>
 
       <div
@@ -121,15 +102,16 @@ export default function Login() {
             className="text-3xl font-bold text-center"
             style={{ marginBottom: 'var(--spacing-xs)' }}
           >
-            {isLogin ? 'Welcome back' : 'Create account'}
+            Welcome
           </h1>
           <p
             className="text-center text-secondary"
-            style={{ marginBottom: 'var(--spacing-2xl)', fontSize: 'var(--font-size-sm)' }}
+            style={{
+              marginBottom: 'var(--spacing-2xl)',
+              fontSize: 'var(--font-size-sm)',
+            }}
           >
-            {isLogin
-              ? 'Sign in to access your SoW workspace'
-              : 'Join Cocoon to start drafting and reviewing SoWs'}
+            Sign in with your Microsoft account to access your SoW workspace
           </p>
 
           {/* Error banner */}
@@ -149,111 +131,20 @@ export default function Login() {
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSubmit}>
-            {/* Full name — register only */}
-            {!isLogin && (
-              <div className="form-group">
-                <label className="form-label">Full Name</label>
-                <input
-                  type="text"
-                  name="fullName"
-                  value={form.fullName}
-                  onChange={handleChange}
-                  placeholder="Your name"
-                  className="form-input"
-                  autoComplete="name"
-                />
-              </div>
-            )}
-
-            <div className="form-group">
-              <label className="form-label">Email</label>
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="you@example.com"
-                className="form-input"
-                required
-                autoComplete="email"
-              />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Password</label>
-              <input
-                type="password"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                placeholder={isLogin ? 'Enter your password' : 'At least 8 characters'}
-                className="form-input"
-                required
-                autoComplete={isLogin ? 'current-password' : 'new-password'}
-                minLength={8}
-              />
-            </div>
-
-            {/* Confirm password — register only */}
-            {!isLogin && (
-              <div className="form-group">
-                <label className="form-label">Confirm Password</label>
-                <input
-                  type="password"
-                  name="confirmPassword"
-                  value={form.confirmPassword}
-                  onChange={handleChange}
-                  placeholder="Repeat your password"
-                  className="form-input"
-                  required
-                  autoComplete="new-password"
-                />
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!isValid || isSubmitting}
-              style={{
-                width: '100%',
-                marginTop: 'var(--spacing-sm)',
-                marginBottom: 'var(--spacing-lg)',
-                opacity: !isValid || isSubmitting ? 0.6 : 1,
-                fontSize: 'var(--font-size-base)',
-                padding: 'var(--spacing-md)',
-              }}
-            >
-              {isSubmitting
-                ? isLogin
-                  ? 'Signing in…'
-                  : 'Creating account…'
-                : isLogin
-                  ? 'Sign In'
-                  : 'Create Account'}
-            </button>
-          </form>
-
-          {/* Switch mode */}
-          <p className="text-center text-secondary" style={{ fontSize: 'var(--font-size-sm)' }}>
-            {isLogin ? "Don't have an account?" : 'Already have an account?'}{' '}
-            <button
-              onClick={switchMode}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                color: 'var(--color-accent-blue)',
-                fontWeight: 'var(--font-weight-semibold)',
-                fontSize: 'var(--font-size-sm)',
-                cursor: 'pointer',
-              }}
-            >
-              {isLogin ? 'Sign up' : 'Sign in'}
-            </button>
-          </p>
+          {/* Sign in button */}
+          <button
+            onClick={handleLogin}
+            className="btn btn-primary"
+            disabled={isSubmitting}
+            style={{
+              width: '100%',
+              fontSize: 'var(--font-size-base)',
+              padding: 'var(--spacing-md)',
+              opacity: isSubmitting ? 0.6 : 1,
+            }}
+          >
+            {isSubmitting ? 'Signing in...' : 'Sign in with Microsoft'}
+          </button>
         </div>
       </div>
     </>

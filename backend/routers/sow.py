@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import database
+from auth import CurrentUser
 from config import MAX_UPLOAD_SIZE_MB, UPLOAD_DIR
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from models import SoWCreate, SoWResponse, SoWStatusUpdate, SoWSummary, SoWUpdate
@@ -79,6 +80,7 @@ def _row_to_summary(row: dict) -> SoWSummary:
     summary="List all SoW documents",
 )
 async def list_sows(
+    current_user: CurrentUser,
     status_filter: str | None = Query(default=None, alias="status"),
     methodology: str | None = Query(default=None),
     cycle: int | None = Query(default=None, ge=1, le=4),
@@ -136,7 +138,7 @@ async def list_sows(
     status_code=status.HTTP_201_CREATED,
     summary="Create a new SoW document",
 )
-async def create_sow(payload: SoWCreate) -> SoWResponse:
+async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWResponse:
     """Create a new SoW and its normalised content skeleton.
 
     Flow (PDF §2.2):
@@ -222,6 +224,7 @@ async def create_sow(payload: SoWCreate) -> SoWResponse:
     summary="Upload a SoW file and create a new SoW record",
 )
 async def upload_sow(
+    current_user: CurrentUser,
     file: UploadFile = _FILE_FIELD,
     methodology: str = _METHODOLOGY_FIELD,
 ) -> SoWResponse:
@@ -320,7 +323,7 @@ async def upload_sow(
     response_model=SoWResponse,
     summary="Look up a SoW by frontend-generated client ID (legacy)",
 )
-async def get_sow_by_client_id(client_id: str) -> SoWResponse:
+async def get_sow_by_client_id(client_id: str, current_user: CurrentUser) -> SoWResponse:
     """Resolve the frontend string ``client_id`` to the full SoW record.
 
     Use this during migration if the frontend still holds a locally generated
@@ -344,7 +347,7 @@ async def get_sow_by_client_id(client_id: str) -> SoWResponse:
     response_model=SoWResponse,
     summary="Get a SoW document by its backend integer ID",
 )
-async def get_sow(sow_id: int) -> SoWResponse:
+async def get_sow(sow_id: int, current_user: CurrentUser) -> SoWResponse:
     """Return the full SoW document including ``content`` (section data)."""
     async with database.pg_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
@@ -361,7 +364,7 @@ async def get_sow(sow_id: int) -> SoWResponse:
     response_model=SoWResponse,
     summary="Partially update a SoW document",
 )
-async def update_sow(sow_id: int, payload: SoWUpdate) -> SoWResponse:
+async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser) -> SoWResponse:
     """Apply a partial update to a SoW.
 
     Only non-None fields are updated.  Designed for the frontend's auto-save —
@@ -415,7 +418,9 @@ async def update_sow(sow_id: int, payload: SoWUpdate) -> SoWResponse:
     response_model=SoWResponse,
     summary="Update SoW status",
 )
-async def update_sow_status(sow_id: int, payload: SoWStatusUpdate) -> SoWResponse:
+async def update_sow_status(
+    sow_id: int, payload: SoWStatusUpdate, current_user: CurrentUser
+) -> SoWResponse:
     """Change the workflow status of a SoW.
 
     Valid values: ``draft`` | ``in_review`` | ``approved`` | ``rejected``
@@ -454,7 +459,7 @@ async def update_sow_status(sow_id: int, payload: SoWStatusUpdate) -> SoWRespons
     status_code=status.HTTP_200_OK,
     summary="Delete a SoW document",
 )
-async def delete_sow(sow_id: int) -> dict:
+async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
     """Permanently delete a SoW and its cascaded records.
 
     Cascades to: review_results, history, collaboration.

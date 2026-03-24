@@ -1,7 +1,6 @@
 """Centralised configuration — reads env vars with safe defaults for testing."""
 
 import os
-import secrets
 
 from dotenv import load_dotenv
 
@@ -21,12 +20,9 @@ PG_PORT = os.getenv("POSTGRES_PORT", "5432")
 
 DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 
-# ── JWT / Auth ────────────────────────────────────────────────────────────────
-# In production, set JWT_SECRET_KEY to a long random value via environment.
-# A fresh random key is generated as a fallback so tests never hard-code one.
-JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_hex(32))
-JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_TOKEN_EXPIRE_MINUTES", "480"))  # 8 h
+# ── Microsoft Entra ID ───────────────────────────────────────────────────────
+AZURE_AD_CLIENT_ID: str = os.getenv("AZURE_AD_CLIENT_ID", "")
+AZURE_AD_JWKS_URL: str = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
 
 # ── File Uploads ─────────────────────────────────────────────────────────────
 UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")

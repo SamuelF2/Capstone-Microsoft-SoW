@@ -25,6 +25,9 @@
     },
     "azureAiKey": {
       "value": "${AZURE_AI_KEY}"
+    },
+    "azureAdClientId": {
+      "value": "${AZURE_AD_CLIENT_ID}"
     }
   }
 }

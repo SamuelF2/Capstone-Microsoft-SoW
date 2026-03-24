@@ -21,6 +21,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - AZURE_AI_ENDPOINT=${AZURE_AI_ENDPOINT:-}
       - AZURE_AI_KEY=${AZURE_AI_KEY:-}
+      - AZURE_AD_CLIENT_ID=${AZURE_AD_CLIENT_ID:-}
     volumes:
       - ./backend:/app
     depends_on:
@@ -42,6 +43,8 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - BACKEND_URL=http://backend:8000
+      - NEXT_PUBLIC_AZURE_CLIENT_ID=${AZURE_AD_CLIENT_ID:-}
+      - NEXT_PUBLIC_AZURE_API_SCOPE=${NEXT_PUBLIC_AZURE_API_SCOPE:-}
     volumes:
       - ./frontend:/app
       - /app/node_modules

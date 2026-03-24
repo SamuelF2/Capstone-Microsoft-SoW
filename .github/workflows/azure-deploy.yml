@@ -59,6 +59,7 @@ jobs:
       AZURE_NEO4J_PASSWORD: ${{ secrets.AZURE_NEO4J_PASSWORD }}
       AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
       AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
+      AZURE_AD_CLIENT_ID: ${{ secrets.AZURE_AD_CLIENT_ID }}
 
     steps:
       - name: Checkout code

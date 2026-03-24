@@ -14,25 +14,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
-
-
-class UserCreate(BaseModel):
-    """Payload for registering a new user."""
-
-    email: EmailStr
-    password: str = Field(min_length=8, description="Minimum 8 characters")
-    full_name: str | None = None
-    username: str | None = None
-
-
-class UserLogin(BaseModel):
-    """Payload for logging in."""
-
-    email: EmailStr
-    password: str
 
 
 class UserResponse(BaseModel):
@@ -40,27 +24,13 @@ class UserResponse(BaseModel):
 
     id: int
     email: str
-    full_name: str | None
+    full_name: str | None = None
     username: str | None = None
     name: str | None = None
     role: str
     is_active: bool
     created_at: datetime
-
-
-class Token(BaseModel):
-    """JWT bearer token returned after successful login."""
-
-    access_token: str
-    token_type: str = "bearer"
-    user: UserResponse
-
-
-class TokenData(BaseModel):
-    """Claims extracted from a decoded JWT."""
-
-    user_id: int | None = None
-    email: str | None = None
+    oid: str | None = None  # Microsoft Entra object ID
 
 
 # ── Content child-table models  (PDF §2.2.1 – 2.2.4) ─────────────────────────

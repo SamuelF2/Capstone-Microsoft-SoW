@@ -1,131 +1,139 @@
 /**
- * Auth context — wraps the entire app so any component can access the current
- * user, token, and auth actions (login / register / logout / authFetch).
+ * Auth context — Microsoft Entra ID via MSAL.js.
  *
- * Session is persisted to localStorage so it survives page refreshes.
- * Token is sent as a Bearer header on every authFetch() call.
+ * Wraps the entire app so any component can access the current user and
+ * auth actions (login / logout / authFetch).
+ *
+ * Token storage is managed by MSAL internally (sessionStorage).
+ * Access tokens are treated as opaque — only the backend validates them.
  */
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { InteractionRequiredAuthError } from '@azure/msal-browser';
+import { getMsalInstance, loginRequest, apiTokenRequest } from './msalConfig';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  // true while we're rehydrating from localStorage on first mount
   const [loading, setLoading] = useState(true);
+  const msalRef = useRef(getMsalInstance());
 
-  // ── Rehydrate session from localStorage ────────────────────────────────────
+  // ── Initialize MSAL and rehydrate session ─────────────────────────────────
   useEffect(() => {
+    const init = async () => {
+      const msal = msalRef.current;
+      if (!msal) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        await msal.initialize();
+        // Required on every page load to complete any in-progress redirect flows
+        await msal.handleRedirectPromise();
+
+        const accounts = msal.getAllAccounts();
+        if (accounts.length > 0) {
+          msal.setActiveAccount(accounts[0]);
+          // Fetch user profile from backend
+          const token = await _acquireToken(msal);
+          if (token) {
+            const res = await fetch('/api/auth/me', {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) setUser(await res.json());
+          }
+        }
+      } catch (err) {
+        console.error('MSAL init error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
+  }, []);
+
+  // ── Token acquisition (silent with interactive fallback) ──────────────────
+  const _acquireToken = async (msal) => {
+    const account = msal.getActiveAccount();
+    if (!account) return null;
+
     try {
-      const storedToken = localStorage.getItem('auth-token');
-      const storedUser = localStorage.getItem('auth-user');
-      if (storedToken && storedUser) {
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
-      }
-    } catch {
-      // corrupted storage — start fresh
-      localStorage.removeItem('auth-token');
-      localStorage.removeItem('auth-user');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // ── Persist session ─────────────────────────────────────────────────────────
-  const _saveSession = (accessToken, userRecord) => {
-    setToken(accessToken);
-    setUser(userRecord);
-    localStorage.setItem('auth-token', accessToken);
-    localStorage.setItem('auth-user', JSON.stringify(userRecord));
-  };
-
-  const _clearSession = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('auth-token');
-    localStorage.removeItem('auth-user');
-  };
-
-  // ── Auth actions ────────────────────────────────────────────────────────────
-
-  /**
-   * POST /api/auth/login — returns the Token response and saves the session.
-   * Throws a human-readable Error on failure.
-   */
-  const login = useCallback(async (email, password) => {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Login failed (${res.status})`);
-    }
-
-    const data = await res.json();
-    _saveSession(data.access_token, data.user);
-    return data;
-  }, []);
-
-  /**
-   * POST /api/auth/register — creates a new account, then auto-logs in.
-   * Throws a human-readable Error on failure.
-   */
-  const register = useCallback(
-    async (email, password, fullName) => {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, full_name: fullName || null }),
+      const response = await msal.acquireTokenSilent({
+        ...apiTokenRequest,
+        account,
       });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `Registration failed (${res.status})`);
+      return response.accessToken;
+    } catch (err) {
+      if (err instanceof InteractionRequiredAuthError) {
+        const response = await msal.acquireTokenPopup(apiTokenRequest);
+        return response.accessToken;
       }
-
-      // Auto-login after successful registration
-      return login(email, password);
-    },
-    [login]
-  );
-
-  /**
-   * POST /api/auth/logout — fires the server-side signal then clears the
-   * local session regardless of the response (JWT is stateless).
-   */
-  const logout = useCallback(async () => {
-    if (token) {
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {}); // fire and forget
+      throw err;
     }
-    _clearSession();
-  }, [token]);
+  };
+
+  /** Get an access token for API calls. */
+  const getAccessToken = useCallback(async () => {
+    const msal = msalRef.current;
+    if (!msal) return null;
+    return _acquireToken(msal);
+  }, []);
+
+  /** Sign in via Microsoft popup. */
+  const login = useCallback(async () => {
+    const msal = msalRef.current;
+    if (!msal) throw new Error('MSAL not initialized — is NEXT_PUBLIC_AZURE_CLIENT_ID set?');
+
+    const response = await msal.loginPopup(loginRequest);
+    msal.setActiveAccount(response.account);
+
+    // Acquire API access token and fetch user profile from backend
+    const token = await _acquireToken(msal);
+    const meRes = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (meRes.ok) {
+      setUser(await meRes.json());
+    } else {
+      const body = await meRes.json().catch(() => ({}));
+      throw new Error(body.detail || `Authentication failed (${meRes.status})`);
+    }
+  }, []);
+
+  /** Sign out via Microsoft popup. */
+  const logout = useCallback(async () => {
+    const msal = msalRef.current;
+    if (msal) {
+      try {
+        await msal.logoutPopup();
+      } catch {
+        // User may have closed the popup — clear local state anyway
+      }
+    }
+    setUser(null);
+  }, []);
 
   /**
-   * Convenience wrapper around fetch() that automatically attaches the
-   * Authorization header when a token is present.
+   * Fetch wrapper that automatically acquires and attaches the Entra
+   * access token as a Bearer header.
    */
   const authFetch = useCallback(
-    (url, options = {}) =>
-      fetch(url, {
+    async (url, options = {}) => {
+      const token = await getAccessToken();
+      return fetch(url, {
         ...options,
         headers: {
           ...options.headers,
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-      }),
-    [token]
+      });
+    },
+    [getAccessToken]
   );
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, authFetch }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, authFetch }}>
       {children}
     </AuthContext.Provider>
   );
