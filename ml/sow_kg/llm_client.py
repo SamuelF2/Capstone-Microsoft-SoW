@@ -1,9 +1,12 @@
 from __future__ import annotations
-import os
+
 import json
 import logging
+import os
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / ".env")
 logger = logging.getLogger(__name__)
 _client = None
@@ -18,6 +21,7 @@ def get_client():
     if not endpoint or not api_key:
         raise RuntimeError("AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY must be set in .env")
     from openai import OpenAI
+
     _client = OpenAI(base_url=endpoint, api_key=api_key)
     return _client
 
@@ -45,7 +49,8 @@ def llm_json(
     fallback: dict | list | None = None,
 ) -> dict | list:
     raw = llm_call(
-        system=system + "\n\nRespond with valid JSON only. No markdown fences, no explanation, no preamble.",
+        system=system
+        + "\n\nRespond with valid JSON only. No markdown fences, no explanation, no preamble.",
         user=user,
         temperature=temperature,
     )

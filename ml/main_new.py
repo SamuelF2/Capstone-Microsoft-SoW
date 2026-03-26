@@ -16,25 +16,25 @@ Commands:
     promote-proposals   Auto-promote proposals above an evidence threshold
 """
 
-import click
+from datetime import UTC, datetime
 from pathlib import Path
+
+import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from datetime import datetime, timezone
-
 from sow_kg.db import get_driver, init_schema
-from sow_kg.ingest_json import ingest_all_json
-from sow_kg.ingest import ingest_file, ingest_directory, get_banned_phrases
 from sow_kg.enrich import run_enrichment, semantic_search
+from sow_kg.ingest import get_banned_phrases, ingest_directory, ingest_file
+from sow_kg.ingest_json import ingest_all_json
 from sow_kg.queries import (
-    validate_sow,
     find_similar_sows,
     get_approval_chain,
     get_persona_checklist,
     get_risk_summary,
     get_rule_triggered_risks,
     print_graph_summary,
+    validate_sow,
 )
 
 console = Console()
@@ -56,10 +56,12 @@ def ingest(data_dir: str, file: str, doc_type: str, clear: bool):
     data_path = Path(data_dir)
     driver = get_driver()
 
-    console.print(Panel.fit(
-        f"[bold]SOW Knowledge Graph Ingestion[/]\nSource: [cyan]{file or data_path}[/]",
-        title="SOW-KG",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]SOW Knowledge Graph Ingestion[/]\nSource: [cyan]{file or data_path}[/]",
+            title="SOW-KG",
+        )
+    )
 
     if clear:
         console.print("[yellow]Clearing graph[/]")
@@ -158,11 +160,13 @@ def approval(value: float, margin: float):
     driver = get_driver()
     result = get_approval_chain(driver, value, margin)
 
-    console.print(Panel.fit(
-        f"Deal Value: [cyan]${value:,.0f}[/]  |  Margin: [cyan]{margin}%[/]\n"
-        f"ESAP Level: [bold yellow]{result['level_id'].upper()}[/]",
-        title="Deal Approval Chain",
-    ))
+    console.print(
+        Panel.fit(
+            f"Deal Value: [cyan]${value:,.0f}[/]  |  Margin: [cyan]{margin}%[/]\n"
+            f"ESAP Level: [bold yellow]{result['level_id'].upper()}[/]",
+            title="Deal Approval Chain",
+        )
+    )
 
     t = Table()
     t.add_column("Stage")
@@ -176,9 +180,19 @@ def approval(value: float, margin: float):
 
 
 @cli.command()
-@click.option("--role", required=True, type=click.Choice([
-    "solution-architect", "delivery-manager", "cpl", "cdp", "sqa-reviewer",
-]))
+@click.option(
+    "--role",
+    required=True,
+    type=click.Choice(
+        [
+            "solution-architect",
+            "delivery-manager",
+            "cpl",
+            "cdp",
+            "sqa-reviewer",
+        ]
+    ),
+)
 def checklist(role: str):
     """Print review checklist for a persona."""
     driver = get_driver()
@@ -190,7 +204,12 @@ def checklist(role: str):
     t.add_column("Category")
     t.add_column("Item")
     for item in items:
-        t.add_row(item["id"], "Required" if item["required"] else "Optional", item["category"], item["item"])
+        t.add_row(
+            item["id"],
+            "Required" if item["required"] else "Optional",
+            item["category"],
+            item["item"],
+        )
     console.print(t)
     driver.close()
 
@@ -246,7 +265,9 @@ def similar(sow_id: str):
     t.add_column("Shared Clauses", justify="right")
     t.add_column("Outcome")
     for r in results:
-        t.add_row(r["title"], r["methodology"], str(r["shared_clauses"]), r["outcome"] or "unlabeled")
+        t.add_row(
+            r["title"], r["methodology"], str(r["shared_clauses"]), r["outcome"] or "unlabeled"
+        )
     console.print(t)
     driver.close()
 
@@ -263,10 +284,20 @@ def enrich(batch_size: int, force: bool):
 
 @cli.command()
 @click.argument("query")
-@click.option("--index", default="section_embeddings", show_default=True, type=click.Choice([
-    "section_embeddings", "deliverable_embeddings",
-    "risk_embeddings", "rule_embeddings", "clausetype_embeddings",
-]))
+@click.option(
+    "--index",
+    default="section_embeddings",
+    show_default=True,
+    type=click.Choice(
+        [
+            "section_embeddings",
+            "deliverable_embeddings",
+            "risk_embeddings",
+            "rule_embeddings",
+            "clausetype_embeddings",
+        ]
+    ),
+)
 @click.option("--top-k", default=5, show_default=True)
 def search(query: str, index: str, top_k: int):
     """Semantic similarity search across embedded nodes."""
@@ -285,8 +316,13 @@ def search(query: str, index: str, top_k: int):
     t.add_column("Preview")
     for r in results:
         props = r["props"]
-        preview = (props.get("content") or props.get("description") or
-                   props.get("title") or props.get("display_name") or "")
+        preview = (
+            props.get("content")
+            or props.get("description")
+            or props.get("title")
+            or props.get("display_name")
+            or ""
+        )
         node_id = props.get("id") or props.get("rule_id") or props.get("type_id") or ""
         t.add_row(f"{r['score']:.4f}", node_id, preview[:120])
     console.print(t)
@@ -294,7 +330,9 @@ def search(query: str, index: str, top_k: int):
 
 
 @cli.command("schema-proposals")
-@click.option("--status", default="all", type=click.Choice(["all", "pending", "accepted", "rejected"]))
+@click.option(
+    "--status", default="all", type=click.Choice(["all", "pending", "accepted", "rejected"])
+)
 @click.option("--kind", default=None, type=click.Choice(["node", "edge", "section_type"]))
 def schema_proposals(status: str, kind: str):
     """List schema evolution proposals from LLM ingestion."""
@@ -360,7 +398,9 @@ def schema_proposals(status: str, kind: str):
 @click.option("--id", "proposal_id", required=True, help="Proposal ID (from schema-proposals)")
 @click.option("--accept", "action", flag_value="accept")
 @click.option("--reject", "action", flag_value="reject")
-@click.option("--tag", multiple=True, help="Add tags (repeatable: --tag compliance --tag financial)")
+@click.option(
+    "--tag", multiple=True, help="Add tags (repeatable: --tag compliance --tag financial)"
+)
 @click.option("--note", default=None, help="Reviewer note")
 @click.option("--reviewed-by", default="human", show_default=True)
 def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, reviewed_by: str):
@@ -370,7 +410,7 @@ def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, review
         return
 
     driver = get_driver()
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
 
     with driver.session() as session:
         existing = session.run(
@@ -399,7 +439,9 @@ def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, review
             set_parts.append("p.note=$note")
             params["note"] = note
 
-        session.run(f"MATCH (p:SchemaProposal {{proposal_id: $pid}}) SET {', '.join(set_parts)}", **params)
+        session.run(
+            f"MATCH (p:SchemaProposal {{proposal_id: $pid}}) SET {', '.join(set_parts)}", **params
+        )
 
     label = existing["label"]
     action_str = f"[green]{action}ed[/]" if action else "[dim]tagged[/]"
@@ -409,16 +451,19 @@ def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, review
 
 
 @cli.command("promote-proposals")
-@click.option("--min-evidence", default=3, show_default=True, help="Min documents proposing same label")
+@click.option(
+    "--min-evidence", default=3, show_default=True, help="Min documents proposing same label"
+)
 @click.option("--min-confidence", default=0.75, show_default=True)
 @click.option("--dry-run", is_flag=True)
 def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
     """Auto-promote proposals that appear across multiple documents above confidence threshold."""
     driver = get_driver()
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
 
     with driver.session() as session:
-        candidates = session.run("""
+        candidates = session.run(
+            """
             MATCH (p:SchemaProposal)
             WHERE p.accepted = false
               AND coalesce(p.rejected, false) = false
@@ -428,7 +473,10 @@ def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
                    p.kind AS kind, p.usage_count AS uses,
                    p.confidence AS confidence
             ORDER BY p.usage_count DESC, p.confidence DESC
-        """, min_evidence=min_evidence, min_conf=min_confidence).data()
+        """,
+            min_evidence=min_evidence,
+            min_conf=min_confidence,
+        ).data()
 
     if not candidates:
         console.print("[dim]No candidates meet the promotion threshold[/]")
@@ -450,7 +498,8 @@ def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
             for c in candidates:
                 session.run(
                     "MATCH (p:SchemaProposal {proposal_id: $pid}) SET p.accepted=true, p.reviewed_by='auto-promote', p.reviewed_at=$ts",
-                    pid=c["pid"], ts=ts,
+                    pid=c["pid"],
+                    ts=ts,
                 )
         console.print(f"[bold green]✓ {len(candidates)} proposals promoted[/]")
     else:
@@ -458,17 +507,22 @@ def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
 
     driver.close()
 
+
 @cli.command()
 @click.argument("query")
 @click.option("--sow-id", default=None, help="Scope context to a specific SOW")
 @click.option("--top-k", default=5, show_default=True)
-@click.option("--hop-depth", default=2, show_default=True, help="Graph traversal hops from anchor nodes")
-@click.option("--context-only", is_flag=True, help="Print retrieved context without calling the LLM")
+@click.option(
+    "--hop-depth", default=2, show_default=True, help="Graph traversal hops from anchor nodes"
+)
+@click.option(
+    "--context-only", is_flag=True, help="Print retrieved context without calling the LLM"
+)
 def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bool):
     """Context-aware SOW authoring assistant powered by GraphRAG."""
     from sentence_transformers import SentenceTransformer
-    from sow_kg.graph_rag import retrieve
     from sow_kg.assist import assist as _assist
+    from sow_kg.graph_rag import retrieve
 
     driver = get_driver()
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
@@ -497,7 +551,12 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
             t.add_column("Preview")
             for s in ctx.sections:
                 conf = f"{s.get('llm_confidence', 0):.2f}" if s.get("llm_confidence") else "—"
-                t.add_row(s.get("heading", ""), s.get("section_type", ""), conf, (s.get("content") or "")[:80])
+                t.add_row(
+                    s.get("heading", ""),
+                    s.get("section_type", ""),
+                    conf,
+                    (s.get("content") or "")[:80],
+                )
             console.print(t)
 
         if ctx.rules:
@@ -506,7 +565,11 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
             t.add_column("Category")
             t.add_column("Description")
             for r in ctx.rules:
-                t.add_row(r.get("severity", "").upper(), r.get("category", ""), (r.get("description") or "")[:80])
+                t.add_row(
+                    r.get("severity", "").upper(),
+                    r.get("category", ""),
+                    (r.get("description") or "")[:80],
+                )
             console.print(t)
 
         if ctx.banned_phrases:
@@ -542,6 +605,7 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
     )
 
     driver.close()
+
 
 if __name__ == "__main__":
     cli()

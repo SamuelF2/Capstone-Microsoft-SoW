@@ -1,29 +1,38 @@
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+
 from neo4j import Driver
+
 logger = logging.getLogger(__name__)
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
 
 @dataclass
 class RetrievedContext:
     query: str
-    sow_id: Optional[str]
+    sow_id: str | None
     sections: list[dict] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
     banned_phrases: list[dict] = field(default_factory=list)
     risks: list[dict] = field(default_factory=list)
     deliverables: list[dict] = field(default_factory=list)
     similar_sections: list[dict] = field(default_factory=list)
-    methodology: Optional[str] = None
+    methodology: str | None = None
     schema_proposals: list[dict] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not any([
-            self.sections, self.rules, self.banned_phrases,
-            self.risks, self.deliverables, self.similar_sections,
-        ])
+        return not any(
+            [
+                self.sections,
+                self.rules,
+                self.banned_phrases,
+                self.risks,
+                self.deliverables,
+                self.similar_sections,
+            ]
+        )
 
     def to_prompt_context(self) -> str:
         parts: list[str] = []
@@ -53,7 +62,7 @@ class RetrievedContext:
         if self.banned_phrases:
             parts.append("## Banned Phrases in Scope")
             for b in self.banned_phrases:
-                parts.append(f"- \"{b.get('phrase')}\" → {b.get('suggestion', 'avoid this term')}")
+                parts.append(f'- "{b.get("phrase")}" → {b.get("suggestion", "avoid this term")}')
 
         if self.risks:
             parts.append("## Identified Risks")
@@ -87,7 +96,7 @@ def retrieve(
     driver: Driver,
     model,
     query: str,
-    sow_id: Optional[str] = None,
+    sow_id: str | None = None,
     top_k: int = 5,
     hop_depth: int = 2,
 ) -> RetrievedContext:
@@ -122,7 +131,7 @@ def retrieve(
         if depth == 0:
             anchor_section_ids = list(new_section_ids)
 
-    ctx.sections = _fetch_sections(driver, list(all_section_ids)[:top_k * 2])
+    ctx.sections = _fetch_sections(driver, list(all_section_ids)[: top_k * 2])
     ctx.rules = _fetch_rules(driver, list(all_rule_ids)[:12])
     ctx.banned_phrases = _fetch_banned_phrases(driver, list(all_banned_ids))
     ctx.risks = _fetch_risks(driver, list(all_risk_ids)[:8])
@@ -133,7 +142,9 @@ def retrieve(
     return ctx
 
 
-def _vector_search_sections(driver: Driver, query_vec: list[float], sow_id: Optional[str], top_k: int) -> list[str]:
+def _vector_search_sections(
+    driver: Driver, query_vec: list[float], sow_id: str | None, top_k: int
+) -> list[str]:
     cypher = """
         CALL db.index.vector.queryNodes('section_embeddings', $k, $vec)
         YIELD node, score
@@ -153,7 +164,8 @@ def _vector_search_rules(driver: Driver, query_vec: list[float], top_k: int) -> 
     with driver.session() as session:
         rows = session.run(
             "CALL db.index.vector.queryNodes('rule_embeddings', $k, $vec) YIELD node, score WHERE score > 0.5 RETURN node.rule_id AS id",
-            k=top_k, vec=query_vec,
+            k=top_k,
+            vec=query_vec,
         ).data()
     return [r["id"] for r in rows if r["id"]]
 
@@ -162,7 +174,8 @@ def _vector_search_clauses(driver: Driver, query_vec: list[float], top_k: int) -
     with driver.session() as session:
         rows = session.run(
             "CALL db.index.vector.queryNodes('clausetype_embeddings', $k, $vec) YIELD node, score WHERE score > 0.5 RETURN node.type_id AS id",
-            k=top_k, vec=query_vec,
+            k=top_k,
+            vec=query_vec,
         ).data()
     return [r["id"] for r in rows if r["id"]]
 
@@ -170,7 +183,7 @@ def _vector_search_clauses(driver: Driver, query_vec: list[float], top_k: int) -
 def _expand_from_sections(
     driver: Driver,
     section_ids: list[str],
-    sow_id: Optional[str],
+    sow_id: str | None,
 ) -> tuple[set, set, set, set, set]:
     if not section_ids:
         return set(), set(), set(), set(), set()
@@ -272,7 +285,7 @@ def _fetch_deliverables(driver: Driver, ids: list[str]) -> list[dict]:
         ).data()
 
 
-def _get_methodology(driver: Driver, sow_id: str) -> Optional[str]:
+def _get_methodology(driver: Driver, sow_id: str) -> str | None:
     with driver.session() as session:
         row = session.run(
             "MATCH (s:SOW {id: $sow_id})-[:USES_METHODOLOGY]->(m:Methodology) RETURN m.name AS name LIMIT 1",
@@ -284,7 +297,7 @@ def _get_methodology(driver: Driver, sow_id: str) -> Optional[str]:
 def _fetch_cross_sow_sections(
     driver: Driver,
     anchor_ids: list[str],
-    exclude_sow_id: Optional[str],
+    exclude_sow_id: str | None,
     limit: int,
 ) -> list[dict]:
     if not anchor_ids:
@@ -302,5 +315,7 @@ def _fetch_cross_sow_sections(
                    sow.title AS sow_title, ct.type_id AS section_type
             LIMIT $limit
             """,
-            anchor_ids=anchor_ids, exclude=exclude_sow_id, limit=limit,
+            anchor_ids=anchor_ids,
+            exclude=exclude_sow_id,
+            limit=limit,
         ).data()

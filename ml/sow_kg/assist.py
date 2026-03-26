@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 import logging
-from typing import Optional
+
 from neo4j import Driver
+
 from .graph_rag import RetrievedContext, retrieve
-from .llm_client import llm_call
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an expert Microsoft SOW (Statement of Work) authoring assistant with deep knowledge of Microsoft's SDMPlus/MCEM compliance standards, ESAP approval requirements, and SOW best practices.
@@ -20,7 +22,9 @@ Your responses must:
 When the context contains banned phrases or validation rules, always surface them before providing suggestions."""
 
 
-def build_messages(query: str, ctx: RetrievedContext, history: Optional[list[dict]] = None) -> list[dict]:
+def build_messages(
+    query: str, ctx: RetrievedContext, history: list[dict] | None = None
+) -> list[dict]:
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     if history:
@@ -37,8 +41,8 @@ def assist(
     driver: Driver,
     model,
     query: str,
-    sow_id: Optional[str] = None,
-    history: Optional[list[dict]] = None,
+    sow_id: str | None = None,
+    history: list[dict] | None = None,
     top_k: int = 5,
     hop_depth: int = 2,
     max_tokens: int = 2048,
@@ -47,6 +51,7 @@ def assist(
     messages = build_messages(query, ctx, history)
 
     from .llm_client import get_client, get_model
+
     client = get_client()
     response = client.chat.completions.create(
         model=get_model(),
@@ -69,9 +74,26 @@ def assist(
             "sow_id": sow_id,
         },
         "retrieved": {
-            "sections": [{"id": s.get("id"), "heading": s.get("heading"), "type": s.get("section_type")} for s in ctx.sections],
-            "rules": [{"id": r.get("rule_id"), "description": r.get("description"), "severity": r.get("severity")} for r in ctx.rules],
+            "sections": [
+                {"id": s.get("id"), "heading": s.get("heading"), "type": s.get("section_type")}
+                for s in ctx.sections
+            ],
+            "rules": [
+                {
+                    "id": r.get("rule_id"),
+                    "description": r.get("description"),
+                    "severity": r.get("severity"),
+                }
+                for r in ctx.rules
+            ],
             "banned_phrases": ctx.banned_phrases,
-            "risks": [{"id": r.get("id"), "description": r.get("description"), "severity": r.get("severity")} for r in ctx.risks],
+            "risks": [
+                {
+                    "id": r.get("id"),
+                    "description": r.get("description"),
+                    "severity": r.get("severity"),
+                }
+                for r in ctx.risks
+            ],
         },
     }
