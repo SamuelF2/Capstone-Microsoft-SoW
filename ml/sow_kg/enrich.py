@@ -178,7 +178,7 @@ def enrich_label(
             )
 
             with driver.session() as session:
-                for row, vec in zip(batch, vecs, strict=False):
+                for row, vec in zip(batch, vecs, strict=True):
                     session.run(
                         write_query,
                         id=row["id"],

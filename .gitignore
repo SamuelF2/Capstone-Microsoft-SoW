@@ -52,6 +52,11 @@ Thumbs.db
 Desktop.ini
 
 # ======================
+# Uploads
+# ======================
+uploads/
+
+# ======================
 # Testing / Coverage
 # ======================
 .coverage
@@ -62,3 +67,9 @@ htmlcov/
 # Ruff / Linting
 # ======================
 .ruff_cache/
+
+# ======================
+# Claude Code
+# ======================
+CLAUDE.md
+.claude/
