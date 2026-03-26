@@ -2,9 +2,10 @@
 Neo4j connection and schema initialization for SOW Knowledge Graph.
 """
 
-from neo4j import GraphDatabase
-from dotenv import load_dotenv
 import os
+
+from dotenv import load_dotenv
+from neo4j import GraphDatabase
 
 load_dotenv()
 
@@ -30,18 +31,15 @@ SCHEMA_QUERIES = [
     "CREATE CONSTRAINT checklist_item_id IF NOT EXISTS FOR (n:ChecklistItem) REQUIRE n.item_id IS UNIQUE",
     "CREATE CONSTRAINT term_text IF NOT EXISTS FOR (n:Term) REQUIRE n.text IS UNIQUE",
     "CREATE CONSTRAINT clause_type_id IF NOT EXISTS FOR (n:ClauseType) REQUIRE n.type_id IS UNIQUE",
-
     # Full-text indexes for semantic search
     "CREATE FULLTEXT INDEX sow_content IF NOT EXISTS FOR (n:SOW) ON EACH [n.title, n.executive_summary]",
     "CREATE FULLTEXT INDEX section_content IF NOT EXISTS FOR (n:Section) ON EACH [n.content]",
     "CREATE FULLTEXT INDEX deliverable_content IF NOT EXISTS FOR (n:Deliverable) ON EACH [n.title, n.acceptance_criteria]",
     "CREATE FULLTEXT INDEX risk_content IF NOT EXISTS FOR (n:Risk) ON EACH [n.description, n.mitigation]",
-
     # Range index for numeric queries (deal value, margin for risk prediction)
     "CREATE INDEX sow_deal_value IF NOT EXISTS FOR (n:SOW) ON (n.deal_value)",
     "CREATE INDEX sow_margin IF NOT EXISTS FOR (n:SOW) ON (n.estimated_margin)",
     "CREATE INDEX risk_severity IF NOT EXISTS FOR (n:Risk) ON (n.severity)",
-
     # Indexes for incremental embedding
     # embed_hash lets enrich.py skip nodes whose content hasn't changed
     "CREATE INDEX section_embed_hash    IF NOT EXISTS FOR (n:Section)     ON (n.embed_hash)",
