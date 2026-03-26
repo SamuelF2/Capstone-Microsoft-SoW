@@ -1,0 +1,385 @@
+project_id,year,resource,role_description,bill_rate,cost_rate,total_hours,labor_revenue,labor_cost,labor_margin
+PROJ-0001,2023,Sr. Project Manager,,227.89,113.94,237.5,54123.88,27060.75,27063.13
+PROJ-0001,2024,Sr. Project Manager,,227.89,113.94,217.3,49520.5,24759.16,24761.34
+PROJ-0001,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",359.69,161.86,374.4,134667.94,60600.38,74067.56
+PROJ-0001,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",359.69,161.86,545.1,196067.02,88229.89,107837.13
+PROJ-0001,2023,Sr. Data Scientist,,333.99,156.98,489.8,163588.3,76888.8,86699.5
+PROJ-0001,2024,Sr. Data Scientist,,333.99,156.98,573.6,191576.66,90043.73,101532.93
+PROJ-0001,2023,Data Scientist,,282.43,141.22,472.1,133335.2,66669.96,66665.24
+PROJ-0001,2024,Data Scientist,,282.43,141.22,731.9,206710.52,103358.92,103351.6
+PROJ-0001,2023,Data Scientist,,291.02,145.51,525.7,152989.21,76494.61,76494.6
+PROJ-0001,2024,Data Scientist,,291.02,145.51,652.5,189890.55,94945.27,94945.28
+PROJ-0001,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",263.21,131.6,539.1,141896.51,70945.56,70950.95
+PROJ-0001,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",263.21,131.6,725.8,191037.82,95515.28,95522.54
+PROJ-0001,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",228.19,118.66,433.4,98897.55,51427.24,47470.31
+PROJ-0001,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",228.19,118.66,667.4,152294.01,79193.68,73100.33
+PROJ-0001,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",237.2,123.34,528.1,125265.32,65135.85,60129.47
+PROJ-0001,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",237.2,123.34,683.5,162126.2,84302.89,77823.31
+PROJ-0002,2023,Sr. Project Manager,,263.0,131.5,267.8,70431.4,35215.7,35215.7
+PROJ-0002,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",353.27,158.97,285.3,100787.93,45354.14,55433.79
+PROJ-0002,2023,Sr. Data Scientist,,304.59,143.16,670.1,204105.76,95931.52,108174.24
+PROJ-0002,2023,Data Scientist,,312.93,156.47,560.3,175334.68,87670.14,87664.54
+PROJ-0002,2023,Data Scientist,,316.66,158.33,598.8,189616.01,94808.0,94808.01
+PROJ-0002,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",257.73,128.87,655.5,168942.02,84474.29,84467.73
+PROJ-0002,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",243.83,126.79,668.6,163024.74,84771.79,78252.95
+PROJ-0002,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",250.94,130.49,526.0,131994.44,68637.74,63356.7
+PROJ-0003,2023,Program Director,,412.27,185.52,7.1,2927.12,1317.19,1609.93
+PROJ-0003,2024,Program Director,,412.27,185.52,395.0,162846.65,73280.4,89566.25
+PROJ-0003,2025,Program Director,,412.27,185.52,106.5,43906.75,19757.88,24148.87
+PROJ-0003,2023,Program Manager,,289.67,144.84,27.2,7879.02,3939.65,3939.37
+PROJ-0003,2024,Program Manager,,289.67,144.84,970.8,281211.64,140610.67,140600.97
+PROJ-0003,2025,Program Manager,,289.67,144.84,591.5,171339.81,85672.86,85666.95
+PROJ-0003,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",383.56,172.6,21.0,8054.76,3624.6,4430.16
+PROJ-0003,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",383.56,172.6,1655.1,634830.16,285670.26,349159.9
+PROJ-0003,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",383.56,172.6,547.2,209884.03,94446.72,115437.31
+PROJ-0003,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",338.95,152.53,32.1,10880.3,4896.21,5984.09
+PROJ-0003,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",338.95,152.53,2047.9,694135.7,312366.19,381769.51
+PROJ-0003,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",338.95,152.53,620.8,210420.16,94690.62,115729.54
+PROJ-0003,2023,Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",283.5,136.08,29.9,8476.65,4068.79,4407.86
+PROJ-0003,2024,Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",283.5,136.08,1850.3,524560.05,251788.82,272771.23
+PROJ-0003,2025,Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",283.5,136.08,782.1,221725.35,106428.17,115297.18
+PROJ-0003,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",303.64,151.82,30.4,9230.66,4615.33,4615.33
+PROJ-0003,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",303.64,151.82,2062.6,626287.86,313143.93,313143.93
+PROJ-0003,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",303.64,151.82,720.4,218742.26,109371.13,109371.13
+PROJ-0003,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",256.27,128.13,31.3,8021.25,4010.47,4010.78
+PROJ-0003,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",256.27,128.13,1604.8,411262.1,205623.02,205639.08
+PROJ-0003,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",256.27,128.13,733.0,187845.91,93919.29,93926.62
+PROJ-0003,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",261.56,130.78,38.1,9965.44,4982.72,4982.72
+PROJ-0003,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",261.56,130.78,1616.6,422837.9,211418.95,211418.95
+PROJ-0003,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",261.56,130.78,707.0,184922.92,92461.46,92461.46
+PROJ-0003,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",233.23,121.28,30.4,7090.19,3686.91,3403.28
+PROJ-0003,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",233.23,121.28,1561.3,364142.0,189354.46,174787.54
+PROJ-0003,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",233.23,121.28,780.7,182082.66,94683.3,87399.36
+PROJ-0003,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",273.25,142.09,31.2,8525.4,4433.21,4092.19
+PROJ-0003,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",273.25,142.09,1942.0,530651.5,275938.78,254712.72
+PROJ-0003,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",273.25,142.09,797.8,217998.85,113359.4,104639.45
+PROJ-0003,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",267.79,139.25,38.9,10417.03,5416.82,5000.21
+PROJ-0003,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",267.79,139.25,1735.6,464776.32,241682.3,223094.02
+PROJ-0003,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",267.79,139.25,743.5,199101.87,103532.38,95569.49
+PROJ-0003,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",237.36,123.43,39.4,9351.98,4863.14,4488.84
+PROJ-0003,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",237.36,123.43,1925.6,457060.42,237676.81,219383.61
+PROJ-0003,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",237.36,123.43,768.7,182458.63,94880.64,87577.99
+PROJ-0003,2023,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",192.86,96.43,33.9,6537.95,3268.98,3268.97
+PROJ-0003,2024,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",192.86,96.43,1930.4,372296.94,186148.47,186148.47
+PROJ-0003,2025,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",192.86,96.43,618.6,119303.2,59651.6,59651.6
+PROJ-0003,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",135.3,74.42,39.4,5330.82,2932.15,2398.67
+PROJ-0003,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",135.3,74.42,1770.4,239535.12,131753.17,107781.95
+PROJ-0003,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",135.3,74.42,737.0,99716.1,54847.54,44868.56
+PROJ-0003,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",153.78,84.58,32.6,5013.23,2757.31,2255.92
+PROJ-0003,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",153.78,84.58,1864.9,286784.32,157733.24,129051.08
+PROJ-0003,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",153.78,84.58,782.5,120332.85,66183.85,54149.0
+PROJ-0003,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",99.55,57.74,33.5,3334.92,1934.29,1400.63
+PROJ-0003,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",99.55,57.74,1656.6,164914.53,95652.08,69262.45
+PROJ-0003,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",99.55,57.74,635.6,63273.98,36699.54,26574.44
+PROJ-0003,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.05,79.49,37.1,5084.56,2949.08,2135.48
+PROJ-0003,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.05,79.49,2061.8,282569.69,163892.48,118677.21
+PROJ-0003,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.05,79.49,733.9,100581.0,58337.71,42243.29
+PROJ-0003,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",146.91,85.21,32.2,4730.5,2743.76,1986.74
+PROJ-0003,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",146.91,85.21,1657.6,243518.02,141244.1,102273.92
+PROJ-0003,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",146.91,85.21,643.3,94507.2,54815.59,39691.61
+PROJ-0003,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",103.78,60.19,39.9,4140.82,2401.58,1739.24
+PROJ-0003,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",103.78,60.19,1676.9,174028.68,100932.61,73096.07
+PROJ-0003,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",103.78,60.19,691.7,71784.63,41633.42,30151.21
+PROJ-0004,2023,Sr. Project Manager,,229.59,114.8,174.6,40086.41,20044.08,20042.33
+PROJ-0004,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",365.94,164.67,548.5,200718.09,90321.49,110396.6
+PROJ-0004,2023,Sr. Product Manager,,313.31,150.39,520.8,163171.85,78323.11,84848.74
+PROJ-0004,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",314.57,157.28,671.7,211296.67,105644.98,105651.69
+PROJ-0004,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",293.42,146.71,554.8,162789.42,81394.71,81394.71
+PROJ-0004,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",209.75,109.07,639.9,134219.02,69793.89,64425.13
+PROJ-0004,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",211.6,110.03,511.0,108127.6,56225.33,51902.27
+PROJ-0004,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",252.44,131.27,531.2,134096.13,69730.62,64365.51
+PROJ-0004,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",121.68,70.57,544.2,66218.26,38404.19,27814.07
+PROJ-0004,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",106.88,61.99,512.5,54776.0,31769.88,23006.12
+PROJ-0005,2023,Program Director,,387.61,174.42,228.5,88568.89,39854.97,48713.92
+PROJ-0005,2024,Program Director,,387.61,174.42,191.7,74304.84,33436.31,40868.53
+PROJ-0005,2023,Sr. Program Manager,,310.04,148.82,813.0,252062.52,120990.66,131071.86
+PROJ-0005,2024,Sr. Program Manager,,310.04,148.82,771.8,239288.87,114859.28,124429.59
+PROJ-0005,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",339.98,152.99,897.7,305200.05,137339.12,167860.93
+PROJ-0005,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",339.98,152.99,963.9,327706.72,147467.06,180239.66
+PROJ-0005,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",377.45,169.85,1095.0,413307.75,185985.75,227322.0
+PROJ-0005,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",377.45,169.85,1252.1,472605.14,212669.18,259935.96
+PROJ-0005,2023,Sr. Product Manager,,280.52,134.65,1171.9,328741.39,157796.34,170945.05
+PROJ-0005,2024,Sr. Product Manager,,280.52,134.65,694.5,194821.14,93514.43,101306.71
+PROJ-0005,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",266.75,133.38,1603.7,427786.98,213901.51,213885.47
+PROJ-0005,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",266.75,133.38,1320.5,352243.38,176128.29,176115.09
+PROJ-0005,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",298.03,149.01,1413.0,421116.39,210551.13,210565.26
+PROJ-0005,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",298.03,149.01,1394.0,415453.82,207719.94,207733.88
+PROJ-0005,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",272.43,136.22,1496.8,407773.22,203894.1,203879.12
+PROJ-0005,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",272.43,136.22,1308.7,356529.14,178271.11,178258.03
+PROJ-0005,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",268.42,139.58,1613.5,433095.67,225212.33,207883.34
+PROJ-0005,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",268.42,139.58,1348.4,361937.53,188209.67,173727.86
+PROJ-0005,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",263.4,136.97,1552.3,408875.82,212618.53,196257.29
+PROJ-0005,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",263.4,136.97,1415.0,372711.0,193812.55,178898.45
+PROJ-0005,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",238.85,124.2,1537.3,367184.1,190932.66,176251.44
+PROJ-0005,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",238.85,124.2,1221.2,291683.62,151673.04,140010.58
+PROJ-0005,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",269.8,140.3,1564.9,422210.02,219555.47,202654.55
+PROJ-0005,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",269.8,140.3,1451.4,391587.72,203631.42,187956.3
+PROJ-0005,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",245.48,127.65,1300.7,319295.84,166034.36,153261.48
+PROJ-0005,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",245.48,127.65,1181.1,289936.43,150767.42,139169.01
+PROJ-0005,2023,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",194.09,97.05,1590.8,308758.37,154387.14,154371.23
+PROJ-0005,2024,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",194.09,97.05,1483.7,287971.33,143993.08,143978.25
+PROJ-0005,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",169.68,93.32,1389.5,235770.36,129668.14,106102.22
+PROJ-0005,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",169.68,93.32,1514.4,256963.39,141323.81,115639.58
+PROJ-0005,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",155.53,85.54,1603.9,249454.57,137197.61,112256.96
+PROJ-0005,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",155.53,85.54,1336.3,207834.74,114307.1,93527.64
+PROJ-0005,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",137.81,75.8,1499.0,206577.19,113624.2,92952.99
+PROJ-0005,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",137.81,75.8,1315.6,181302.84,99722.48,81580.36
+PROJ-0005,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",97.29,56.43,1437.0,139805.73,81089.91,58715.82
+PROJ-0005,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",97.29,56.43,1308.3,127284.51,73827.37,53457.14
+PROJ-0005,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",95.0,55.1,1349.9,128240.5,74379.49,53861.01
+PROJ-0005,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",95.0,55.1,1445.7,137341.5,79658.07,57683.43
+PROJ-0005,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",101.86,59.08,1446.9,147381.23,85482.85,61898.38
+PROJ-0005,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",101.86,59.08,1437.7,146444.12,84939.32,61504.8
+PROJ-0005,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",127.37,73.87,1482.4,188813.29,109504.89,79308.4
+PROJ-0005,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",127.37,73.87,1257.7,160193.25,92906.3,67286.95
+PROJ-0005,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",134.7,78.13,1391.8,187475.46,108741.33,78734.13
+PROJ-0005,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",134.7,78.13,1315.9,177251.73,102811.27,74440.46
+PROJ-0006,2025,Sr. Project Manager,,253.08,126.54,127.7,32318.32,16159.16,16159.16
+PROJ-0006,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",342.99,154.35,204.0,69969.96,31487.4,38482.56
+PROJ-0006,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",289.54,144.77,198.2,57386.83,28693.41,28693.42
+PROJ-0007,2024,Sr. Project Manager,,238.61,119.31,339.5,81008.1,40505.75,40502.35
+PROJ-0007,2025,Sr. Project Manager,,238.61,119.31,357.7,85350.8,42677.19,42673.61
+PROJ-0007,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",341.01,153.45,339.4,115738.79,52080.93,63657.86
+PROJ-0007,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",341.01,153.45,620.3,211528.5,95185.03,116343.47
+PROJ-0007,2024,Sr. Data Scientist,,344.15,161.75,668.9,230201.93,108194.57,122007.36
+PROJ-0007,2025,Sr. Data Scientist,,344.15,161.75,781.4,268918.81,126391.45,142527.36
+PROJ-0007,2024,Data Scientist,,269.57,134.78,630.0,169829.1,84911.4,84917.7
+PROJ-0007,2025,Data Scientist,,269.57,134.78,782.7,210992.44,105492.31,105500.13
+PROJ-0007,2024,Data Scientist,,263.97,131.99,585.8,154633.63,77319.74,77313.89
+PROJ-0007,2025,Data Scientist,,263.97,131.99,776.3,204919.91,102463.84,102456.07
+PROJ-0007,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",313.12,156.56,632.8,198142.34,99071.17,99071.17
+PROJ-0007,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",313.12,156.56,626.7,196232.3,98116.15,98116.15
+PROJ-0007,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",262.49,136.49,595.5,156312.8,81279.79,75033.01
+PROJ-0007,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",262.49,136.49,751.5,197261.24,102572.24,94689.0
+PROJ-0007,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",219.11,113.94,567.7,124388.75,64683.74,59705.01
+PROJ-0007,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",219.11,113.94,738.6,161834.65,84156.08,77678.57
+PROJ-0008,2023,Sr. Project Manager,,254.49,127.25,165.1,42016.3,21008.97,21007.33
+PROJ-0008,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",357.95,161.08,350.2,125354.09,56410.22,68943.87
+PROJ-0008,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",285.31,142.66,437.8,124908.72,62456.55,62452.17
+PROJ-0008,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",257.99,129.0,441.0,113773.59,56889.0,56884.59
+PROJ-0008,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",236.5,122.98,458.2,108364.3,56349.44,52014.86
+PROJ-0008,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",221.54,115.2,440.0,97477.6,50688.0,46789.6
+PROJ-0009,2024,Sr. Project Manager,,240.42,120.21,231.1,55561.06,27780.53,27780.53
+PROJ-0009,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",376.06,169.23,419.9,157907.59,71059.68,86847.91
+PROJ-0009,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",285.96,142.98,666.5,190592.34,95296.17,95296.17
+PROJ-0010,2023,Sr. Project Manager,,251.9,125.95,151.5,38162.85,19081.42,19081.43
+PROJ-0010,2024,Sr. Project Manager,,251.9,125.95,479.2,120710.48,60355.24,60355.24
+PROJ-0010,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",328.22,147.7,423.6,139033.99,62565.72,76468.27
+PROJ-0010,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",328.22,147.7,1057.0,346928.54,156118.9,190809.64
+PROJ-0010,2023,Sr. Data Scientist,,313.89,147.53,508.0,159456.12,74945.24,84510.88
+PROJ-0010,2024,Sr. Data Scientist,,313.89,147.53,1153.8,362166.28,170220.11,191946.17
+PROJ-0010,2023,Data Scientist,,314.13,157.06,478.0,150154.14,75074.68,75079.46
+PROJ-0010,2024,Data Scientist,,314.13,157.06,1101.3,345951.37,172970.18,172981.19
+PROJ-0010,2023,Data Scientist,,297.6,148.8,431.7,128473.92,64236.96,64236.96
+PROJ-0010,2024,Data Scientist,,297.6,148.8,1401.9,417205.44,208602.72,208602.72
+PROJ-0010,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",319.63,159.81,506.0,161732.78,80863.86,80868.92
+PROJ-0010,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",319.63,159.81,1168.1,373359.8,186674.06,186685.74
+PROJ-0010,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",258.1,134.21,425.5,109821.55,57106.36,52715.19
+PROJ-0010,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",258.1,134.21,1119.9,289046.19,150301.78,138744.41
+PROJ-0010,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",222.81,115.86,430.1,95830.58,49831.39,45999.19
+PROJ-0010,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",222.81,115.86,1394.5,310708.54,161566.77,149141.77
+PROJ-0011,2023,Sr. Project Manager,,275.12,137.56,307.4,84571.89,42285.94,42285.95
+PROJ-0011,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",374.29,168.43,416.3,155816.93,70117.41,85699.52
+PROJ-0011,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",270.87,135.44,613.4,166151.66,83078.9,83072.76
+PROJ-0011,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",309.35,154.68,616.3,190652.4,95329.28,95323.12
+PROJ-0011,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",224.09,116.53,646.0,144762.14,75278.38,69483.76
+PROJ-0011,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",230.78,120.01,616.7,142322.03,74010.17,68311.86
+PROJ-0012,2024,Sr. Project Manager,,288.73,144.37,83.2,24022.34,12011.58,12010.76
+PROJ-0012,2025,Sr. Project Manager,,288.73,144.37,160.5,46341.17,23171.39,23169.78
+PROJ-0012,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",369.3,166.19,120.4,44463.72,20009.28,24454.44
+PROJ-0012,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",369.3,166.19,316.1,116735.73,52532.66,64203.07
+PROJ-0012,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",312.46,156.23,174.2,54430.53,27215.27,27215.26
+PROJ-0012,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",312.46,156.23,331.8,103674.23,51837.11,51837.12
+PROJ-0012,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",311.08,155.54,157.7,49057.32,24528.66,24528.66
+PROJ-0012,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",311.08,155.54,333.6,103776.29,51888.14,51888.15
+PROJ-0012,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",243.39,126.56,188.4,45854.68,23843.9,22010.78
+PROJ-0012,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",243.39,126.56,342.4,83336.74,43334.14,40002.6
+PROJ-0012,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",233.28,121.31,173.1,40380.77,20998.76,19382.01
+PROJ-0012,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",233.28,121.31,343.5,80131.68,41669.99,38461.69
+PROJ-0013,2023,Program Director,,412.91,185.81,30.0,12387.3,5574.3,6813.0
+PROJ-0013,2024,Program Director,,412.91,185.81,351.8,145261.74,65367.96,79893.78
+PROJ-0013,2025,Program Director,,412.91,185.81,84.2,34767.02,15645.2,19121.82
+PROJ-0013,2023,Sr. Program Manager,,339.33,162.88,88.6,30064.64,14431.17,15633.47
+PROJ-0013,2024,Sr. Program Manager,,339.33,162.88,1100.3,373364.8,179216.86,194147.94
+PROJ-0013,2025,Sr. Program Manager,,339.33,162.88,169.9,57652.17,27673.31,29978.86
+PROJ-0013,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",348.48,156.82,132.3,46103.9,20747.29,25356.61
+PROJ-0013,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",348.48,156.82,1129.5,393608.16,177128.19,216479.97
+PROJ-0013,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",348.48,156.82,283.0,98619.84,44380.06,54239.78
+PROJ-0013,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",364.22,163.9,128.6,46838.69,21077.54,25761.15
+PROJ-0013,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",364.22,163.9,1158.7,422021.71,189910.93,232110.78
+PROJ-0013,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",364.22,163.9,401.1,146088.64,65740.29,80348.35
+PROJ-0013,2023,Sr. Product Manager,,325.99,156.48,115.4,37619.25,18057.79,19561.46
+PROJ-0013,2024,Sr. Product Manager,,325.99,156.48,1378.5,449377.22,215707.68,233669.54
+PROJ-0013,2025,Sr. Product Manager,,325.99,156.48,349.0,113770.51,54611.52,59158.99
+PROJ-0013,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",319.33,159.66,228.6,72998.84,36498.28,36500.56
+PROJ-0013,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",319.33,159.66,2075.6,662801.35,331390.3,331411.05
+PROJ-0013,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",319.33,159.66,470.0,150085.1,75040.2,75044.9
+PROJ-0013,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",316.4,158.2,199.2,63026.88,31513.44,31513.44
+PROJ-0013,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",316.4,158.2,1707.1,540126.44,270063.22,270063.22
+PROJ-0013,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",316.4,158.2,479.6,151745.44,75872.72,75872.72
+PROJ-0013,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",251.73,125.86,223.4,56236.48,28117.12,28119.36
+PROJ-0013,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",251.73,125.86,1606.0,404278.38,202131.16,202147.22
+PROJ-0013,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",251.73,125.86,505.8,127325.03,63659.99,63665.04
+PROJ-0013,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",204.42,106.3,205.6,42028.75,21855.28,20173.47
+PROJ-0013,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",204.42,106.3,1691.4,345755.99,179795.82,165960.17
+PROJ-0013,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",204.42,106.3,552.3,112901.17,58709.49,54191.68
+PROJ-0013,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",222.38,115.64,201.4,44787.33,23289.9,21497.43
+PROJ-0013,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",222.38,115.64,1719.6,382404.65,198854.54,183550.11
+PROJ-0013,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",222.38,115.64,437.5,97291.25,50592.5,46698.75
+PROJ-0013,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",248.31,129.12,198.2,49215.04,25591.58,23623.46
+PROJ-0013,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",248.31,129.12,1701.0,422375.31,219633.12,202742.19
+PROJ-0013,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",248.31,129.12,463.8,115166.18,59885.86,55280.32
+PROJ-0013,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.48,117.77,227.6,51546.85,26804.45,24742.4
+PROJ-0013,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.48,117.77,1672.5,378787.8,196970.32,181817.48
+PROJ-0013,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.48,117.77,437.3,99039.7,51500.82,47538.88
+PROJ-0013,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",224.8,116.9,214.2,48152.16,25039.98,23112.18
+PROJ-0013,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",224.8,116.9,1706.9,383711.12,199536.61,184174.51
+PROJ-0013,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",224.8,116.9,435.3,97855.44,50886.57,46968.87
+PROJ-0013,2023,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",167.87,83.94,237.6,39885.91,19944.14,19941.77
+PROJ-0013,2024,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",167.87,83.94,2025.9,340087.83,170054.05,170033.78
+PROJ-0013,2025,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",167.87,83.94,482.2,80946.91,40475.87,40471.04
+PROJ-0013,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",146.65,80.66,190.4,27922.16,15357.66,12564.5
+PROJ-0013,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",146.65,80.66,1909.0,279954.85,153979.94,125974.91
+PROJ-0013,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",146.65,80.66,521.0,76404.65,42023.86,34380.79
+PROJ-0013,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",137.92,75.86,217.6,30011.39,16507.14,13504.25
+PROJ-0013,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",137.92,75.86,1613.1,222478.75,122369.77,100108.98
+PROJ-0013,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",137.92,75.86,464.1,64008.67,35206.63,28802.04
+PROJ-0013,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",139.44,76.69,227.8,31764.43,17469.98,14294.45
+PROJ-0013,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",139.44,76.69,1881.5,262356.36,144292.23,118064.13
+PROJ-0013,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",139.44,76.69,491.6,68548.7,37700.8,30847.9
+PROJ-0013,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",107.82,62.54,213.1,22976.44,13327.27,9649.17
+PROJ-0013,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",107.82,62.54,1810.5,195208.11,113228.67,81979.44
+PROJ-0013,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",107.82,62.54,456.1,49176.7,28524.49,20652.21
+PROJ-0013,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.31,79.64,227.8,31279.22,18141.99,13137.23
+PROJ-0013,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.31,79.64,1761.0,241802.91,140246.04,101556.87
+PROJ-0013,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.31,79.64,476.4,65414.48,37940.5,27473.98
+PROJ-0013,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",144.47,83.79,181.2,26177.96,15182.75,10995.21
+PROJ-0013,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",144.47,83.79,1958.2,282901.15,164077.58,118823.57
+PROJ-0013,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",144.47,83.79,443.7,64101.34,37177.62,26923.72
+PROJ-0013,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",89.27,51.78,201.0,17943.27,10407.78,7535.49
+PROJ-0013,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",89.27,51.78,1884.4,168220.39,97574.23,70646.16
+PROJ-0013,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",89.27,51.78,464.8,41492.7,24067.34,17425.36
+PROJ-0013,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",113.82,66.02,210.8,23993.26,13917.02,10076.24
+PROJ-0013,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",113.82,66.02,2038.4,232010.69,134575.17,97435.52
+PROJ-0013,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",113.82,66.02,501.1,57035.2,33082.62,23952.58
+PROJ-0014,2024,Sr. Project Manager,,245.28,122.64,489.9,120162.67,60081.34,60081.33
+PROJ-0014,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",366.71,165.02,782.0,286767.22,129045.64,157721.58
+PROJ-0014,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",304.33,152.16,902.7,274718.69,137354.83,137363.86
+PROJ-0014,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",323.98,161.99,1162.1,376497.16,188248.58,188248.58
+PROJ-0014,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",204.55,106.37,1113.4,227745.97,118432.36,109313.61
+PROJ-0014,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",209.78,109.09,1197.2,251148.62,130602.55,120546.07
+PROJ-0015,2024,Sr. Project Manager,,258.93,129.47,34.9,9036.66,4518.5,4518.16
+PROJ-0015,2025,Sr. Project Manager,,258.93,129.47,288.8,74778.98,37390.94,37388.04
+PROJ-0015,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",374.08,168.34,32.9,12307.23,5538.39,6768.84
+PROJ-0015,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",374.08,168.34,662.1,247678.37,111457.91,136220.46
+PROJ-0015,2024,Sr. Data Scientist,,319.96,150.38,63.4,20285.46,9534.09,10751.37
+PROJ-0015,2025,Sr. Data Scientist,,319.96,150.38,791.5,253248.34,119025.77,134222.57
+PROJ-0015,2024,Data Scientist,,287.63,143.81,60.9,17516.67,8758.03,8758.64
+PROJ-0015,2025,Data Scientist,,287.63,143.81,728.4,209509.69,104751.2,104758.49
+PROJ-0015,2024,Data Scientist,,278.61,139.31,70.9,19753.45,9877.08,9876.37
+PROJ-0015,2025,Data Scientist,,278.61,139.31,851.0,237097.11,118552.81,118544.3
+PROJ-0015,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",260.15,130.07,76.4,19875.46,9937.35,9938.11
+PROJ-0015,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",260.15,130.07,772.7,201017.9,100505.09,100512.81
+PROJ-0015,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",274.32,142.65,67.4,18489.17,9614.61,8874.56
+PROJ-0015,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",274.32,142.65,792.9,217508.33,113107.18,104401.15
+PROJ-0015,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.96,118.02,61.6,13980.74,7270.03,6710.71
+PROJ-0015,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.96,118.02,903.2,204990.27,106595.66,98394.61
+PROJ-0016,2023,Sr. Project Manager,,269.35,134.68,193.2,52038.42,26020.18,26018.24
+PROJ-0016,2024,Sr. Project Manager,,269.35,134.68,207.7,55944.0,27973.04,27970.96
+PROJ-0016,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",361.43,162.64,282.7,102176.26,45978.33,56197.93
+PROJ-0016,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",361.43,162.64,457.8,165462.65,74456.59,91006.06
+PROJ-0016,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",279.61,139.81,398.9,111536.43,55770.21,55766.22
+PROJ-0016,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",279.61,139.81,622.3,174001.3,87003.76,86997.54
+PROJ-0016,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",302.37,151.19,438.7,132649.72,66327.05,66322.67
+PROJ-0016,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",302.37,151.19,646.2,195391.49,97698.98,97692.51
+PROJ-0016,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",259.95,135.17,434.7,113000.26,58758.4,54241.86
+PROJ-0016,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",259.95,135.17,714.8,185812.26,96619.52,89192.74
+PROJ-0016,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.11,117.58,422.1,95441.03,49630.52,45810.51
+PROJ-0016,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.11,117.58,665.5,150476.21,78249.49,72226.72
+PROJ-0016,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",201.45,104.75,420.2,84649.29,44015.95,40633.34
+PROJ-0016,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",201.45,104.75,701.5,141317.17,73482.12,67835.05
+PROJ-0016,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",142.22,82.49,367.1,52208.96,30282.08,21926.88
+PROJ-0016,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",142.22,82.49,670.7,95386.95,55326.04,40060.91
+PROJ-0016,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.07,79.5,378.9,51935.82,30122.55,21813.27
+PROJ-0016,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",137.07,79.5,654.8,89753.44,52056.6,37696.84
+PROJ-0017,2023,Sr. Project Manager,,253.6,126.8,633.9,160757.04,80378.52,80378.52
+PROJ-0017,2024,Sr. Project Manager,,253.6,126.8,76.2,19324.32,9662.16,9662.16
+PROJ-0017,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",343.13,154.41,754.1,258754.33,116440.58,142313.75
+PROJ-0017,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",343.13,154.41,127.0,43577.51,19610.07,23967.44
+PROJ-0017,2023,Sr. Data Scientist,,328.22,154.26,1098.4,360516.85,169439.18,191077.67
+PROJ-0017,2024,Sr. Data Scientist,,328.22,154.26,181.5,59571.93,27998.19,31573.74
+PROJ-0017,2023,Data Scientist,,273.94,136.97,1151.0,315304.94,157652.47,157652.47
+PROJ-0017,2024,Data Scientist,,273.94,136.97,154.2,42241.55,21120.77,21120.78
+PROJ-0017,2023,Data Scientist,,273.88,136.94,1027.5,281411.7,140705.85,140705.85
+PROJ-0017,2024,Data Scientist,,273.88,136.94,174.1,47682.51,23841.25,23841.26
+PROJ-0017,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",274.59,137.29,1114.5,306030.55,153009.7,153020.85
+PROJ-0017,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",274.59,137.29,151.5,41600.38,20799.43,20800.95
+PROJ-0017,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",274.23,142.6,1059.6,290574.11,151098.96,139475.15
+PROJ-0017,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",274.23,142.6,150.5,41271.62,21461.3,19810.32
+PROJ-0017,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",243.83,126.79,1002.7,244488.34,127132.33,117356.01
+PROJ-0017,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",243.83,126.79,178.6,43548.04,22644.69,20903.35
+PROJ-0018,2024,Program Director,,441.34,198.6,194.7,85928.9,38667.42,47261.48
+PROJ-0018,2025,Program Director,,441.34,198.6,76.7,33850.78,15232.62,18618.16
+PROJ-0018,2024,Program Manager,,312.64,156.32,911.1,284846.3,142423.15,142423.15
+PROJ-0018,2025,Program Manager,,312.64,156.32,235.4,73595.46,36797.73,36797.73
+PROJ-0018,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",329.35,148.21,1560.2,513851.87,231237.24,282614.63
+PROJ-0018,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",329.35,148.21,458.4,150974.04,67939.46,83034.58
+PROJ-0018,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",357.01,160.65,1240.5,442870.9,199286.33,243584.57
+PROJ-0018,2025,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",357.01,160.65,515.8,184145.76,82863.27,101282.49
+PROJ-0018,2024,Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",293.64,140.95,1656.0,486267.84,233413.2,252854.64
+PROJ-0018,2025,Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",293.64,140.95,470.1,138040.16,66260.6,71779.56
+PROJ-0018,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",283.98,141.99,1740.9,494380.78,247190.39,247190.39
+PROJ-0018,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",283.98,141.99,432.5,122821.35,61410.68,61410.67
+PROJ-0018,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",317.68,158.84,1723.1,547394.41,273697.2,273697.21
+PROJ-0018,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",317.68,158.84,471.1,149659.05,74829.52,74829.53
+PROJ-0018,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",312.97,156.49,1690.3,529013.19,264515.05,264498.14
+PROJ-0018,2025,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",312.97,156.49,502.6,157298.72,78651.87,78646.85
+PROJ-0018,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.46,117.76,1552.5,351579.15,182822.4,168756.75
+PROJ-0018,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.46,117.76,512.8,116128.69,60387.33,55741.36
+PROJ-0018,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",232.65,120.98,1523.5,354442.28,184313.03,170129.25
+PROJ-0018,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",232.65,120.98,495.0,115161.75,59885.1,55276.65
+PROJ-0018,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.41,117.73,1572.3,355984.44,185106.88,170877.56
+PROJ-0018,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",226.41,117.73,463.9,105031.6,54614.95,50416.65
+PROJ-0018,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",206.6,107.43,1766.9,365041.54,189818.07,175223.47
+PROJ-0018,2025,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",206.6,107.43,469.4,96978.04,50427.64,46550.4
+PROJ-0018,2024,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",152.34,76.17,1423.3,216825.52,108412.76,108412.76
+PROJ-0018,2025,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",152.34,76.17,428.2,65231.99,32615.99,32616.0
+PROJ-0018,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",146.49,80.57,1748.7,256167.06,140892.76,115274.3
+PROJ-0018,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",146.49,80.57,494.1,72380.71,39809.64,32571.07
+PROJ-0018,2024,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",162.02,89.11,1716.1,278042.52,152921.67,125120.85
+PROJ-0018,2025,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",162.02,89.11,456.6,73978.33,40687.63,33290.7
+PROJ-0018,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",81.56,47.3,1541.3,125708.43,72903.49,52804.94
+PROJ-0018,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",81.56,47.3,486.8,39703.41,23025.64,16677.77
+PROJ-0018,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",76.94,44.63,1491.1,114725.23,66547.79,48177.44
+PROJ-0018,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",76.94,44.63,392.2,30175.87,17503.89,12671.98
+PROJ-0018,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",99.47,57.69,1529.4,152129.42,88231.09,63898.33
+PROJ-0018,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",99.47,57.69,452.3,44990.28,26093.19,18897.09
+PROJ-0018,2024,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",88.24,51.18,1631.3,143945.91,83489.93,60455.98
+PROJ-0018,2025,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",88.24,51.18,405.3,35763.67,20743.25,15020.42
+PROJ-0019,2024,Sr. Project Manager,,284.18,142.09,458.8,130381.78,65190.89,65190.89
+PROJ-0019,2024,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",356.0,160.2,754.3,268530.8,120838.86,147691.94
+PROJ-0019,2024,Sr. Data Scientist,,349.83,164.42,889.9,311313.72,146317.36,164996.36
+PROJ-0019,2024,Data Scientist,,297.76,148.88,861.2,256430.91,128215.46,128215.45
+PROJ-0019,2024,Data Scientist,,260.4,130.2,974.7,253811.88,126905.94,126905.94
+PROJ-0019,2024,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",267.02,133.51,968.5,258608.87,129304.43,129304.44
+PROJ-0019,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",228.72,118.93,887.6,203011.87,105562.27,97449.6
+PROJ-0019,2024,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",246.28,128.07,840.2,206924.46,107604.41,99320.05
+PROJ-0020,2023,Program Director,,449.12,202.1,184.8,82997.38,37348.08,45649.3
+PROJ-0020,2023,Program Manager,,278.85,139.43,535.1,149212.64,74608.99,74603.65
+PROJ-0020,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",391.54,176.19,970.0,379793.8,170904.3,208889.5
+PROJ-0020,2023,Sr. Solution Architect,"Program Architect, Infrastructure Architect, Security Architect, Application Architect, Data Architect, AI Architect, QA Architect",351.94,158.37,565.3,198951.68,89526.56,109425.12
+PROJ-0020,2023,Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",315.15,151.27,731.3,230469.19,110623.75,119845.44
+PROJ-0020,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",283.16,141.58,900.6,255013.9,127506.95,127506.95
+PROJ-0020,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",251.06,125.53,891.4,223794.88,111897.44,111897.44
+PROJ-0020,2023,Sr. Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",301.1,150.55,887.9,267346.69,133673.35,133673.34
+PROJ-0020,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",200.13,104.07,892.1,178535.97,92840.85,85695.12
+PROJ-0020,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",268.81,139.78,921.1,247600.89,128751.36,118849.53
+PROJ-0020,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",238.68,124.11,844.1,201469.79,104761.25,96708.54
+PROJ-0020,2023,Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",216.19,112.42,863.9,186766.54,97119.64,89646.9
+PROJ-0020,2023,Offshore Solution Architect,"Infrastructure Architect, App Architect, Data Architect, AI Architect",197.93,98.97,787.6,155889.67,77948.77,77940.9
+PROJ-0020,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",155.99,85.79,881.0,137427.19,75580.99,61846.2
+PROJ-0020,2023,Offshore Senior Consultant,"Technical Lead, Functional Lead, AI Lead, Data Lead, QA Lead, UX Designer, Security Lead",129.55,71.25,810.9,105052.1,57776.62,47275.48
+PROJ-0020,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",94.42,54.76,772.3,72920.57,42291.15,30629.42
+PROJ-0020,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",82.02,47.57,956.9,78484.94,45519.73,32965.21
+PROJ-0020,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",98.19,56.95,917.9,90128.6,52274.4,37854.2
+PROJ-0020,2023,Offshore Consultant,"Infrastructure Engineer, Security Engineer, Application Engineer, Data Engineer, AI Engineer, QA Engineer, UX Engineer, DevOps Engineer",111.63,64.75,878.9,98111.61,56908.78,41202.83
