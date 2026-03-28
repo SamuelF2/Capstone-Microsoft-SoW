@@ -12,7 +12,9 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+import Spinner from '../components/Spinner';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,7 +106,7 @@ export default function AllSoWs() {
           justifyContent: 'center',
         }}
       >
-        <div className="text-secondary">Loading…</div>
+        <Spinner message="Loading your SoWs…" />
       </div>
     );
   }
@@ -271,8 +273,11 @@ export default function AllSoWs() {
 
                 <tbody>
                   {filtered.map((sow, i) => (
-                    <tr
+                    <motion.tr
                       key={sow.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03, duration: 0.2 }}
                       onClick={() => handleRowClick(sow)}
                       style={{
                         borderBottom:
@@ -280,12 +285,16 @@ export default function AllSoWs() {
                             ? '1px solid var(--color-border-default)'
                             : 'none',
                         cursor: 'pointer',
+                        backgroundColor: i % 2 === 1 ? 'rgba(255,255,255,0.02)' : 'transparent',
                         transition: 'background-color var(--transition-base)',
                       }}
                       onMouseEnter={(e) =>
                         (e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)')
                       }
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.backgroundColor =
+                          i % 2 === 1 ? 'rgba(255,255,255,0.02)' : 'transparent')
+                      }
                     >
                       <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
                         <p className="font-medium" style={{ marginBottom: '2px' }}>
@@ -353,7 +362,7 @@ export default function AllSoWs() {
                           {sow.status === 'draft' ? 'Edit →' : 'View →'}
                         </span>
                       </td>
-                    </tr>
+                    </motion.tr>
                   ))}
                 </tbody>
               </table>

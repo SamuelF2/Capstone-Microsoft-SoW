@@ -1,7 +1,24 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+
+function FieldError({ message }) {
+  if (!message) return null;
+  return (
+    <motion.p
+      className="form-error"
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.15 }}
+      style={{ overflow: 'hidden' }}
+    >
+      {message}
+    </motion.p>
+  );
+}
 
 export default function CreateNew() {
   const router = useRouter();
@@ -175,11 +192,14 @@ export default function CreateNew() {
                   required
                   style={fieldError('sowTitle') ? { borderColor: 'var(--color-error)' } : {}}
                 />
-                {fieldError('sowTitle') && <p className="form-error">{fieldError('sowTitle')}</p>}
+                <AnimatePresence>
+                  <FieldError message={fieldError('sowTitle')} />
+                </AnimatePresence>
               </div>
 
               {/* Row 2: Opportunity ID + Work Order Number */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
@@ -202,9 +222,9 @@ export default function CreateNew() {
                     required
                     style={fieldError('opportunityId') ? { borderColor: 'var(--color-error)' } : {}}
                   />
-                  {fieldError('opportunityId') && (
-                    <p className="form-error">{fieldError('opportunityId')}</p>
-                  )}
+                  <AnimatePresence>
+                    <FieldError message={fieldError('opportunityId')} />
+                  </AnimatePresence>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Work Order Number</label>
@@ -221,6 +241,7 @@ export default function CreateNew() {
 
               {/* Row 3: Deal Value + Estimated Margin */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
@@ -289,6 +310,7 @@ export default function CreateNew() {
 
               {/* Row 4: Customer Name + Customer Legal Name */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
@@ -311,9 +333,9 @@ export default function CreateNew() {
                     required
                     style={fieldError('customerName') ? { borderColor: 'var(--color-error)' } : {}}
                   />
-                  {fieldError('customerName') && (
-                    <p className="form-error">{fieldError('customerName')}</p>
-                  )}
+                  <AnimatePresence>
+                    <FieldError message={fieldError('customerName')} />
+                  </AnimatePresence>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Customer Legal Name</label>
@@ -330,6 +352,7 @@ export default function CreateNew() {
 
               {/* Row 5: Delivery Methodology + Deal Cycle */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '2fr 1fr',
@@ -359,9 +382,9 @@ export default function CreateNew() {
                       </option>
                     ))}
                   </select>
-                  {fieldError('deliveryMethodology') && (
-                    <p className="form-error">{fieldError('deliveryMethodology')}</p>
-                  )}
+                  <AnimatePresence>
+                    <FieldError message={fieldError('deliveryMethodology')} />
+                  </AnimatePresence>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 0 }}>

@@ -201,7 +201,7 @@ export default function Account() {
           <p className="text-lg text-secondary mb-xl">Manage your profile and settings</p>
 
           <div
-            className="grid"
+            className="grid account-layout"
             style={{ gridTemplateColumns: '250px 1fr', gap: 'var(--spacing-xl)' }}
           >
             <div className="flex flex-col gap-sm">
