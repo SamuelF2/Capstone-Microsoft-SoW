@@ -5,16 +5,16 @@ Structure
 ---------
 main.py        App entry point, lifespan, middleware, health check
 database.py    Shared connection state (neo4j_driver, pg_pool)
-auth.py        JWT utilities + get_current_user dependency
+auth.py        Entra ID JWT validation + get_current_user dependency
 models.py      Pydantic models (UserResponse, SoWCreate, …)
 config.py      Env-var driven configuration
 routers/
-  auth.py      POST /api/auth/login|logout|register  GET /api/auth/me
+  auth.py      POST /api/auth/logout  GET /api/auth/me
   sow.py       CRUD + status for /api/sow/…
 
 PostgreSQL schema (per Database Schema for PostgreSQL.pdf)
 ----------------------------------------------------------
-users           — authentication (id, email, username, hashed_password, name, …)
+users           — authentication (id, oid, email, name, role, …)
 ai_suggestion   — ML risk output (id, flag, validation_recommendation, risks)
 content         — SOW body skeleton (id, scope_id, price_id, assumption_id, resource_id)
 scope           — work scope (id, content_id, in_scope, out_scope)
@@ -30,6 +30,7 @@ review_results  — review findings (id, sow_id, reviewer, score, findings, revi
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -54,6 +55,19 @@ from validators import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialise and tear down database connections."""
+
+    # ── Validate Entra ID config ─────────────────────────────────────────────
+    from config import AZURE_AD_CLIENT_ID
+
+    env = os.getenv("ENV", "development")
+    if not AZURE_AD_CLIENT_ID and env not in ("development", "test"):
+        raise RuntimeError(
+            "AZURE_AD_CLIENT_ID is required. "
+            "Set it in .env or as an environment variable. "
+            "See .env.example for details."
+        )
+    if not AZURE_AD_CLIENT_ID:
+        print("WARNING: AZURE_AD_CLIENT_ID is empty — auth will reject all tokens")
 
     # ── Connect databases (non-blocking) ─────────────────────────────────────
     # Try once quickly. If it fails, start in degraded mode so the container

@@ -23,6 +23,7 @@
 # Optional GitHub Secrets:
 #   AZURE_AI_ENDPOINT      - Azure AI Foundry endpoint
 #   AZURE_AI_KEY           - Azure AI Foundry API key
+#   AZURE_AD_CLIENT_ID     - Microsoft Entra ID app registration client ID (required for auth)
 # =============================================================================
 
 name: Azure Deploy
