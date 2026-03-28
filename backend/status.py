@@ -1,5 +1,5 @@
 """
-System Status Page — reuses database connections from main.py.
+System Status Page — reuses database connections from database.py.
 Visit http://localhost:8000/status
 """
 
@@ -19,7 +19,7 @@ async def check_fastapi() -> dict:
 
 
 async def check_neo4j() -> dict:
-    from main import neo4j_driver
+    from database import neo4j_driver
 
     try:
         neo4j_driver.verify_connectivity()
@@ -39,7 +39,7 @@ async def check_neo4j() -> dict:
 
 
 async def check_postgres() -> dict:
-    from main import pg_pool
+    from database import pg_pool
 
     try:
         async with pg_pool.acquire() as conn:

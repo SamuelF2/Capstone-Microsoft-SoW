@@ -44,7 +44,6 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - BACKEND_URL=http://backend:8000
       - NEXT_PUBLIC_AZURE_CLIENT_ID=${AZURE_AD_CLIENT_ID:-}
-      - NEXT_PUBLIC_AZURE_API_SCOPE=${NEXT_PUBLIC_AZURE_API_SCOPE:-}
     volumes:
       - ./frontend:/app
       - /app/node_modules
