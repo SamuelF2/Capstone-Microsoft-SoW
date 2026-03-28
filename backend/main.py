@@ -91,15 +91,17 @@ async def lifespan(app: FastAPI):
     async with database.pg_pool.acquire() as conn:
         # ------------------------------------------------------------------ #
         # 1. USERS                                                            #
-        # PDF §2.6: id, username, password, name                              #
-        # We keep email-based auth and add username + name alias columns.     #
+        # Authenticated via Microsoft Entra ID. oid is the stable Entra       #
+        # object ID; users are auto-created on first sign-in.                 #
         # ------------------------------------------------------------------ #
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id              SERIAL PRIMARY KEY,
+                oid             TEXT UNIQUE,
                 email           TEXT UNIQUE NOT NULL,
-                hashed_password TEXT NOT NULL,
                 full_name       TEXT,
+                username        TEXT UNIQUE,
+                name            TEXT,
                 role            TEXT NOT NULL DEFAULT 'consultant',
                 is_active       BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -107,11 +109,18 @@ async def lifespan(app: FastAPI):
             );
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_oid ON users(oid);")
+        # Migration: make hashed_password nullable for existing databases
+        await conn.execute("""
+            DO $$ BEGIN
+                ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL;
+            EXCEPTION WHEN undefined_column THEN NULL;
+            END $$;
+        """)
         for col_ddl in [
-            # PDF §2.6 — username (short login handle / display alias)
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;",
-            # PDF §2.6 — name (display name, mirrors full_name)
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS oid TEXT UNIQUE;",
         ]:
             await conn.execute(col_ddl)
 

@@ -429,6 +429,7 @@ async def get_sow(sow_id: int, current_user: CurrentUser) -> SoWResponse:
     Raises **404** if the SoW does not exist or the current user is not a
     collaborator on it.
     """
+
     async with database.pg_pool.acquire() as conn:
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)

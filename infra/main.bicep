@@ -59,6 +59,9 @@ param azureAiEndpoint string = ''
 @description('Azure AI Foundry API key (optional)')
 param azureAiKey string = ''
 
+@description('Microsoft Entra ID Application (Client) ID')
+param azureAdClientId string = ''
+
 // ---------------------------------------------------------------------------
 // Variables
 // ---------------------------------------------------------------------------
@@ -191,6 +194,7 @@ module api 'modules/container-app.bicep' = {
       { name: 'DATABASE_URL', value: 'postgresql://${postgresUser}:${postgresPassword}@${postgres.outputs.fqdn}:5432/${postgresDbName}' }
       { name: 'AZURE_AI_ENDPOINT', secretRef: 'azure-ai-endpoint' }
       { name: 'AZURE_AI_KEY', secretRef: 'azure-ai-key' }
+      { name: 'AZURE_AD_CLIENT_ID', value: azureAdClientId }
     ]
     secrets: [
       { name: 'neo4j-password', value: neo4jPassword }
@@ -218,6 +222,7 @@ module web 'modules/container-app.bicep' = {
     external: true
     env: [
       { name: 'NEXT_PUBLIC_API_URL', value: 'https://${api.outputs.fqdn}' }
+      { name: 'NEXT_PUBLIC_AZURE_CLIENT_ID', value: azureAdClientId }
     ]
     secrets: []
   }
