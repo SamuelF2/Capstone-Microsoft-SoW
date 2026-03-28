@@ -1,16 +1,17 @@
 import { useState } from 'react';
 import Head from 'next/head';
+import { useAuth } from '../lib/auth';
 
 export default function Account() {
+  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState('profile');
 
-  // Sample user data
   const userData = {
-    name: 'John Doe',
-    email: 'john.doe@microsoft.com',
-    role: 'Project Manager',
-    department: 'Engineering',
-    joinDate: 'January 2023',
+    name: user?.full_name || user?.name || user?.email?.split('@')[0] || '—',
+    email: user?.email || '—',
+    role: user?.role || '—',
+    department: '—',
+    joinDate: '—',
   };
 
   const renderContent = () => {
@@ -23,26 +24,52 @@ export default function Account() {
             <div className="grid grid-cols-2 gap-lg mb-xl">
               <div className="form-group">
                 <label className="form-label">Full Name</label>
-                <input type="text" defaultValue={userData.name} className="form-input" />
+                <input
+                  type="text"
+                  value={userData.name}
+                  className="form-input"
+                  readOnly
+                  style={{ opacity: 0.7, cursor: 'default' }}
+                />
               </div>
 
               <div className="form-group">
                 <label className="form-label">Email</label>
-                <input type="email" defaultValue={userData.email} className="form-input" />
+                <input
+                  type="email"
+                  value={userData.email}
+                  className="form-input"
+                  readOnly
+                  style={{ opacity: 0.7, cursor: 'default' }}
+                />
               </div>
 
               <div className="form-group">
                 <label className="form-label">Role</label>
-                <input type="text" defaultValue={userData.role} className="form-input" />
+                <input
+                  type="text"
+                  value={userData.role}
+                  className="form-input"
+                  readOnly
+                  style={{ opacity: 0.7, cursor: 'default' }}
+                />
               </div>
 
               <div className="form-group">
                 <label className="form-label">Department</label>
-                <input type="text" defaultValue={userData.department} className="form-input" />
+                <input
+                  type="text"
+                  value={userData.department}
+                  className="form-input"
+                  readOnly
+                  style={{ opacity: 0.7, cursor: 'default' }}
+                />
               </div>
             </div>
 
-            <button className="btn btn-primary">Save Changes</button>
+            <p className="text-sm text-tertiary">
+              Profile information is managed by your Microsoft Entra ID account.
+            </p>
           </div>
         );
 

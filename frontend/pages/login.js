@@ -21,7 +21,16 @@ export default function Login() {
       await login();
       router.replace('/');
     } catch (err) {
-      setError(err.message);
+      const msg = err.message || '';
+      if (msg.includes('popup') || msg.includes('blocked') || msg.includes('BrowserAuthError')) {
+        setError(
+          'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.'
+        );
+      } else if (msg.includes('user_cancelled') || msg.includes('cancelled')) {
+        setError(null); // User closed the popup — not an error
+      } else {
+        setError(msg || 'Sign-in failed. Please try again.');
+      }
       setIsSubmitting(false);
     }
   };

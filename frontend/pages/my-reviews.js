@@ -290,6 +290,22 @@ export default function MyReviews() {
             </p>
           </div>
 
+          {/* Demo banner */}
+          <div
+            style={{
+              marginBottom: 'var(--spacing-lg)',
+              padding: 'var(--spacing-sm) var(--spacing-lg)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'rgba(59,130,246,0.08)',
+              border: '1px solid rgba(59,130,246,0.25)',
+              color: 'var(--color-info)',
+              fontSize: 'var(--font-size-sm)',
+            }}
+          >
+            Showing sample data for demo purposes. This page will display your actual assigned
+            reviews once the review workflow API is connected.
+          </div>
+
           {/* Summary chips */}
           <div
             style={{

@@ -49,19 +49,27 @@ export default function AllSoWs() {
   const { token } = useAuth();
   const [sows, setSows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
 
   useEffect(() => {
     if (!token) return;
+    setFetchError(null);
     fetch('/api/sow', {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((res) => (res.ok ? res.json() : []))
-      .catch(() => [])
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load SoWs (${res.status})`);
+        return res.json();
+      })
       .then((data) => {
         setSows(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setFetchError(err.message || 'Could not load SoWs. Please try again.');
         setLoading(false);
       });
   }, [token]);
@@ -134,6 +142,33 @@ export default function AllSoWs() {
               + Create New
             </button>
           </div>
+
+          {/* Error banner */}
+          {fetchError && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--color-error)',
+                fontSize: 'var(--font-size-sm)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span>{fetchError}</span>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: 'var(--color-error)' }}
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           {/* Filters */}
           <div

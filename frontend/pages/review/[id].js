@@ -220,7 +220,23 @@ export default function ReviewDetail() {
             ← Back to Reviews
           </button>
 
-          <h1 className="text-4xl font-bold mb-xl">{reviewData.title}</h1>
+          <h1 className="text-4xl font-bold mb-lg">{reviewData.title}</h1>
+
+          {/* Demo banner */}
+          <div
+            style={{
+              marginBottom: 'var(--spacing-lg)',
+              padding: 'var(--spacing-sm) var(--spacing-lg)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'rgba(59,130,246,0.08)',
+              border: '1px solid rgba(59,130,246,0.25)',
+              color: 'var(--color-info)',
+              fontSize: 'var(--font-size-sm)',
+            }}
+          >
+            Showing sample review data for demo purposes. Actual AI analysis results will appear
+            here once the review pipeline is connected.
+          </div>
 
           <div className="tabs">
             <button

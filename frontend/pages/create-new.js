@@ -19,9 +19,20 @@ export default function CreateNew() {
     deliveryMethodology: '',
     cycle: '1',
   });
+  const [touched, setTouched] = useState({});
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleBlur = (e) => {
+    setTouched({ ...touched, [e.target.name]: true });
+  };
+
+  const fieldError = (name) => {
+    if (!touched[name]) return null;
+    if (!form[name] || !form[name].trim()) return 'This field is required';
+    return null;
   };
 
   const handleSubmit = async (e) => {
@@ -158,10 +169,13 @@ export default function CreateNew() {
                   name="sowTitle"
                   value={form.sowTitle}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder="e.g. Contoso Cloud Migration Phase 1"
                   className="form-input"
                   required
+                  style={fieldError('sowTitle') ? { borderColor: 'var(--color-error)' } : {}}
                 />
+                {fieldError('sowTitle') && <p className="form-error">{fieldError('sowTitle')}</p>}
               </div>
 
               {/* Row 2: Opportunity ID + Work Order Number */}
@@ -182,10 +196,15 @@ export default function CreateNew() {
                     name="opportunityId"
                     value={form.opportunityId}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     placeholder="e.g. OPP-20240001"
                     className="form-input"
                     required
+                    style={fieldError('opportunityId') ? { borderColor: 'var(--color-error)' } : {}}
                   />
+                  {fieldError('opportunityId') && (
+                    <p className="form-error">{fieldError('opportunityId')}</p>
+                  )}
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Work Order Number</label>
@@ -286,10 +305,15 @@ export default function CreateNew() {
                     name="customerName"
                     value={form.customerName}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     placeholder="e.g. Contoso"
                     className="form-input"
                     required
+                    style={fieldError('customerName') ? { borderColor: 'var(--color-error)' } : {}}
                   />
+                  {fieldError('customerName') && (
+                    <p className="form-error">{fieldError('customerName')}</p>
+                  )}
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Customer Legal Name</label>
@@ -321,8 +345,12 @@ export default function CreateNew() {
                     name="deliveryMethodology"
                     value={form.deliveryMethodology}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     className="form-select"
                     required
+                    style={
+                      fieldError('deliveryMethodology') ? { borderColor: 'var(--color-error)' } : {}
+                    }
                   >
                     <option value="">Select a methodology…</option>
                     {methodologies.map((method) => (
@@ -331,6 +359,9 @@ export default function CreateNew() {
                       </option>
                     ))}
                   </select>
+                  {fieldError('deliveryMethodology') && (
+                    <p className="form-error">{fieldError('deliveryMethodology')}</p>
+                  )}
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 0 }}>
