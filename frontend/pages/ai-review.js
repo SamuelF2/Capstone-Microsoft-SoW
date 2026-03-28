@@ -12,6 +12,111 @@ const ALLOWED_MIMES = new Set([
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx'];
 
+// ── Mock AI recommendations (replace with API call when ready) ──────────────
+
+const MOCK_RECOMMENDATIONS = {
+  violations: [
+    {
+      rule: 'Missing SLA terms',
+      severity: 'high',
+      message:
+        'No Service Level Agreement defined in the scope section. MCEM requires explicit SLA commitments for all delivery engagements.',
+    },
+    {
+      rule: 'Unbounded scope language',
+      severity: 'high',
+      message:
+        'Phrase "best effort" detected in section 3.2. SDMPlus prohibits vague commitment language — replace with measurable deliverables.',
+    },
+    {
+      rule: 'Missing support transition plan',
+      severity: 'medium',
+      message:
+        'No support handoff or hypercare period defined. Required for all methodologies per MCEM guidelines.',
+    },
+    {
+      rule: 'Incomplete risk register',
+      severity: 'medium',
+      message:
+        'Two identified risks lack mitigation strategies. All risks must include severity, probability, and mitigation plan.',
+    },
+    {
+      rule: 'Customer responsibilities unclear',
+      severity: 'low',
+      message:
+        'Customer resource commitments listed but no RACI matrix provided. Recommended for engagements over $500K.',
+    },
+  ],
+  risks: [
+    {
+      category: 'Staffing',
+      level: 'high',
+      description:
+        'No backup resource identified for lead Solution Architect role. Single point of failure on critical path.',
+    },
+    {
+      category: 'Timeline',
+      level: 'medium',
+      description:
+        'Sprint 4 delivery overlaps with customer holiday freeze (Dec 20 – Jan 5). Milestone dates may need adjustment.',
+    },
+    {
+      category: 'Budget',
+      level: 'low',
+      description:
+        'Travel & expenses estimated at 3% of engagement value, which is below the typical 5-8% range for on-site delivery.',
+    },
+  ],
+  approval: {
+    level: 'Yellow',
+    esapType: 'Type-2',
+    reason: 'Deal value $2.4M exceeds $1M threshold with estimated margin at 14% (below 15%).',
+    chain: [
+      'Solution Architect',
+      'SQA Reviewer',
+      'Customer Practice Lead',
+      'Customer Delivery Partner',
+    ],
+  },
+  checklist: [
+    { item: 'Verify pricing against approved rate card', required: true, checked: false },
+    { item: 'Confirm scope aligns with selected methodology', required: true, checked: false },
+    {
+      item: 'Validate deliverable acceptance criteria are measurable',
+      required: true,
+      checked: false,
+    },
+    {
+      item: 'Review risk register for completeness (severity + mitigation)',
+      required: true,
+      checked: false,
+    },
+    {
+      item: 'Ensure customer responsibilities are explicitly stated',
+      required: true,
+      checked: false,
+    },
+    { item: 'Check change management process is documented', required: false, checked: false },
+    { item: 'Verify billing milestones match delivery schedule', required: false, checked: false },
+    {
+      item: 'Confirm support transition plan covers hypercare period',
+      required: true,
+      checked: false,
+    },
+  ],
+  similarSows: [
+    { title: 'Contoso Cloud Adoption Phase 2', methodology: 'Cloud Adoption', similarity: 0.89 },
+    {
+      title: 'Fabrikam Agile Transformation',
+      methodology: 'Agile Sprint Delivery',
+      similarity: 0.76,
+    },
+    { title: 'Northwind ERP Sure Step Migration', methodology: 'Sure Step 365', similarity: 0.71 },
+  ],
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -32,6 +137,399 @@ function validateFile(file) {
   return '';
 }
 
+const SEVERITY_STYLES = {
+  high: {
+    bg: 'rgba(239,68,68,0.12)',
+    color: '#ef4444',
+    border: 'rgba(239,68,68,0.3)',
+    label: 'High',
+  },
+  medium: {
+    bg: 'rgba(251,191,36,0.12)',
+    color: '#fbbf24',
+    border: 'rgba(251,191,36,0.3)',
+    label: 'Medium',
+  },
+  low: {
+    bg: 'rgba(74,222,128,0.12)',
+    color: '#4ade80',
+    border: 'rgba(74,222,128,0.3)',
+    label: 'Low',
+  },
+};
+
+const APPROVAL_STYLES = {
+  Green: { bg: 'rgba(74,222,128,0.15)', color: '#4ade80', border: 'rgba(74,222,128,0.4)' },
+  Yellow: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: 'rgba(251,191,36,0.4)' },
+  Red: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'rgba(239,68,68,0.4)' },
+};
+
+// ── Recommendation Sub-Components ───────────────────────────────────────────
+
+function SeverityBadge({ severity }) {
+  const s = SEVERITY_STYLES[severity] || SEVERITY_STYLES.low;
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 10px',
+        borderRadius: 'var(--radius-full)',
+        fontSize: 'var(--font-size-xs)',
+        fontWeight: 600,
+        backgroundColor: s.bg,
+        color: s.color,
+        border: `1px solid ${s.border}`,
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+function ViolationsSection({ violations }) {
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-error)' }}>&#9888;</span> Compliance Violations
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--color-text-secondary)',
+            fontWeight: 400,
+          }}
+        >
+          {violations.length} found
+        </span>
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        {violations.map((v, i) => (
+          <div
+            key={i}
+            style={{
+              padding: 'var(--spacing-md) var(--spacing-lg)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--color-bg-tertiary)',
+              borderLeft: `3px solid ${(SEVERITY_STYLES[v.severity] || SEVERITY_STYLES.low).color}`,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 'var(--spacing-xs)',
+              }}
+            >
+              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
+                {v.rule}
+              </span>
+              <SeverityBadge severity={v.severity} />
+            </div>
+            <p
+              className="text-secondary"
+              style={{ fontSize: 'var(--font-size-sm)', lineHeight: 'var(--line-height-relaxed)' }}
+            >
+              {v.message}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RisksSection({ risks }) {
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-warning)' }}>&#9873;</span> Delivery Risks
+      </h3>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+          gap: 'var(--spacing-md)',
+        }}
+      >
+        {risks.map((r, i) => {
+          const s = SEVERITY_STYLES[r.level] || SEVERITY_STYLES.low;
+          return (
+            <div
+              key={i}
+              style={{
+                padding: 'var(--spacing-lg)',
+                borderRadius: 'var(--radius-lg)',
+                backgroundColor: 'var(--color-bg-tertiary)',
+                border: `1px solid ${s.border}`,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 'var(--spacing-sm)',
+                }}
+              >
+                <span
+                  className="font-semibold"
+                  style={{ fontSize: 'var(--font-size-sm)', color: s.color }}
+                >
+                  {r.category}
+                </span>
+                <SeverityBadge severity={r.level} />
+              </div>
+              <p
+                className="text-secondary"
+                style={{
+                  fontSize: 'var(--font-size-sm)',
+                  lineHeight: 'var(--line-height-relaxed)',
+                }}
+              >
+                {r.description}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalSection({ approval }) {
+  const style = APPROVAL_STYLES[approval.level] || APPROVAL_STYLES.Yellow;
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-info)' }}>&#9745;</span> ESAP Approval Status
+      </h3>
+      <div
+        style={{
+          padding: 'var(--spacing-lg)',
+          borderRadius: 'var(--radius-lg)',
+          backgroundColor: style.bg,
+          border: `1px solid ${style.border}`,
+          marginBottom: 'var(--spacing-lg)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--spacing-md)',
+            marginBottom: 'var(--spacing-sm)',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: 14,
+              height: 14,
+              borderRadius: '50%',
+              backgroundColor: style.color,
+              boxShadow: `0 0 8px ${style.color}`,
+            }}
+          />
+          <span
+            className="font-semibold"
+            style={{ fontSize: 'var(--font-size-xl)', color: style.color }}
+          >
+            {approval.level} — {approval.esapType}
+          </span>
+        </div>
+        <p
+          className="text-secondary"
+          style={{ fontSize: 'var(--font-size-sm)', lineHeight: 'var(--line-height-relaxed)' }}
+        >
+          {approval.reason}
+        </p>
+      </div>
+      <div>
+        <p className="text-sm font-semibold mb-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          Required Approval Chain
+        </p>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--spacing-sm)',
+            alignItems: 'center',
+          }}
+        >
+          {approval.chain.map((person, i) => (
+            <span
+              key={i}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+            >
+              <span
+                style={{
+                  padding: '4px 14px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--font-size-sm)',
+                  backgroundColor: 'var(--color-bg-tertiary)',
+                  border: '1px solid var(--color-border-default)',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                {person}
+              </span>
+              {i < approval.chain.length - 1 && (
+                <span
+                  style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}
+                >
+                  &#8594;
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChecklistSection({ checklist }) {
+  const [items, setItems] = useState(checklist);
+  const toggle = (idx) => {
+    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, checked: !it.checked } : it)));
+  };
+  const done = items.filter((it) => it.checked).length;
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-accent-blue)' }}>&#9776;</span> Review Checklist
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 'var(--font-size-sm)',
+            color: done === items.length ? 'var(--color-success)' : 'var(--color-text-secondary)',
+            fontWeight: 400,
+          }}
+        >
+          {done}/{items.length} complete
+        </span>
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+        {items.map((it, i) => (
+          <label
+            key={i}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 'var(--spacing-md)',
+              padding: 'var(--spacing-sm) var(--spacing-md)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              backgroundColor: it.checked ? 'rgba(74,222,128,0.05)' : 'transparent',
+              transition: 'background-color var(--transition-base)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={it.checked}
+              onChange={() => toggle(i)}
+              style={{
+                marginTop: 3,
+                accentColor: 'var(--color-accent-blue)',
+                width: 16,
+                height: 16,
+              }}
+            />
+            <span
+              style={{
+                fontSize: 'var(--font-size-sm)',
+                color: it.checked ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)',
+                textDecoration: it.checked ? 'line-through' : 'none',
+                lineHeight: 'var(--line-height-relaxed)',
+              }}
+            >
+              {it.item}
+              {it.required && (
+                <span
+                  style={{
+                    color: 'var(--color-error)',
+                    marginLeft: 4,
+                    fontSize: 'var(--font-size-xs)',
+                  }}
+                >
+                  *
+                </span>
+              )}
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SimilarSowsSection({ similarSows }) {
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-accent-purple-light)' }}>&#128279;</span> Similar SoWs in
+        Knowledge Graph
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+        {similarSows.map((s, i) => (
+          <div
+            key={i}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: 'var(--spacing-md) var(--spacing-lg)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--color-bg-tertiary)',
+            }}
+          >
+            <div>
+              <p className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
+                {s.title}
+              </p>
+              <p className="text-tertiary" style={{ fontSize: 'var(--font-size-xs)' }}>
+                {s.methodology}
+              </p>
+            </div>
+            <div
+              style={{
+                padding: '4px 12px',
+                borderRadius: 'var(--radius-full)',
+                backgroundColor: 'rgba(139,92,246,0.12)',
+                color: 'var(--color-accent-purple-light)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 600,
+              }}
+            >
+              {Math.round(s.similarity * 100)}% match
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ───────────────────────────────────────────────────────────────
+
 export default function AIReview() {
   const router = useRouter();
   const { token } = useAuth();
@@ -41,6 +539,9 @@ export default function AIReview() {
   const [errors, setErrors] = useState({ file: '', methodology: '' });
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [recommendations, setRecommendations] = useState(null);
 
   const processSelectedFile = (selected) => {
     const fileError = validateFile(selected);
@@ -108,12 +609,29 @@ export default function AIReview() {
         throw new Error(detail?.detail || `Upload failed (${res.status})`);
       }
 
-      const sow = await res.json();
-      router.push(`/review/${sow.id}`);
+      await res.json();
+
+      // Upload succeeded — now fetch AI recommendations
+      setIsUploading(false);
+      setIsAnalyzing(true);
+
+      // Simulate analysis delay for demo
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // TODO: Replace mock data with API call when backend endpoint is ready
+      // const recRes = await fetch(`/api/sow/${sow.id}/recommendations`, {
+      //   headers: { Authorization: `Bearer ${token}` },
+      // });
+      // const data = await recRes.json();
+      const data = MOCK_RECOMMENDATIONS;
+
+      setRecommendations(data);
+      setIsAnalyzing(false);
+      setShowResults(true);
     } catch (err) {
       setError(err.message);
-    } finally {
       setIsUploading(false);
+      setIsAnalyzing(false);
     }
   };
 
@@ -162,142 +680,230 @@ export default function AIReview() {
           )}
 
           {/* Upload Card */}
-          <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-            <h2
-              className="text-xl font-semibold mb-xl"
-              style={{
-                paddingBottom: 'var(--spacing-md)',
-                borderBottom: '1px solid var(--color-border-default)',
-              }}
-            >
-              Upload SoW Document
-            </h2>
+          {!showResults && (
+            <>
+              <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                <h2
+                  className="text-xl font-semibold mb-xl"
+                  style={{
+                    paddingBottom: 'var(--spacing-md)',
+                    borderBottom: '1px solid var(--color-border-default)',
+                  }}
+                >
+                  Upload SoW Document
+                </h2>
 
-            {/* Drop Zone */}
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              style={{
-                border: `2px dashed ${isDragging ? 'var(--color-accent-blue)' : file ? 'var(--color-success)' : errors.file ? 'var(--color-error)' : 'var(--color-border-default)'}`,
-                borderRadius: 'var(--radius-lg)',
-                padding: 'var(--spacing-3xl) var(--spacing-xl)',
-                textAlign: 'center',
-                marginBottom: 'var(--spacing-xl)',
-                backgroundColor: isDragging
-                  ? 'rgba(0,120,212,0.05)'
-                  : file
-                    ? 'rgba(74,222,128,0.05)'
-                    : errors.file
-                      ? 'rgba(239,68,68,0.05)'
-                      : 'var(--color-bg-tertiary)',
-                transition: 'all var(--transition-base)',
-                cursor: 'pointer',
-              }}
-            >
-              <div style={{ fontSize: '2.5rem', marginBottom: 'var(--spacing-md)' }}>
-                {file ? '✅' : errors.file ? '❌' : '📄'}
+                {/* Drop Zone */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  style={{
+                    border: `2px dashed ${isDragging ? 'var(--color-accent-blue)' : file ? 'var(--color-success)' : errors.file ? 'var(--color-error)' : 'var(--color-border-default)'}`,
+                    borderRadius: 'var(--radius-lg)',
+                    padding: 'var(--spacing-3xl) var(--spacing-xl)',
+                    textAlign: 'center',
+                    marginBottom: 'var(--spacing-xl)',
+                    backgroundColor: isDragging
+                      ? 'rgba(0,120,212,0.05)'
+                      : file
+                        ? 'rgba(74,222,128,0.05)'
+                        : errors.file
+                          ? 'rgba(239,68,68,0.05)'
+                          : 'var(--color-bg-tertiary)',
+                    transition: 'all var(--transition-base)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ fontSize: '2.5rem', marginBottom: 'var(--spacing-md)' }}>
+                    {file ? '✅' : errors.file ? '❌' : '📄'}
+                  </div>
+
+                  {file ? (
+                    <>
+                      <p className="font-semibold mb-sm" style={{ color: 'var(--color-success)' }}>
+                        {file.name}
+                      </p>
+                      <p className="text-sm text-secondary">{formatFileSize(file.size)}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFile(null);
+                          setErrors((prev) => ({ ...prev, file: '' }));
+                        }}
+                        className="btn btn-ghost btn-sm"
+                        style={{ marginTop: 'var(--spacing-md)', color: 'var(--color-error)' }}
+                      >
+                        Remove file
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-secondary mb-md">
+                        Drag and drop your SoW document here, or
+                      </p>
+                      <label
+                        htmlFor="file-upload"
+                        className="btn btn-secondary btn-sm"
+                        style={{ cursor: 'pointer' }}
+                      >
+                        Browse Files
+                      </label>
+                      <p
+                        className="text-sm text-tertiary"
+                        style={{ marginTop: 'var(--spacing-md)' }}
+                      >
+                        Supported: .pdf, .docx (max 25 MB)
+                      </p>
+                    </>
+                  )}
+
+                  <input
+                    id="file-upload"
+                    type="file"
+                    accept=".pdf,.docx"
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
+                  />
+                </div>
+
+                {errors.file && (
+                  <p className="form-error" style={{ marginBottom: 'var(--spacing-md)' }}>
+                    {errors.file}
+                  </p>
+                )}
+
+                {/* Methodology */}
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">
+                    SoW Methodology <span style={{ color: 'var(--color-error)' }}>*</span>
+                  </label>
+                  <select
+                    value={methodology}
+                    onChange={(e) => {
+                      setMethodology(e.target.value);
+                      if (e.target.value) {
+                        setErrors((prev) => ({ ...prev, methodology: '' }));
+                      }
+                    }}
+                    className="form-select"
+                  >
+                    <option value="">Select a methodology…</option>
+                    {methodologies.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.methodology && <p className="form-error">{errors.methodology}</p>}
+                </div>
+                <p className="form-helper" style={{ marginTop: 'var(--spacing-sm)' }}>
+                  Google Docs users: File → Download as PDF or Word (.docx)
+                </p>
               </div>
 
-              {file ? (
-                <>
-                  <p className="font-semibold mb-sm" style={{ color: 'var(--color-success)' }}>
-                    {file.name}
-                  </p>
-                  <p className="text-sm text-secondary">{formatFileSize(file.size)}</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFile(null);
-                      setErrors((prev) => ({ ...prev, file: '' }));
-                    }}
-                    className="btn btn-ghost btn-sm"
-                    style={{ marginTop: 'var(--spacing-md)', color: 'var(--color-error)' }}
-                  >
-                    Remove file
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="text-secondary mb-md">Drag and drop your SoW document here, or</p>
-                  <label
-                    htmlFor="file-upload"
-                    className="btn btn-secondary btn-sm"
-                    style={{ cursor: 'pointer' }}
-                  >
-                    Browse Files
-                  </label>
-                  <p className="text-sm text-tertiary" style={{ marginTop: 'var(--spacing-md)' }}>
-                    Supported: .pdf, .docx (max 25 MB)
-                  </p>
-                </>
-              )}
+              {/* AI Info Banner */}
+              <div className="alert alert-info" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                <strong>How AI Review Works:</strong> Our model checks your SoW against MCEM
+                compliance standards, flags missing sections, scores delivery risk, and generates
+                actionable recommendations — typically in under 30 seconds.
+              </div>
 
-              <input
-                id="file-upload"
-                type="file"
-                accept=".pdf,.docx"
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-              />
-            </div>
-
-            {errors.file && (
-              <p className="form-error" style={{ marginBottom: 'var(--spacing-md)' }}>
-                {errors.file}
-              </p>
-            )}
-
-            {/* Methodology */}
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">
-                SoW Methodology <span style={{ color: 'var(--color-error)' }}>*</span>
-              </label>
-              <select
-                value={methodology}
-                onChange={(e) => {
-                  setMethodology(e.target.value);
-                  if (e.target.value) {
-                    setErrors((prev) => ({ ...prev, methodology: '' }));
-                  }
-                }}
-                className="form-select"
+              {/* Actions */}
+              <div
+                style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--spacing-md)' }}
               >
-                <option value="">Select a methodology…</option>
-                {methodologies.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              {errors.methodology && <p className="form-error">{errors.methodology}</p>}
-            </div>
-            <p className="form-helper" style={{ marginTop: 'var(--spacing-sm)' }}>
-              Google Docs users: File → Download as PDF or Word (.docx)
-            </p>
-          </div>
+                <button type="button" className="btn btn-secondary" onClick={() => router.back()}>
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpload}
+                  className="btn btn-primary btn-lg"
+                  disabled={!isValid || isUploading}
+                  style={{ opacity: isValid && !isUploading ? 1 : 0.6 }}
+                >
+                  {isUploading ? 'Uploading…' : 'Upload & Analyze'}
+                </button>
+              </div>
+            </>
+          )}
 
-          {/* AI Info Banner */}
-          <div className="alert alert-info" style={{ marginBottom: 'var(--spacing-lg)' }}>
-            <strong>How AI Review Works:</strong> Our model checks your SoW against MCEM compliance
-            standards, flags missing sections, scores delivery risk, and generates actionable
-            recommendations — typically in under 30 seconds.
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--spacing-md)' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => router.back()}>
-              Cancel
-            </button>
-            <button
-              onClick={handleUpload}
-              className="btn btn-primary btn-lg"
-              disabled={!isValid || isUploading}
-              style={{ opacity: isValid && !isUploading ? 1 : 0.6 }}
+          {/* Analyzing spinner */}
+          {isAnalyzing && (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: 'var(--spacing-3xl) 0',
+              }}
             >
-              {isUploading ? 'Uploading…' : 'Upload & Analyze'}
-            </button>
-          </div>
+              <div
+                style={{
+                  display: 'inline-block',
+                  width: 48,
+                  height: 48,
+                  border: '3px solid var(--color-border-default)',
+                  borderTopColor: 'var(--color-accent-blue)',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                }}
+              />
+              <p
+                className="text-secondary font-semibold"
+                style={{ marginTop: 'var(--spacing-lg)', fontSize: 'var(--font-size-lg)' }}
+              >
+                Analyzing SoW against MCEM standards…
+              </p>
+              <p className="text-tertiary" style={{ marginTop: 'var(--spacing-sm)' }}>
+                Checking compliance rules, risk patterns, and approval requirements
+              </p>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          )}
+
+          {/* Recommendations */}
+          {showResults && recommendations && (
+            <div>
+              {/* Success banner */}
+              <div
+                style={{
+                  marginBottom: 'var(--spacing-xl)',
+                  padding: 'var(--spacing-md) var(--spacing-lg)',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'rgba(74,222,128,0.08)',
+                  border: '1px solid rgba(74,222,128,0.3)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div>
+                  <p className="font-semibold" style={{ color: 'var(--color-success)' }}>
+                    Analysis Complete
+                  </p>
+                  <p className="text-sm text-secondary">
+                    {file?.name} — {methodology}
+                  </p>
+                </div>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setShowResults(false);
+                    setRecommendations(null);
+                    setFile(null);
+                    setMethodology('');
+                  }}
+                >
+                  Analyze Another
+                </button>
+              </div>
+
+              <ApprovalSection approval={recommendations.approval} />
+              <ViolationsSection violations={recommendations.violations} />
+              <RisksSection risks={recommendations.risks} />
+              <ChecklistSection checklist={recommendations.checklist} />
+              <SimilarSowsSection similarSows={recommendations.similarSows} />
+            </div>
+          )}
         </div>
       </div>
     </>
