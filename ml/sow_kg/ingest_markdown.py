@@ -177,14 +177,14 @@ def _extract_risks(content: str) -> list[dict]:
         if not headers:
             headers = [c.lower() for c in cells]
             continue
-        if set(cells) <= {"-", "---", "----", ""}:
+        if all(re.match(r"^-+$", c) or c == "" for c in cells):
             continue
 
         def col(names):
             for n in names:
-                for i, h in enumerate(headers):
-                    if n in h and i < len(cells):
-                        return cells[i]
+                for i, h in enumerate(headers):  # noqa: B023
+                    if n in h and i < len(cells):  # noqa: B023
+                        return cells[i]  # noqa: B023
             return ""
 
         desc = col(["risk", "description", "issue", "concern"])
@@ -284,14 +284,14 @@ def _extract_deliverables(content: str) -> list[dict]:
         if not headers:
             headers = [c.lower() for c in cells]
             continue
-        if set(cells) <= {"-", "---", "----", ""}:
+        if all(re.match(r"^-+$", c) or c == "" for c in cells):
             continue
 
         def col(names):
             for n in names:
-                for i, h in enumerate(headers):
-                    if n in h and i < len(cells):
-                        return cells[i]
+                for i, h in enumerate(headers):  # noqa: B023
+                    if n in h and i < len(cells):  # noqa: B023
+                        return cells[i]  # noqa: B023
             return ""
 
         title = col(["name", "deliverable", "work product", "title", "output"])

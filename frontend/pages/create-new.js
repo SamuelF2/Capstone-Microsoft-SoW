@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { useAuth } from '../lib/auth';
 
 export default function CreateNew() {
   const router = useRouter();
+  const { token } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
   const [form, setForm] = useState({
     sowTitle: '',
     opportunityId: '',
@@ -14,19 +17,78 @@ export default function CreateNew() {
     customerName: '',
     customerLegalName: '',
     deliveryMethodology: '',
+    cycle: '1',
   });
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    // Simulate submission — in production, POST to your API here
-    setTimeout(() => {
-      router.push('/all-sows');
-    }, 1000);
+    setError(null);
+
+    try {
+      // POST to backend — backend generates the canonical integer ID
+      const res = await fetch('/api/sow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          title: form.sowTitle,
+          cycle: parseInt(form.cycle, 10) || 1,
+          methodology: form.deliveryMethodology,
+          customer_name: form.customerName,
+          opportunity_id: form.opportunityId,
+          deal_value: form.dealValue ? parseFloat(form.dealValue) : null,
+          metadata: {
+            workOrderNumber: form.workOrderNumber,
+            estimatedMargin: form.estimatedMargin,
+            customerLegalName: form.customerLegalName,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Server error ${res.status}`);
+      }
+
+      const sow = await res.json();
+      const id = sow.id; // integer PK from PostgreSQL
+
+      // Cache the SoW record in localStorage for offline auto-save
+      const sowRecord = {
+        id,
+        sowTitle: sow.title,
+        opportunityId: sow.opportunity_id || form.opportunityId,
+        workOrderNumber: form.workOrderNumber,
+        dealValue: sow.deal_value ?? form.dealValue,
+        estimatedMargin: form.estimatedMargin,
+        customerName: sow.customer_name || form.customerName,
+        customerLegalName: form.customerLegalName,
+        deliveryMethodology: sow.methodology || form.deliveryMethodology,
+        cycle: sow.cycle || parseInt(form.cycle, 10),
+        contentId: sow.content_id,
+        status: sow.status || 'draft',
+        createdAt: sow.uploaded_at || new Date().toISOString(),
+        updatedAt: sow.updated_at || new Date().toISOString(),
+      };
+
+      localStorage.setItem(`sow-${id}`, JSON.stringify(sowRecord));
+
+      // Registry of all known backend IDs (integers)
+      const registry = JSON.parse(localStorage.getItem('sow-registry') || '[]');
+      if (!registry.includes(id)) {
+        registry.unshift(id);
+        localStorage.setItem('sow-registry', JSON.stringify(registry));
+      }
+
+      router.push(`/draft/${id}`);
+    } catch (err) {
+      setError(err.message);
+      setIsSubmitting(false);
+    }
   };
 
   const isValid =
@@ -47,12 +109,7 @@ export default function CreateNew() {
           padding: 'var(--spacing-2xl) var(--spacing-xl)',
         }}
       >
-        <div
-          style={{
-            maxWidth: '760px',
-            margin: '0 auto',
-          }}
-        >
+        <div style={{ maxWidth: '760px', margin: '0 auto' }}>
           {/* Header */}
           <div style={{ marginBottom: 'var(--spacing-2xl)' }}>
             <h1 className="text-4xl font-bold mb-sm">Create New SoW</h1>
@@ -60,6 +117,23 @@ export default function CreateNew() {
               Fill in the details below to generate a new Statement of Work template.
             </p>
           </div>
+
+          {/* Error banner */}
+          {error && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--color-error)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
+              <strong>Could not create SoW:</strong> {error}
+            </div>
+          )}
 
           {/* Form Card */}
           <form onSubmit={handleSubmit}>
@@ -230,25 +304,57 @@ export default function CreateNew() {
                 </div>
               </div>
 
-              {/* Row 5: Delivery Methodology (full width) */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">
-                  Delivery Methodology <span style={{ color: 'var(--color-error)' }}>*</span>
-                </label>
-                <select
-                  name="deliveryMethodology"
-                  value={form.deliveryMethodology}
-                  onChange={handleChange}
-                  className="form-select"
-                  required
-                >
-                  <option value="">Select a methodology…</option>
-                  {methodologies.map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </select>
+              {/* Row 5: Delivery Methodology + Deal Cycle */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 1fr',
+                  gap: 'var(--spacing-lg)',
+                  marginBottom: 0,
+                }}
+              >
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">
+                    Delivery Methodology <span style={{ color: 'var(--color-error)' }}>*</span>
+                  </label>
+                  <select
+                    name="deliveryMethodology"
+                    value={form.deliveryMethodology}
+                    onChange={handleChange}
+                    className="form-select"
+                    required
+                  >
+                    <option value="">Select a methodology…</option>
+                    {methodologies.map((method) => (
+                      <option key={method} value={method}>
+                        {method}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">
+                    Deal Cycle
+                    <span
+                      className="text-tertiary"
+                      style={{ marginLeft: 'var(--spacing-xs)', fontWeight: 'normal' }}
+                    >
+                      (1–4)
+                    </span>
+                  </label>
+                  <select
+                    name="cycle"
+                    value={form.cycle}
+                    onChange={handleChange}
+                    className="form-select"
+                  >
+                    <option value="1">Cycle 1</option>
+                    <option value="2">Cycle 2</option>
+                    <option value="3">Cycle 3</option>
+                    <option value="4">Cycle 4</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -258,7 +364,12 @@ export default function CreateNew() {
                 <span style={{ color: 'var(--color-error)' }}>*</span> Required fields
               </p>
               <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => router.back()}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => router.back()}
+                  disabled={isSubmitting}
+                >
                   Cancel
                 </button>
                 <button

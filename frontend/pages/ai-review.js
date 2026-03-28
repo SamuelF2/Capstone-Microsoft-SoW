@@ -1,22 +1,67 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { useAuth } from '../lib/auth';
+
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
+
+const ALLOWED_MIMES = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx'];
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function validateFile(file) {
+  const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    return `Invalid file type "${ext}". Only .pdf and .docx files are accepted.`;
+  }
+  if (file.type && !ALLOWED_MIMES.has(file.type)) {
+    return 'File type not recognized. Please upload a genuine PDF or Word (.docx) file.';
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return `File is too large (${formatFileSize(file.size)}). Maximum size is 25 MB.`;
+  }
+  return '';
+}
 
 export default function AIReview() {
   const router = useRouter();
+  const { token } = useAuth();
   const [file, setFile] = useState(null);
   const [methodology, setMethodology] = useState('');
   const [isDragging, setIsDragging] = useState(false);
+  const [errors, setErrors] = useState({ file: '', methodology: '' });
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const processSelectedFile = (selected) => {
+    const fileError = validateFile(selected);
+    if (fileError) {
+      setFile(null);
+      setErrors((prev) => ({ ...prev, file: fileError }));
+    } else {
+      setFile(selected);
+      setErrors((prev) => ({ ...prev, file: '' }));
+    }
+  };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      processSelectedFile(e.target.files[0]);
     }
   };
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    setIsDragging(true);
+    if (!isDragging) setIsDragging(true);
   };
 
   const handleDragLeave = () => setIsDragging(false);
@@ -25,26 +70,56 @@ export default function AIReview() {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
+      processSelectedFile(e.dataTransfer.files[0]);
     }
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
+    const newErrors = { file: '', methodology: '' };
     if (!file) {
-      alert('Please upload a SoW document first');
-      return;
+      newErrors.file = 'Please upload a SoW document.';
     }
     if (!methodology) {
-      alert('Please select a methodology');
+      newErrors.methodology = 'Please select a methodology.';
+    }
+    if (newErrors.file || newErrors.methodology) {
+      setErrors(newErrors);
       return;
     }
-    // In production: upload file and redirect to the resulting review ID
-    router.push('/review/1');
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('methodology', methodology);
+
+      const res = await fetch('/api/sow/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Upload failed (${res.status})`);
+      }
+
+      const sow = await res.json();
+      router.push(`/review/${sow.id}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const methodologies = ['Agile Sprint Delivery', 'Sure Step 365', 'Waterfall', 'Cloud Adoption'];
 
-  const isValid = file && methodology;
+  const isValid = file && methodology && !errors.file && !errors.methodology;
 
   return (
     <>
@@ -69,6 +144,23 @@ export default function AIReview() {
             </p>
           </div>
 
+          {/* Error banner */}
+          {error && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--color-error)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
+              <strong>Upload failed:</strong> {error}
+            </div>
+          )}
+
           {/* Upload Card */}
           <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
             <h2
@@ -87,7 +179,7 @@ export default function AIReview() {
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               style={{
-                border: `2px dashed ${isDragging ? 'var(--color-accent-blue)' : file ? 'var(--color-success)' : 'var(--color-border-default)'}`,
+                border: `2px dashed ${isDragging ? 'var(--color-accent-blue)' : file ? 'var(--color-success)' : errors.file ? 'var(--color-error)' : 'var(--color-border-default)'}`,
                 borderRadius: 'var(--radius-lg)',
                 padding: 'var(--spacing-3xl) var(--spacing-xl)',
                 textAlign: 'center',
@@ -96,13 +188,15 @@ export default function AIReview() {
                   ? 'rgba(0,120,212,0.05)'
                   : file
                     ? 'rgba(74,222,128,0.05)'
-                    : 'var(--color-bg-tertiary)',
+                    : errors.file
+                      ? 'rgba(239,68,68,0.05)'
+                      : 'var(--color-bg-tertiary)',
                 transition: 'all var(--transition-base)',
                 cursor: 'pointer',
               }}
             >
               <div style={{ fontSize: '2.5rem', marginBottom: 'var(--spacing-md)' }}>
-                {file ? '✅' : '📄'}
+                {file ? '✅' : errors.file ? '❌' : '📄'}
               </div>
 
               {file ? (
@@ -110,10 +204,13 @@ export default function AIReview() {
                   <p className="font-semibold mb-sm" style={{ color: 'var(--color-success)' }}>
                     {file.name}
                   </p>
-                  <p className="text-sm text-secondary">{(file.size / 1024).toFixed(1)} KB</p>
+                  <p className="text-sm text-secondary">{formatFileSize(file.size)}</p>
                   <button
                     type="button"
-                    onClick={() => setFile(null)}
+                    onClick={() => {
+                      setFile(null);
+                      setErrors((prev) => ({ ...prev, file: '' }));
+                    }}
                     className="btn btn-ghost btn-sm"
                     style={{ marginTop: 'var(--spacing-md)', color: 'var(--color-error)' }}
                   >
@@ -131,7 +228,7 @@ export default function AIReview() {
                     Browse Files
                   </label>
                   <p className="text-sm text-tertiary" style={{ marginTop: 'var(--spacing-md)' }}>
-                    Supported: .pdf, .doc, .docx
+                    Supported: .pdf, .docx (max 25 MB)
                   </p>
                 </>
               )}
@@ -139,11 +236,17 @@ export default function AIReview() {
               <input
                 id="file-upload"
                 type="file"
-                accept=".pdf,.doc,.docx"
+                accept=".pdf,.docx"
                 onChange={handleFileChange}
                 style={{ display: 'none' }}
               />
             </div>
+
+            {errors.file && (
+              <p className="form-error" style={{ marginBottom: 'var(--spacing-md)' }}>
+                {errors.file}
+              </p>
+            )}
 
             {/* Methodology */}
             <div className="form-group" style={{ marginBottom: 0 }}>
@@ -152,7 +255,12 @@ export default function AIReview() {
               </label>
               <select
                 value={methodology}
-                onChange={(e) => setMethodology(e.target.value)}
+                onChange={(e) => {
+                  setMethodology(e.target.value);
+                  if (e.target.value) {
+                    setErrors((prev) => ({ ...prev, methodology: '' }));
+                  }
+                }}
                 className="form-select"
               >
                 <option value="">Select a methodology…</option>
@@ -162,7 +270,11 @@ export default function AIReview() {
                   </option>
                 ))}
               </select>
+              {errors.methodology && <p className="form-error">{errors.methodology}</p>}
             </div>
+            <p className="form-helper" style={{ marginTop: 'var(--spacing-sm)' }}>
+              Google Docs users: File → Download as PDF or Word (.docx)
+            </p>
           </div>
 
           {/* AI Info Banner */}
@@ -180,10 +292,10 @@ export default function AIReview() {
             <button
               onClick={handleUpload}
               className="btn btn-primary btn-lg"
-              disabled={!isValid}
-              style={{ opacity: isValid ? 1 : 0.6 }}
+              disabled={!isValid || isUploading}
+              style={{ opacity: isValid && !isUploading ? 1 : 0.6 }}
             >
-              Upload & Analyze
+              {isUploading ? 'Uploading…' : 'Upload & Analyze'}
             </button>
           </div>
         </div>

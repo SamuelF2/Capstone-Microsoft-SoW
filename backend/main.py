@@ -1,89 +1,301 @@
 """
-Cocoon Backend API - FastAPI with Neo4j + PostgreSQL
+Cocoon Backend API — FastAPI with Neo4j + PostgreSQL
+
+Structure
+---------
+main.py        App entry point, lifespan, middleware, health check
+database.py    Shared connection state (neo4j_driver, pg_pool)
+auth.py        JWT utilities + get_current_user dependency
+models.py      Pydantic models (UserResponse, SoWCreate, …)
+config.py      Env-var driven configuration
+routers/
+  auth.py      POST /api/auth/login|logout|register  GET /api/auth/me
+  sow.py       CRUD + status for /api/sow/…
+
+PostgreSQL schema (per Database Schema for PostgreSQL.pdf)
+----------------------------------------------------------
+users           — authentication (id, email, username, hashed_password, name, …)
+ai_suggestion   — ML risk output (id, flag, validation_recommendation, risks)
+content         — SOW body skeleton (id, scope_id, price_id, assumption_id, resource_id)
+scope           — work scope (id, content_id, in_scope, out_scope)
+pricing         — financial terms (id, content_id, total_value, breakdown)
+assumptions     — drafting assumptions (id, content_id, items)
+resources       — staffing (id, content_id, team)
+sow_documents   — primary SOW record (id, cycle, content_id, ai_suggestion_id, …)
+history         — audit log (id, sow_id, changed_by, change_type, changed_at, diff)
+collaboration   — user↔SOW role mapping (id, sow_id, user_id, role)
+review_results  — review findings (id, sow_id, reviewer, score, findings, reviewed_at)
 """
 
-import os
+from __future__ import annotations
+
+import asyncio
 from contextlib import asynccontextmanager
 
 import asyncpg
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+import database
+from config import DATABASE_URL, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
+from routers.auth import router as auth_router
+from routers.sow import router as sow_router
 from status import router as status_router
+from validators import (
+    build_health_status,
+    format_graph_stats,
+    format_knowledge_result,
+    validate_knowledge_payload,
+)
 
-load_dotenv()
-
-# ── Config ──────────────────────────────────────────────
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ["NEO4J_PASSWORD"]
-
-PG_USER = os.environ["POSTGRES_USER"]
-PG_PASSWORD = os.environ["POSTGRES_PASSWORD"]
-PG_DB = os.environ["POSTGRES_DB"]
-PG_HOST = os.getenv("POSTGRES_HOST", "postgres")
-PG_PORT = os.getenv("POSTGRES_PORT", "5432")
-DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
-
-# ── Database clients ────────────────────────────────────
-neo4j_driver = None
-pg_pool = None
+# ── Lifespan ─────────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup / shutdown lifecycle."""
-    global neo4j_driver, pg_pool
+    """Initialise and tear down database connections."""
 
-    # --- Start Neo4j driver ---
-    neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-    neo4j_driver.verify_connectivity()
-    print("Neo4j connected")
+    # ── Connect databases (non-blocking) ─────────────────────────────────────
+    # Try once quickly. If it fails, start in degraded mode so the container
+    # passes Azure's startup probe. The /health endpoint reports status.
 
-    # --- Start PostgreSQL pool ---
-    pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
-    print("PostgreSQL connected")
+    # Neo4j — 5s hard timeout
+    try:
+        database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        database.neo4j_driver.verify_connectivity()
+        print("Neo4j connected")
+    except Exception as e:
+        print(f"Neo4j connection failed, starting in degraded mode: {e}")
+        database.neo4j_driver = None
 
-    # --- Create initial tables if needed ---
-    async with pg_pool.acquire() as conn:
+    # PostgreSQL — 5s hard timeout (asyncpg timeout alone can hang on DNS)
+    try:
+        database.pg_pool = await asyncio.wait_for(
+            asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10),
+            timeout=5,
+        )
+        print("PostgreSQL connected")
+    except Exception as e:
+        print(f"PostgreSQL connection failed, starting in degraded mode: {e}")
+        database.pg_pool = None
+
+    # ── Schema bootstrap ─────────────────────────────────────────────────────
+    # Core tables from infrastructure/postgres/init/01-init.sql are created on
+    # first container start.  Everything below is idempotent and aligns the
+    # schema with the Database Schema for PostgreSQL.pdf specification.
+    if not database.pg_pool:
+        print("Skipping schema bootstrap — PostgreSQL not available")
+        yield
+        return
+
+    async with database.pg_pool.acquire() as conn:
+        # ------------------------------------------------------------------ #
+        # 1. USERS                                                            #
+        # PDF §2.6: id, username, password, name                              #
+        # We keep email-based auth and add username + name alias columns.     #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id              SERIAL PRIMARY KEY,
+                email           TEXT UNIQUE NOT NULL,
+                hashed_password TEXT NOT NULL,
+                full_name       TEXT,
+                role            TEXT NOT NULL DEFAULT 'consultant',
+                is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+        for col_ddl in [
+            # PDF §2.6 — username (short login handle / display alias)
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;",
+            # PDF §2.6 — name (display name, mirrors full_name)
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
+        ]:
+            await conn.execute(col_ddl)
+
+        # ------------------------------------------------------------------ #
+        # 2. AI SUGGESTION                                                    #
+        # Must exist before sow_documents references it.                      #
+        # PDF §2.3: id, flag (Green/Yellow/Red), validation_recommendation,  #
+        #           risks                                                      #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_suggestion (
+                id                        SERIAL PRIMARY KEY,
+                flag                      TEXT,
+                validation_recommendation JSONB,
+                risks                     JSONB
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 3. CONTENT (skeleton — child FK columns added after child tables)  #
+        # PDF §2.2: id, scope_id, price_id, assumption_id, resource_id       #
+        # Created without FK constraints first; FKs are added below.         #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS content (
+                id            SERIAL PRIMARY KEY,
+                scope_id      INTEGER,
+                price_id      INTEGER,
+                assumption_id INTEGER,
+                resource_id   INTEGER
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 4. CHILD CONTENT TABLES  (PDF §2.2.1–2.2.4)                        #
+        # Each references content(id) via content_id.                         #
+        # Extra columns store the actual section data (JSONB for flexibility) #
+        # until the PDF's TBD types are finalised.                            #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS scope (
+                id         SERIAL PRIMARY KEY,
+                content_id INTEGER REFERENCES content(id) ON DELETE CASCADE,
+                in_scope   JSONB,
+                out_scope  JSONB
+            );
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS pricing (
+                id          SERIAL PRIMARY KEY,
+                content_id  INTEGER REFERENCES content(id) ON DELETE CASCADE,
+                total_value NUMERIC,
+                breakdown   JSONB
+            );
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS assumptions (
+                id         SERIAL PRIMARY KEY,
+                content_id INTEGER REFERENCES content(id) ON DELETE CASCADE,
+                items      JSONB
+            );
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS resources (
+                id         SERIAL PRIMARY KEY,
+                content_id INTEGER REFERENCES content(id) ON DELETE CASCADE,
+                team       JSONB
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 5. SOW_DOCUMENTS  (primary SOW record)                              #
+        # Core columns from infra SQL; extended to match PDF §2.1.            #
+        # PDF §2.1: id, cycle (1–4), content_id → content,                   #
+        #           ai_suggestion_id → ai_suggestion                          #
+        # ------------------------------------------------------------------ #
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS sow_documents (
-                id              SERIAL PRIMARY KEY,
-                title           TEXT NOT NULL,
-                status          TEXT NOT NULL DEFAULT 'draft',
-                uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                content         JSONB,
-                metadata        JSONB
+                id          SERIAL PRIMARY KEY,
+                title       TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'draft',
+                uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                content     JSONB,
+                metadata    JSONB
             );
         """)
+        for col_ddl in [
+            # PDF §2.1 columns
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS cycle INTEGER;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS content_id INTEGER REFERENCES content(id);",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS ai_suggestion_id INTEGER REFERENCES ai_suggestion(id);",
+            # Application bridging + metadata columns
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS client_id TEXT UNIQUE;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS methodology TEXT;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS customer_name TEXT;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS opportunity_id TEXT;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS deal_value NUMERIC;",
+        ]:
+            await conn.execute(col_ddl)
+
+        # ------------------------------------------------------------------ #
+        # 6. REVIEW RESULTS                                                   #
+        # ------------------------------------------------------------------ #
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS review_results (
-                id              SERIAL PRIMARY KEY,
-                sow_id          INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
-                reviewer        TEXT,
-                score           REAL,
-                findings        JSONB,
-                reviewed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                id          SERIAL PRIMARY KEY,
+                sow_id      INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
+                reviewer    TEXT,
+                score       REAL,
+                findings    JSONB,
+                reviewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
-    print("PostgreSQL tables initialized")
+
+        # ------------------------------------------------------------------ #
+        # 7. HISTORY  (audit log)                                             #
+        # PDF §2.4: id (+ application columns for full audit trail)           #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS history (
+                id          SERIAL PRIMARY KEY,
+                sow_id      INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
+                changed_by  INTEGER REFERENCES users(id),
+                change_type TEXT,
+                changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                diff        JSONB
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 8. COLLABORATION  (user↔SOW role mapping)                           #
+        # PDF §2.5: user_id → users, role                                     #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS collaboration (
+                id      SERIAL PRIMARY KEY,
+                sow_id  INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                role    TEXT
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 9. INDEXES                                                          #
+        # ------------------------------------------------------------------ #
+        for idx_ddl in [
+            "CREATE INDEX IF NOT EXISTS idx_sow_status      ON sow_documents(status);",
+            "CREATE INDEX IF NOT EXISTS idx_sow_client_id   ON sow_documents(client_id);",
+            "CREATE INDEX IF NOT EXISTS idx_sow_methodology ON sow_documents(methodology);",
+            "CREATE INDEX IF NOT EXISTS idx_sow_cycle       ON sow_documents(cycle);",
+            "CREATE INDEX IF NOT EXISTS idx_sow_content_id  ON sow_documents(content_id);",
+            "CREATE INDEX IF NOT EXISTS idx_review_sow_id   ON review_results(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_history_sow_id  ON history(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_collab_sow_id   ON collaboration(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_collab_user_id  ON collaboration(user_id);",
+        ]:
+            await conn.execute(idx_ddl)
+
+    print("PostgreSQL schema ready")
+
+    # ── Upload directory ──────────────────────────────────────────────────────
+    from pathlib import Path
+
+    from config import UPLOAD_DIR
+
+    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    print(f"Upload directory ready: {UPLOAD_DIR}")
 
     yield
 
-    # --- Cleanup ---
-    if neo4j_driver:
-        neo4j_driver.close()
-    if pg_pool:
-        await pg_pool.close()
+    # ── Cleanup ──────────────────────────────────────────────────────────────
+    if database.neo4j_driver:
+        database.neo4j_driver.close()
+    if database.pg_pool:
+        await database.pg_pool.close()
 
 
-# ── App ─────────────────────────────────────────────────
+# ── App ───────────────────────────────────────────────────────────────────────
+
 app = FastAPI(
     title="Cocoon API",
-    description="AI-enabled Statement of Work review and automation",
-    version="0.1.0",
+    description="AI-enabled Statement of Work drafting, review, and automation",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -95,123 +307,57 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Status page ─────────────────────────────────────────
-app.include_router(status_router)
+# ── Routers ───────────────────────────────────────────────────────────────────
+
+app.include_router(status_router)  # /status  (HTML status page)
+app.include_router(auth_router)  # /api/auth/...
+app.include_router(sow_router)  # /api/sow/...
 
 
-# ── Health ──────────────────────────────────────────────
-@app.get("/health")
+# ── Health ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/health", tags=["health"])
 async def health():
     """Check connectivity to both databases."""
-    status = {"status": "healthy", "neo4j": "unknown", "postgres": "unknown"}
+    neo4j_ok, neo4j_error = True, None
+    pg_ok, pg_error = True, None
 
-    # Neo4j check
     try:
-        neo4j_driver.verify_connectivity()
-        status["neo4j"] = "connected"
-    except Exception as e:
-        status["neo4j"] = f"error: {e}"
-        status["status"] = "degraded"
+        database.neo4j_driver.verify_connectivity()
+    except Exception as exc:
+        neo4j_ok, neo4j_error = False, str(exc)
 
-    # PostgreSQL check
     try:
-        async with pg_pool.acquire() as conn:
+        async with database.pg_pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        status["postgres"] = "connected"
-    except Exception as e:
-        status["postgres"] = f"error: {e}"
-        status["status"] = "degraded"
+    except Exception as exc:
+        pg_ok, pg_error = False, str(exc)
 
-    return status
+    return build_health_status(neo4j_ok, neo4j_error, pg_ok, pg_error)
 
 
-# ── SoW CRUD (PostgreSQL) ──────────────────────────────
-@app.get("/api/sow")
-async def list_sows():
-    """List all SoW documents."""
-    async with pg_pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, title, status, uploaded_at, updated_at FROM sow_documents ORDER BY updated_at DESC"
-        )
-    return [dict(r) for r in rows]
+# ── Graph endpoints (Neo4j — managed by separate team; kept in main for now) ──
 
 
-@app.post("/api/sow")
-async def create_sow(payload: dict):
-    """Create a new SoW document."""
-    title = payload.get("title")
-    if not title:
-        raise HTTPException(status_code=400, detail="title is required")
-
-    async with pg_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "INSERT INTO sow_documents (title, content, metadata) VALUES ($1, $2, $3) RETURNING *",
-            title,
-            payload.get("content"),
-            payload.get("metadata"),
-        )
-    return dict(row)
-
-
-@app.get("/api/sow/{sow_id}")
-async def get_sow(sow_id: int):
-    """Get a single SoW document."""
-    async with pg_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="SoW not found")
-    return dict(row)
-
-
-@app.delete("/api/sow/{sow_id}")
-async def delete_sow(sow_id: int):
-    """Delete a SoW document."""
-    async with pg_pool.acquire() as conn:
-        result = await conn.execute("DELETE FROM sow_documents WHERE id = $1", sow_id)
-    if result == "DELETE 0":
-        raise HTTPException(status_code=404, detail="SoW not found")
-    return {"deleted": sow_id}
-
-
-# ── Graph Operations (Neo4j) ───────────────────────────
-@app.get("/api/graph/stats")
+@app.get("/api/graph/stats", tags=["graph"])
 async def graph_stats():
     """Get Neo4j graph statistics."""
-    with neo4j_driver.session() as session:
+    with database.neo4j_driver.session() as session:
         node_count = session.run("MATCH (n) RETURN count(n) AS count").single()["count"]
         rel_count = session.run("MATCH ()-[r]->() RETURN count(r) AS count").single()["count"]
         labels = session.run(
             "CALL db.labels() YIELD label RETURN collect(label) AS labels"
         ).single()["labels"]
-    return {
-        "nodes": node_count,
-        "relationships": rel_count,
-        "labels": labels,
-    }
+    return format_graph_stats(node_count, rel_count, labels)
 
 
-@app.post("/api/graph/sow-knowledge")
+@app.post("/api/graph/sow-knowledge", tags=["graph"])
 async def add_sow_knowledge(payload: dict):
-    """Add SoW knowledge entities and relationships to Neo4j.
+    """Add SoW knowledge entities and relationships to Neo4j."""
+    sow_id, entities, relationships = validate_knowledge_payload(payload)
 
-    Example payload:
-    {
-        "sow_id": 1,
-        "entities": [
-            {"label": "Deliverable", "name": "Architecture Document", "properties": {}},
-            {"label": "Milestone", "name": "Phase 1 Complete", "properties": {}}
-        ],
-        "relationships": [
-            {"from": "Architecture Document", "to": "Phase 1 Complete", "type": "PART_OF"}
-        ]
-    }
-    """
-    sow_id = payload.get("sow_id")
-    entities = payload.get("entities", [])
-    relationships = payload.get("relationships", [])
-
-    with neo4j_driver.session() as session:
-        # Create or merge entities
+    with database.neo4j_driver.session() as session:
         for entity in entities:
             session.run(
                 f"MERGE (n:{entity['label']} {{name: $name, sow_id: $sow_id}}) SET n += $props",
@@ -219,8 +365,6 @@ async def add_sow_knowledge(payload: dict):
                 sow_id=sow_id,
                 props=entity.get("properties", {}),
             )
-
-        # Create relationships
         for rel in relationships:
             session.run(
                 f"MATCH (a {{name: $from_name, sow_id: $sow_id}}), "
@@ -231,8 +375,4 @@ async def add_sow_knowledge(payload: dict):
                 sow_id=sow_id,
             )
 
-    return {
-        "status": "ok",
-        "entities_added": len(entities),
-        "relationships_added": len(relationships),
-    }
+    return format_knowledge_result(len(entities), len(relationships))

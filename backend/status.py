@@ -9,6 +9,7 @@ import time
 import httpx
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
+from status_utils import aggregate_service_results, compute_overall_status, truncate_error
 
 router = APIRouter()
 
@@ -33,7 +34,7 @@ async def check_neo4j() -> dict:
             "name": "Neo4j Graph DB",
             "status": "down",
             "port": 7687,
-            "detail": str(e).split("\n")[0][:80],
+            "detail": truncate_error(str(e)),
         }
 
 
@@ -50,7 +51,7 @@ async def check_postgres() -> dict:
             "name": "PostgreSQL",
             "status": "down",
             "port": 5432,
-            "detail": str(e).split("\n")[0][:80],
+            "detail": truncate_error(str(e)),
         }
 
 
@@ -86,16 +87,10 @@ async def status_health():
         check_frontend(),
         return_exceptions=True,
     )
-    services = []
-    for r in results:
-        if isinstance(r, Exception):
-            services.append({"name": "Unknown", "status": "down", "port": 0, "detail": str(r)[:80]})
-        else:
-            services.append(r)
+    services = aggregate_service_results(results)
     elapsed = round((time.time() - start) * 1000)
-    all_up = all(s["status"] == "up" for s in services)
     return {
-        "status": "healthy" if all_up else "degraded",
+        "status": compute_overall_status(services),
         "services": services,
         "check_ms": elapsed,
     }
