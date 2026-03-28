@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useAuth } from '../../lib/auth';
 
 // Shared components
 import ExecutiveSummary from '../../components/sow/ExecutiveSummary';
@@ -394,11 +395,14 @@ function SaveIndicator({ savedAt }) {
 export default function DraftPage() {
   const router = useRouter();
   const { id } = router.query;
+  const { token } = useAuth();
 
   const [sowData, setSowData] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
   const [savedAt, setSavedAt] = useState(null);
   const [notFound, setNotFound] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
   // Load SoW from localStorage
   useEffect(() => {
@@ -426,6 +430,37 @@ export default function DraftPage() {
   // Update a top-level section of the SoW data
   const updateSection = (section, value) => {
     setSowData((prev) => ({ ...prev, [section]: value }));
+  };
+
+  // Submit the SoW for review — sets status to in_review on the backend
+  const handleSubmitForReview = async () => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch(`/api/sow/${id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: 'in_review' }),
+      });
+
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Server error ${res.status}`);
+      }
+
+      // Reflect new status in localStorage
+      const updated = { ...sowData, status: 'in_review', updatedAt: new Date().toISOString() };
+      localStorage.setItem(`sow-${id}`, JSON.stringify(updated));
+
+      router.push(`/review/${id}`);
+    } catch (err) {
+      setSubmitError(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (notFound) {
@@ -467,6 +502,7 @@ export default function DraftPage() {
   }
 
   const tabs = getTabConfig(sowData.deliveryMethodology);
+  const isLastTab = activeTab === tabs.length - 1;
   const badgeStyle = METHODOLOGY_BADGE[sowData.deliveryMethodology] ?? {
     bg: 'var(--color-bg-tertiary)',
     color: 'var(--color-text-secondary)',
@@ -717,31 +753,54 @@ export default function DraftPage() {
             margin: '0 auto',
             padding: '0 var(--spacing-xl) var(--spacing-2xl)',
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            flexDirection: 'column',
+            gap: 'var(--spacing-sm)',
           }}
         >
-          <button
-            className="btn btn-secondary"
-            onClick={() => setActiveTab((t) => Math.max(0, t - 1))}
-            disabled={activeTab === 0}
-            style={{ opacity: activeTab === 0 ? 0.4 : 1 }}
-          >
-            ← Previous
-          </button>
+          {submitError && (
+            <p
+              style={{
+                textAlign: 'right',
+                fontSize: 'var(--font-size-sm)',
+                color: 'var(--color-error)',
+              }}
+            >
+              {submitError}
+            </p>
+          )}
 
-          <span className="text-sm text-secondary">
-            {activeTab + 1} of {tabs.length}
-          </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setActiveTab((t) => Math.max(0, t - 1))}
+              disabled={activeTab === 0}
+              style={{ opacity: activeTab === 0 ? 0.4 : 1 }}
+            >
+              ← Previous
+            </button>
 
-          <button
-            className="btn btn-primary"
-            onClick={() => setActiveTab((t) => Math.min(tabs.length - 1, t + 1))}
-            disabled={activeTab === tabs.length - 1}
-            style={{ opacity: activeTab === tabs.length - 1 ? 0.4 : 1 }}
-          >
-            Next →
-          </button>
+            <span className="text-sm text-secondary">
+              {activeTab + 1} of {tabs.length}
+            </span>
+
+            {isLastTab ? (
+              <button
+                className="btn btn-primary"
+                onClick={handleSubmitForReview}
+                disabled={isSubmitting}
+                style={{ opacity: isSubmitting ? 0.6 : 1 }}
+              >
+                {isSubmitting ? 'Submitting…' : 'Submit for Review →'}
+              </button>
+            ) : (
+              <button
+                className="btn btn-primary"
+                onClick={() => setActiveTab((t) => Math.min(tabs.length - 1, t + 1))}
+              >
+                Next →
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </>

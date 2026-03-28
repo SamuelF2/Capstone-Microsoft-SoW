@@ -1,0 +1,21 @@
+project_id,project_name,deal_terms,deal_type,customer_id,customer_name,customer_location,customer_industry,deal_signature_date,start_date,end_date
+PROJ-0001,Margie's Strategic AI/ML Platform Modernization,Fixed,New,CUST-011,Margie's Travel Corp,"Atlanta, GA",Transportation,2023-09-08,2023-09-22,2024-05-19
+PROJ-0002,Northwind Strategic AI/ML Platform Solution,Time & Material,New,CUST-002,Northwind Health Systems,"Boston, MA",Healthcare,2023-01-31,2023-02-09,2023-06-09
+PROJ-0003,Alpine Unified Cloud Migration Program,Fixed,New,CUST-009,Alpine Ski House Hospitality,"Denver, CO",Hospitality,2023-11-29,2023-12-28,2025-05-21
+PROJ-0004,Fabrikam Accelerated Application Modernization Initiative,Time & Material,New,CUST-004,Fabrikam Manufacturing,"Detroit, MI",Manufacturing,2023-06-13,2023-07-12,2023-11-09
+PROJ-0005,Woodgrove Accelerated ERP Modernization Platform,Fixed,New,CUST-005,Woodgrove Energy,"Houston, TX",Energy / Utilities,2023-02-22,2023-03-03,2024-09-23
+PROJ-0006,Trey Unified Digital Transformation Advisory Platform,Time & Material,New,CUST-006,Trey Research Labs,"San Francisco, CA",Technology,2025-01-17,2025-02-07,2025-04-08
+PROJ-0007,Litware Next-Gen AI/ML Platform Platform,Time & Material,New,CUST-007,Litware Telecom,"Dallas, TX",Telecommunications,2024-08-14,2024-08-27,2025-05-24
+PROJ-0008,Contoso Accelerated Security Transformation Initiative,Time & Material,New,CUST-001,Contoso Financial Group,"New York, NY",Financial Services,2023-08-27,2023-09-06,2023-12-05
+PROJ-0009,Proseware Next-Gen Digital Transformation Advisory Initiative,Fixed,New,CUST-008,Proseware Government Solutions,"Washington, DC",Government,2023-12-30,2024-01-12,2024-05-11
+PROJ-0010,Relecloud Accelerated AI/ML Platform Program,Fixed,New,CUST-012,Relecloud Insurance,"Charlotte, NC",Financial Services,2023-09-08,2023-09-20,2024-09-14
+PROJ-0011,Woodgrove Accelerated Security Transformation Initiative,Fixed,New,CUST-005,Woodgrove Energy,"Houston, TX",Energy / Utilities,2023-02-02,2023-02-19,2023-06-19
+PROJ-0012,Northwind Accelerated Security Transformation Modernization,Time & Material,New,CUST-002,Northwind Health Systems,"Boston, MA",Healthcare,2024-11-02,2024-11-24,2025-03-24
+PROJ-0013,Proseware Unified ERP Modernization Program,Fixed,New,CUST-008,Proseware Government Solutions,"Washington, DC",Government,2023-10-27,2023-11-16,2025-04-09
+PROJ-0014,Trey Integrated Security Transformation Platform,Fixed,New,CUST-006,Trey Research Labs,"San Francisco, CA",Technology,2024-05-20,2024-05-29,2024-12-25
+PROJ-0015,Wide Unified AI/ML Platform Platform,Fixed,New,CUST-014,Wide World Importers,"Portland, OR",Retail / E-Commerce,2024-11-27,2024-12-17,2025-06-15
+PROJ-0016,Litware Integrated DevOps & Infrastructure Automation Platform,Time & Material,New,CUST-007,Litware Telecom,"Dallas, TX",Telecommunications,2023-09-15,2023-10-09,2024-05-06
+PROJ-0017,Margie's Accelerated AI/ML Platform Solution,Time & Material,New,CUST-011,Margie's Travel Corp,"Atlanta, GA",Transportation,2023-04-25,2023-05-11,2024-02-05
+PROJ-0018,Proseware Unified Cloud Migration Platform,Time & Material,New,CUST-008,Proseware Government Solutions,"Washington, DC",Government,2024-01-26,2024-02-07,2025-04-02
+PROJ-0019,Wide Unified Data Platform Build Engagement,Fixed,New,CUST-014,Wide World Importers,"Portland, OR",Retail / E-Commerce,2024-01-18,2024-01-30,2024-07-28
+PROJ-0020,Alpine Integrated Cloud Migration Engagement,Time & Material,New,CUST-009,Alpine Ski House Hospitality,"Denver, CO",Hospitality,2023-04-25,2023-05-13,2023-11-09
