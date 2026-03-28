@@ -3,12 +3,19 @@ import '../styles/shared.css';
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/router';
+import { AnimatePresence, motion } from 'framer-motion';
 
 import Layout from '../components/Layout';
 import { AuthProvider, useAuth } from '../lib/auth';
 
 // Routes that don't require authentication
 const PUBLIC_ROUTES = ['/login'];
+
+const pageVariants = {
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.25, ease: 'easeOut' } },
+  exit: { opacity: 0, y: -8, transition: { duration: 0.15, ease: 'easeIn' } },
+};
 
 /**
  * Inner component — has access to the AuthProvider context.
@@ -63,7 +70,17 @@ function AppShell({ Component, pageProps }) {
 
   return (
     <Layout>
-      <Component {...pageProps} />
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={router.pathname}
+          variants={pageVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+        >
+          <Component {...pageProps} />
+        </motion.div>
+      </AnimatePresence>
     </Layout>
   );
 }

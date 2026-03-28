@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../../lib/auth';
+import Spinner from '../../components/Spinner';
 
 // Shared components
 import ExecutiveSummary from '../../components/sow/ExecutiveSummary';
@@ -381,12 +383,16 @@ function SaveIndicator({ savedAt }) {
   if (!savedAt) return null;
   const time = new Date(savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return (
-    <span
+    <motion.span
+      key={savedAt}
+      initial={{ opacity: 0.5, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3 }}
       className="text-xs text-secondary"
       style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
     >
       <span style={{ color: 'var(--color-success)' }}>●</span> Saved {time}
-    </span>
+    </motion.span>
   );
 }
 
@@ -496,7 +502,7 @@ export default function DraftPage() {
           justifyContent: 'center',
         }}
       >
-        <div className="text-secondary">Loading…</div>
+        <Spinner message="Loading SoW…" />
       </div>
     );
   }
@@ -739,11 +745,21 @@ export default function DraftPage() {
             padding: 'var(--spacing-2xl) var(--spacing-xl)',
           }}
         >
-          {tabs.length > 0 && tabs[activeTab] ? (
-            tabs[activeTab].render(sowData, updateSection)
-          ) : (
-            <p className="text-secondary">No content configured for this methodology.</p>
-          )}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, x: 12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -12 }}
+              transition={{ duration: 0.2 }}
+            >
+              {tabs.length > 0 && tabs[activeTab] ? (
+                tabs[activeTab].render(sowData, updateSection)
+              ) : (
+                <p className="text-secondary">No content configured for this methodology.</p>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </div>
 
         {/* Bottom navigation */}

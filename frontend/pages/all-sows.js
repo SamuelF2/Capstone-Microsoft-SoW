@@ -12,7 +12,9 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+import Spinner from '../components/Spinner';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,19 +51,27 @@ export default function AllSoWs() {
   const { token } = useAuth();
   const [sows, setSows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
 
   useEffect(() => {
     if (!token) return;
+    setFetchError(null);
     fetch('/api/sow', {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((res) => (res.ok ? res.json() : []))
-      .catch(() => [])
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load SoWs (${res.status})`);
+        return res.json();
+      })
       .then((data) => {
         setSows(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setFetchError(err.message || 'Could not load SoWs. Please try again.');
         setLoading(false);
       });
   }, [token]);
@@ -96,7 +106,7 @@ export default function AllSoWs() {
           justifyContent: 'center',
         }}
       >
-        <div className="text-secondary">Loading…</div>
+        <Spinner message="Loading your SoWs…" />
       </div>
     );
   }
@@ -134,6 +144,33 @@ export default function AllSoWs() {
               + Create New
             </button>
           </div>
+
+          {/* Error banner */}
+          {fetchError && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--color-error)',
+                fontSize: 'var(--font-size-sm)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span>{fetchError}</span>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: 'var(--color-error)' }}
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+            </div>
+          )}
 
           {/* Filters */}
           <div
@@ -236,8 +273,11 @@ export default function AllSoWs() {
 
                 <tbody>
                   {filtered.map((sow, i) => (
-                    <tr
+                    <motion.tr
                       key={sow.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03, duration: 0.2 }}
                       onClick={() => handleRowClick(sow)}
                       style={{
                         borderBottom:
@@ -245,12 +285,16 @@ export default function AllSoWs() {
                             ? '1px solid var(--color-border-default)'
                             : 'none',
                         cursor: 'pointer',
+                        backgroundColor: i % 2 === 1 ? 'rgba(255,255,255,0.02)' : 'transparent',
                         transition: 'background-color var(--transition-base)',
                       }}
                       onMouseEnter={(e) =>
                         (e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)')
                       }
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.backgroundColor =
+                          i % 2 === 1 ? 'rgba(255,255,255,0.02)' : 'transparent')
+                      }
                     >
                       <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
                         <p className="font-medium" style={{ marginBottom: '2px' }}>
@@ -318,7 +362,7 @@ export default function AllSoWs() {
                           {sow.status === 'draft' ? 'Edit →' : 'View →'}
                         </span>
                       </td>
-                    </tr>
+                    </motion.tr>
                   ))}
                 </tbody>
               </table>

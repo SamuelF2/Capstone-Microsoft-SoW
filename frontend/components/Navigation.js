@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState } from 'react';
+import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
 
 export default function Navigation() {
@@ -10,14 +11,22 @@ export default function Navigation() {
 
   const isActive = (path) => router.pathname === path;
 
+  const navLinks = [
+    { href: '/all-sows', label: 'All SoWs' },
+    { href: '/create-new', label: 'Create New' },
+    { href: '/ai-review', label: 'AI Review' },
+    { href: '/review-history', label: 'Review History' },
+    { href: '/my-reviews', label: 'My Reviews' },
+  ];
+
   const navLinkStyle = (path) => ({
     fontSize: 'var(--font-size-sm)',
     color: isActive(path) ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
     fontWeight: isActive(path) ? 'var(--font-weight-medium)' : 'var(--font-weight-normal)',
     transition: 'color var(--transition-base)',
     textDecoration: 'none',
-    paddingBottom: '2px',
-    borderBottom: isActive(path) ? '2px solid var(--color-accent-blue)' : '2px solid transparent',
+    paddingBottom: '6px',
+    position: 'relative',
   });
 
   const handleLogout = async () => {
@@ -91,21 +100,26 @@ export default function Navigation() {
 
         {/* Nav Links */}
         <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'center' }}>
-          <Link href="/all-sows" style={navLinkStyle('/all-sows')}>
-            All SoWs
-          </Link>
-          <Link href="/create-new" style={navLinkStyle('/create-new')}>
-            Create New
-          </Link>
-          <Link href="/ai-review" style={navLinkStyle('/ai-review')}>
-            AI Review
-          </Link>
-          <Link href="/review-history" style={navLinkStyle('/review-history')}>
-            Review History
-          </Link>
-          <Link href="/my-reviews" style={navLinkStyle('/my-reviews')}>
-            My Reviews
-          </Link>
+          {navLinks.map(({ href, label }) => (
+            <Link key={href} href={href} style={navLinkStyle(href)}>
+              {label}
+              {isActive(href) && (
+                <motion.div
+                  layoutId="nav-underline"
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: '2px',
+                    backgroundColor: 'var(--color-accent-blue)',
+                    borderRadius: '1px',
+                  }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                />
+              )}
+            </Link>
+          ))}
         </div>
 
         {/* User section */}

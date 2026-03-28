@@ -1199,6 +1199,27 @@ p {
 }
 
 /* --------------------------------------------
+   RESPONSIVE BREAKPOINTS
+   -------------------------------------------- */
+
+@media (max-width: 768px) {
+  .grid-cols-2 {
+    grid-template-columns: 1fr !important;
+  }
+  .grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  /* Stack inline 2-col form grids on narrow screens */
+  .form-grid-responsive {
+    grid-template-columns: 1fr !important;
+  }
+  /* Stack account sidebar layout */
+  .account-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* --------------------------------------------
    PRINT STYLES
    -------------------------------------------- */
 

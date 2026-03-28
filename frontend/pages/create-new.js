@@ -1,7 +1,24 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+
+function FieldError({ message }) {
+  if (!message) return null;
+  return (
+    <motion.p
+      className="form-error"
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.15 }}
+      style={{ overflow: 'hidden' }}
+    >
+      {message}
+    </motion.p>
+  );
+}
 
 export default function CreateNew() {
   const router = useRouter();
@@ -19,9 +36,20 @@ export default function CreateNew() {
     deliveryMethodology: '',
     cycle: '1',
   });
+  const [touched, setTouched] = useState({});
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleBlur = (e) => {
+    setTouched({ ...touched, [e.target.name]: true });
+  };
+
+  const fieldError = (name) => {
+    if (!touched[name]) return null;
+    if (!form[name] || !form[name].trim()) return 'This field is required';
+    return null;
   };
 
   const handleSubmit = async (e) => {
@@ -158,14 +186,20 @@ export default function CreateNew() {
                   name="sowTitle"
                   value={form.sowTitle}
                   onChange={handleChange}
+                  onBlur={handleBlur}
                   placeholder="e.g. Contoso Cloud Migration Phase 1"
                   className="form-input"
                   required
+                  style={fieldError('sowTitle') ? { borderColor: 'var(--color-error)' } : {}}
                 />
+                <AnimatePresence>
+                  <FieldError message={fieldError('sowTitle')} />
+                </AnimatePresence>
               </div>
 
               {/* Row 2: Opportunity ID + Work Order Number */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
@@ -182,10 +216,15 @@ export default function CreateNew() {
                     name="opportunityId"
                     value={form.opportunityId}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     placeholder="e.g. OPP-20240001"
                     className="form-input"
                     required
+                    style={fieldError('opportunityId') ? { borderColor: 'var(--color-error)' } : {}}
                   />
+                  <AnimatePresence>
+                    <FieldError message={fieldError('opportunityId')} />
+                  </AnimatePresence>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Work Order Number</label>
@@ -202,6 +241,7 @@ export default function CreateNew() {
 
               {/* Row 3: Deal Value + Estimated Margin */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
@@ -270,6 +310,7 @@ export default function CreateNew() {
 
               {/* Row 4: Customer Name + Customer Legal Name */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
@@ -286,10 +327,15 @@ export default function CreateNew() {
                     name="customerName"
                     value={form.customerName}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     placeholder="e.g. Contoso"
                     className="form-input"
                     required
+                    style={fieldError('customerName') ? { borderColor: 'var(--color-error)' } : {}}
                   />
+                  <AnimatePresence>
+                    <FieldError message={fieldError('customerName')} />
+                  </AnimatePresence>
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Customer Legal Name</label>
@@ -306,6 +352,7 @@ export default function CreateNew() {
 
               {/* Row 5: Delivery Methodology + Deal Cycle */}
               <div
+                className="form-grid-responsive"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '2fr 1fr',
@@ -321,8 +368,12 @@ export default function CreateNew() {
                     name="deliveryMethodology"
                     value={form.deliveryMethodology}
                     onChange={handleChange}
+                    onBlur={handleBlur}
                     className="form-select"
                     required
+                    style={
+                      fieldError('deliveryMethodology') ? { borderColor: 'var(--color-error)' } : {}
+                    }
                   >
                     <option value="">Select a methodology…</option>
                     {methodologies.map((method) => (
@@ -331,6 +382,9 @@ export default function CreateNew() {
                       </option>
                     ))}
                   </select>
+                  <AnimatePresence>
+                    <FieldError message={fieldError('deliveryMethodology')} />
+                  </AnimatePresence>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 0 }}>

@@ -49,7 +49,23 @@ export default function ReviewHistory() {
           }}
         >
           <h1 className="text-4xl font-bold mb-sm">Review History</h1>
-          <p className="text-lg text-secondary mb-xl">View and manage your past SOW reviews</p>
+          <p className="text-lg text-secondary mb-lg">View and manage your past SOW reviews</p>
+
+          {/* Demo banner */}
+          <div
+            style={{
+              marginBottom: 'var(--spacing-lg)',
+              padding: 'var(--spacing-sm) var(--spacing-lg)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'rgba(59,130,246,0.08)',
+              border: '1px solid rgba(59,130,246,0.25)',
+              color: 'var(--color-info)',
+              fontSize: 'var(--font-size-sm)',
+            }}
+          >
+            Showing sample data for demo purposes. This page will display your actual review history
+            once the review API is connected.
+          </div>
 
           <div className="flex flex-wrap gap-md mb-lg">
             <input
