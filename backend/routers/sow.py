@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -362,9 +363,16 @@ async def upload_sow(
         # Seed collaboration so the uploader can access via /api/my-sows
         await _seed_collaboration(conn, sow_id=sow_id, user_id=current_user.id)
 
-    # ── Save file to disk ─────────────────────────────────────────────────
-    safe_filename = f"{sow_id}_{original_filename}"
+    # ── Save file to disk (UUID name prevents directory traversal) ──────
+    safe_filename = f"{sow_id}_{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    # Final guard: ensure resolved path stays inside UPLOAD_DIR
+    resolved = os.path.realpath(file_path)
+    if not resolved.startswith(os.path.realpath(UPLOAD_DIR)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file path",
+        )
     with open(file_path, "wb") as f:
         f.write(contents)
 
