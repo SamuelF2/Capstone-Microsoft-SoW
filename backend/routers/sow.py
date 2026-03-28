@@ -424,7 +424,6 @@ async def get_sow_by_client_id(client_id: str, current_user: CurrentUser) -> SoW
     summary="Get a SoW document by its backend integer ID",
 )
 async def get_sow(sow_id: int, current_user: CurrentUser) -> SoWResponse:
-
     """Return the full SoW document including ``content`` (section data).
 
     Raises **404** if the SoW does not exist or the current user is not a
