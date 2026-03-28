@@ -8,8 +8,8 @@
  * Access tokens are treated as opaque — only the backend validates them.
  */
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { InteractionRequiredAuthError } from '@azure/msal-browser';
-import { getMsalInstance, loginRequest, apiTokenRequest } from './msalConfig';
+import { InteractionRequiredAuthError, BrowserAuthError } from '@azure/msal-browser';
+import { getMsalInstance, loginRequest } from './msalConfig';
 
 const AuthContext = createContext(null);
 
@@ -54,20 +54,23 @@ export function AuthProvider({ children }) {
   }, []);
 
   // ── Token acquisition (silent with interactive fallback) ──────────────────
+  // Uses the ID token (not a custom API access token) for backend auth.
+  // The ID token contains all claims the backend needs (oid, name, email, roles)
+  // and avoids the need to configure "Expose an API" scopes in the App Registration.
   const _acquireToken = async (msal) => {
     const account = msal.getActiveAccount();
     if (!account) return null;
 
     try {
       const response = await msal.acquireTokenSilent({
-        ...apiTokenRequest,
+        ...loginRequest,
         account,
       });
-      return response.accessToken;
+      return response.idToken;
     } catch (err) {
-      if (err instanceof InteractionRequiredAuthError) {
-        const response = await msal.acquireTokenPopup(apiTokenRequest);
-        return response.accessToken;
+      if (err instanceof InteractionRequiredAuthError || err instanceof BrowserAuthError) {
+        const response = await msal.acquireTokenPopup(loginRequest);
+        return response.idToken;
       }
       throw err;
     }
@@ -88,8 +91,8 @@ export function AuthProvider({ children }) {
     const response = await msal.loginPopup(loginRequest);
     msal.setActiveAccount(response.account);
 
-    // Acquire API access token and fetch user profile from backend
-    const token = await _acquireToken(msal);
+    // Use the ID token directly from loginPopup — no need for a second silent acquisition
+    const token = response.idToken;
     const meRes = await fetch('/api/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
     });

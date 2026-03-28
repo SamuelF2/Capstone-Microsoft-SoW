@@ -34,14 +34,6 @@ export const loginRequest = {
   scopes: ['openid', 'profile', 'email'],
 };
 
-/**
- * Scopes for acquiring an access token to call the backend API.
- * Must match the scope exposed in Azure Portal > App Registration > Expose an API.
- */
-export const apiTokenRequest = {
-  scopes: [process.env.NEXT_PUBLIC_AZURE_API_SCOPE || `api://${clientId}/SoW.Read`],
-};
-
 /** Singleton MSAL instance — lazy-initialized, null if client ID is not set. */
 let _msalInstance = null;
 
