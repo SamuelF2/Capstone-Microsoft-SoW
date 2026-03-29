@@ -532,7 +532,7 @@ function SimilarSowsSection({ similarSows }) {
 
 export default function AIReview() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { authFetch } = useAuth();
   const [file, setFile] = useState(null);
   const [methodology, setMethodology] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -596,11 +596,8 @@ export default function AIReview() {
       formData.append('file', file);
       formData.append('methodology', methodology);
 
-      const res = await fetch('/api/sow/upload', {
+      const res = await authFetch('/api/sow/upload', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
         body: formData,
       });
 

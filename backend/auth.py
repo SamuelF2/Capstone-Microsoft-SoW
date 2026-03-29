@@ -108,6 +108,7 @@ async def decode_token(token: str) -> dict:
         return payload
 
     except JWTError as err:
+        logger.warning("JWT validation failed: %s", err)
         raise credentials_exc from err
 
 

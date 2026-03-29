@@ -48,7 +48,7 @@ function formatDate(iso) {
 
 export default function AllSoWs() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { user, authFetch } = useAuth();
   const [sows, setSows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
@@ -57,11 +57,9 @@ export default function AllSoWs() {
   const [filterStatus, setFilterStatus] = useState('All');
 
   useEffect(() => {
-    if (!token) return;
+    if (!user) return;
     setFetchError(null);
-    fetch('/api/sow', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    authFetch('/api/sow')
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load SoWs (${res.status})`);
         return res.json();
@@ -74,7 +72,7 @@ export default function AllSoWs() {
         setFetchError(err.message || 'Could not load SoWs. Please try again.');
         setLoading(false);
       });
-  }, [token]);
+  }, [user, authFetch]);
 
   const filtered = sows.filter((s) => {
     const q = search.toLowerCase();
