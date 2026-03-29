@@ -1,13 +1,8 @@
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 
 const STATUS_STYLES = {
-  'Needs Your Input': {
-    color: 'var(--color-warning)',
-    bg: 'rgba(251, 191, 36, 0.1)',
-    border: 'rgba(251, 191, 36, 0.3)',
-    dot: 'var(--color-warning)',
-  },
   'Pending Review': {
     color: 'var(--color-info)',
     bg: 'rgba(59, 130, 246, 0.1)',
@@ -20,73 +15,34 @@ const STATUS_STYLES = {
     border: 'rgba(139, 92, 246, 0.3)',
     dot: 'var(--color-accent-purple-light)',
   },
-  'Action Required': {
-    color: 'var(--color-error)',
-    bg: 'rgba(239, 68, 68, 0.1)',
-    border: 'rgba(239, 68, 68, 0.3)',
-    dot: 'var(--color-error)',
+  Completed: {
+    color: 'var(--color-success)',
+    bg: 'rgba(74, 222, 128, 0.1)',
+    border: 'rgba(74, 222, 128, 0.3)',
+    dot: 'var(--color-success)',
   },
 };
 
-// Sample SoWs assigned to / needing attention from the current user
-const MY_SOWS = [
-  {
-    id: 1,
-    title: 'Contoso Cloud Migration Phase 1',
-    opportunityId: 'OPP-20240112',
-    customer: 'Contoso Ltd.',
-    methodology: 'Cloud Adoption',
-    dealValue: '$240,000',
-    status: 'Needs Your Input',
-    dueDate: 'Feb 20, 2026',
-    actionNote: 'Risk section is incomplete. Please review and add mitigation details.',
-    assignedRole: 'Solution Architect',
-  },
-  {
-    id: 2,
-    title: 'Fabrikam Agile Transformation',
-    opportunityId: 'OPP-20240098',
-    customer: 'Fabrikam Inc.',
-    methodology: 'Agile Sprint Delivery',
-    dealValue: '$185,000',
-    status: 'Action Required',
-    dueDate: 'Feb 18, 2026',
-    actionNote: 'Approval deadline in 2 days. Sign off on deliverables section.',
-    assignedRole: 'CPI Reviewer',
-  },
-  {
-    id: 3,
-    title: 'Northwind ERP Sure Step Implementation',
-    opportunityId: 'OPP-20240077',
-    customer: 'Northwind Traders',
-    methodology: 'Sure Step 365',
-    dealValue: '$310,000',
-    status: 'Pending Review',
-    dueDate: 'Feb 25, 2026',
-    actionNote: 'Waiting for your compliance review. No blockers at this time.',
-    assignedRole: 'CDP Reviewer',
-  },
-  {
-    id: 4,
-    title: 'Alpine Ski House Waterfall Deployment',
-    opportunityId: 'OPP-20240055',
-    customer: 'Alpine Ski House',
-    methodology: 'Waterfall',
-    dealValue: '$95,000',
-    status: 'In Progress',
-    dueDate: 'Mar 3, 2026',
-    actionNote: 'You are the primary author. 3 sections still need content.',
-    assignedRole: 'Author',
-  },
-];
+function formatDate(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
+}
 
-function SoWCard({ sow }) {
+function ReviewCard({ review }) {
   const router = useRouter();
-  const statusStyle = STATUS_STYLES[sow.status] || STATUS_STYLES['In Progress'];
+  const statusStyle = STATUS_STYLES[review.status] || STATUS_STYLES['Pending Review'];
 
   return (
     <div
-      onClick={() => router.push(`/review/${sow.id}`)}
+      onClick={() => router.push(`/review/${review.id}`)}
       style={{
         display: 'flex',
         alignItems: 'stretch',
@@ -112,7 +68,6 @@ function SoWCard({ sow }) {
           width: '5px',
           flexShrink: 0,
           backgroundColor: statusStyle.dot,
-          borderRadius: 'var(--radius-xl) 0 0 var(--radius-xl)',
         }}
       />
 
@@ -126,7 +81,6 @@ function SoWCard({ sow }) {
           gap: 'var(--spacing-sm)',
         }}
       >
-        {/* Top row: title + status badge */}
         <div
           style={{
             display: 'flex',
@@ -136,7 +90,7 @@ function SoWCard({ sow }) {
           }}
         >
           <h3 className="text-lg font-semibold" style={{ margin: 0 }}>
-            {sow.title}
+            {review.title}
           </h3>
           <span
             style={{
@@ -162,98 +116,46 @@ function SoWCard({ sow }) {
                 flexShrink: 0,
               }}
             />
-            {sow.status}
+            {review.status}
           </span>
         </div>
 
-        {/* Meta row */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--spacing-xl)',
-            flexWrap: 'wrap',
-          }}
-        >
+        <div style={{ display: 'flex', gap: 'var(--spacing-xl)', flexWrap: 'wrap' }}>
           <span className="text-sm text-secondary">
-            <strong style={{ color: 'var(--color-text-primary)' }}>Customer:</strong> {sow.customer}
+            <strong style={{ color: 'var(--color-text-primary)' }}>Methodology:</strong>{' '}
+            {review.methodology}
           </span>
           <span className="text-sm text-secondary">
-            <strong style={{ color: 'var(--color-text-primary)' }}>ID:</strong> {sow.opportunityId}
+            <strong style={{ color: 'var(--color-text-primary)' }}>Uploaded:</strong>{' '}
+            {formatDate(review.uploadedAt)}
           </span>
-          <span className="text-sm text-secondary">
-            <strong style={{ color: 'var(--color-text-primary)' }}>Value:</strong> {sow.dealValue}
-          </span>
-          <span className="text-sm text-secondary">
-            <strong style={{ color: 'var(--color-text-primary)' }}>Method:</strong>{' '}
-            {sow.methodology}
-          </span>
+          {review.score != null && (
+            <span className="text-sm text-secondary">
+              <strong style={{ color: 'var(--color-text-primary)' }}>Score:</strong> {review.score}
+            </span>
+          )}
         </div>
-
-        {/* Action note */}
-        <p
-          className="text-sm"
-          style={{
-            color: 'var(--color-text-secondary)',
-            backgroundColor: 'var(--color-bg-tertiary)',
-            padding: 'var(--spacing-sm) var(--spacing-md)',
-            borderRadius: 'var(--radius-md)',
-            borderLeft: `3px solid ${statusStyle.dot}`,
-            margin: 0,
-            lineHeight: 'var(--line-height-relaxed)',
-          }}
-        >
-          {sow.actionNote}
-        </p>
       </div>
 
       {/* Right panel */}
       <div
         style={{
           display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          alignItems: 'flex-end',
+          alignItems: 'center',
           padding: 'var(--spacing-lg)',
-          gap: 'var(--spacing-md)',
           borderLeft: '1px solid var(--color-border-default)',
-          minWidth: '180px',
-          flexShrink: 0,
+          minWidth: '120px',
+          justifyContent: 'center',
         }}
       >
-        <div style={{ textAlign: 'right' }}>
-          <p className="text-xs text-secondary" style={{ marginBottom: '2px' }}>
-            Due date
-          </p>
-          <p
-            className="text-sm font-semibold"
-            style={{
-              color:
-                sow.status === 'Action Required'
-                  ? 'var(--color-error)'
-                  : 'var(--color-text-primary)',
-            }}
-          >
-            {sow.dueDate}
-          </p>
-        </div>
-
-        <div style={{ textAlign: 'right' }}>
-          <p className="text-xs text-secondary" style={{ marginBottom: '2px' }}>
-            Your role
-          </p>
-          <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            {sow.assignedRole}
-          </p>
-        </div>
-
         <button
           onClick={(e) => {
             e.stopPropagation();
-            router.push(`/review/${sow.id}`);
+            router.push(`/review/${review.id}`);
           }}
           className="btn btn-primary btn-sm"
         >
-          Open SoW →
+          Review →
         </button>
       </div>
     </div>
@@ -261,12 +163,21 @@ function SoWCard({ sow }) {
 }
 
 export default function MyReviews() {
-  const actionItems = MY_SOWS.filter(
-    (s) => s.status === 'Action Required' || s.status === 'Needs Your Input'
-  );
-  const otherItems = MY_SOWS.filter(
-    (s) => s.status !== 'Action Required' && s.status !== 'Needs Your Input'
-  );
+  const router = useRouter();
+  const [reviews, setReviews] = useState([]);
+
+  useEffect(() => {
+    try {
+      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
+      // My Reviews shows only non-completed reviews
+      setReviews(registry.filter((r) => r.status !== 'Completed'));
+    } catch {
+      setReviews([]);
+    }
+  }, []);
+
+  const pending = reviews.filter((r) => r.status === 'Pending Review');
+  const inProgress = reviews.filter((r) => r.status === 'In Progress');
 
   return (
     <>
@@ -283,103 +194,107 @@ export default function MyReviews() {
       >
         <div style={{ maxWidth: 'var(--container-lg)', margin: '0 auto' }}>
           {/* Header */}
-          <div style={{ marginBottom: 'var(--spacing-2xl)' }}>
-            <h1 className="text-4xl font-bold mb-sm">My Reviews</h1>
-            <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-              SoWs that are assigned to you or waiting on your action.
-            </p>
-          </div>
-
-          {/* Demo banner */}
-          <div
-            style={{
-              marginBottom: 'var(--spacing-lg)',
-              padding: 'var(--spacing-sm) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'rgba(59,130,246,0.08)',
-              border: '1px solid rgba(59,130,246,0.25)',
-              color: 'var(--color-info)',
-              fontSize: 'var(--font-size-sm)',
-            }}
-          >
-            Showing sample data for demo purposes. This page will display your actual assigned
-            reviews once the review workflow API is connected.
-          </div>
-
-          {/* Summary chips */}
           <div
             style={{
               display: 'flex',
-              gap: 'var(--spacing-md)',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
               marginBottom: 'var(--spacing-2xl)',
-              flexWrap: 'wrap',
             }}
           >
-            {Object.entries(
-              MY_SOWS.reduce((acc, s) => {
-                acc[s.status] = (acc[s.status] || 0) + 1;
-                return acc;
-              }, {})
-            ).map(([status, count]) => {
-              const st = STATUS_STYLES[status];
-              return (
-                <span
-                  key={status}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 'var(--radius-full)',
-                    fontSize: 'var(--font-size-sm)',
-                    fontWeight: 'var(--font-weight-medium)',
-                    color: st.color,
-                    backgroundColor: st.bg,
-                    border: `1px solid ${st.border}`,
-                  }}
-                >
-                  {count} {status}
-                </span>
-              );
-            })}
+            <div>
+              <h1 className="text-4xl font-bold mb-sm">My Reviews</h1>
+              <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
+                SoWs uploaded for AI review that need your attention.
+              </p>
+            </div>
+            <button className="btn btn-primary" onClick={() => router.push('/ai-review')}>
+              + Upload for Review
+            </button>
           </div>
 
-          {/* Needs Attention */}
-          {actionItems.length > 0 && (
+          {/* Summary chips */}
+          {reviews.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--spacing-md)',
+                marginBottom: 'var(--spacing-2xl)',
+                flexWrap: 'wrap',
+              }}
+            >
+              {Object.entries(
+                reviews.reduce((acc, r) => {
+                  acc[r.status] = (acc[r.status] || 0) + 1;
+                  return acc;
+                }, {})
+              ).map(([status, count]) => {
+                const st = STATUS_STYLES[status] || STATUS_STYLES['Pending Review'];
+                return (
+                  <span
+                    key={status}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 'var(--radius-full)',
+                      fontSize: 'var(--font-size-sm)',
+                      fontWeight: 'var(--font-weight-medium)',
+                      color: st.color,
+                      backgroundColor: st.bg,
+                      border: `1px solid ${st.border}`,
+                    }}
+                  >
+                    {count} {status}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pending Review */}
+          {pending.length > 0 && (
             <section style={{ marginBottom: 'var(--spacing-2xl)' }}>
               <h2
                 className="text-xl font-semibold mb-lg"
                 style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
               >
-                <span style={{ color: 'var(--color-error)' }}>⚠</span> Needs Your Attention
+                <span style={{ color: 'var(--color-info)' }}>&#9679;</span> Pending Review
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                {actionItems.map((sow) => (
-                  <SoWCard key={sow.id} sow={sow} />
+                {pending.map((r) => (
+                  <ReviewCard key={r.id} review={r} />
                 ))}
               </div>
             </section>
           )}
 
-          {/* Other assigned */}
-          {otherItems.length > 0 && (
+          {/* In Progress */}
+          {inProgress.length > 0 && (
             <section>
               <h2
                 className="text-xl font-semibold mb-lg"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
-                Other Assigned SoWs
+                In Progress
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                {otherItems.map((sow) => (
-                  <SoWCard key={sow.id} sow={sow} />
+                {inProgress.map((r) => (
+                  <ReviewCard key={r.id} review={r} />
                 ))}
               </div>
             </section>
           )}
 
-          {MY_SOWS.length === 0 && (
+          {/* Empty state */}
+          {reviews.length === 0 && (
             <div className="card text-center" style={{ padding: 'var(--spacing-3xl)' }}>
-              <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>🎉</div>
-              <h3 className="text-xl font-semibold mb-sm">All caught up!</h3>
-              <p className="text-secondary">You have no SoWs that need your attention right now.</p>
+              <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>📄</div>
+              <h3 className="text-xl font-semibold mb-sm">No reviews yet</h3>
+              <p className="text-secondary" style={{ marginBottom: 'var(--spacing-lg)' }}>
+                Upload a SoW for AI review to get started.
+              </p>
+              <button className="btn btn-primary" onClick={() => router.push('/ai-review')}>
+                Upload for Review
+              </button>
             </div>
           )}
         </div>

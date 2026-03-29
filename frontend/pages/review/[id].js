@@ -1,201 +1,106 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
+}
 
 export default function ReviewDetail() {
   const router = useRouter();
   const { id } = router.query;
   const [activeTab, setActiveTab] = useState('overview');
+  const [reviewEntry, setReviewEntry] = useState(null);
+  const [isComplete, setIsComplete] = useState(false);
 
-  // Sample data - in a real app, this would be fetched based on the ID
+  // Load review metadata from registry
+  useEffect(() => {
+    if (!id) return;
+    try {
+      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
+      const entry = registry.find((r) => String(r.id) === String(id));
+      if (entry) {
+        setReviewEntry(entry);
+        setIsComplete(entry.status === 'Completed');
+      }
+    } catch {
+      // registry not available
+    }
+  }, [id]);
+
+  const handleMarkComplete = () => {
+    try {
+      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
+      const updated = registry.map((r) =>
+        String(r.id) === String(id)
+          ? { ...r, status: 'Completed', completedAt: new Date().toISOString() }
+          : r
+      );
+      localStorage.setItem('review-registry', JSON.stringify(updated));
+      setIsComplete(true);
+      setReviewEntry((prev) => (prev ? { ...prev, status: 'Completed' } : prev));
+    } catch {
+      // localStorage not available
+    }
+  };
+
+  // Use registry data if available, fall back to generic sample data
   const reviewData = {
     id: id,
-    title: `SOW Review ${id}`,
-    methodology: 'Agile',
-    uploadDate: '2024-02-15',
-    status: 'Completed',
-    score: 85,
+    title: reviewEntry?.title || `SOW Review ${id}`,
+    methodology: reviewEntry?.methodology || 'Agile',
+    uploadDate: formatDate(reviewEntry?.uploadedAt) || '—',
+    status: reviewEntry?.status || 'Pending Review',
+    score: reviewEntry?.score || 72,
     tabs: {
       overview: {
-        summary:
-          'This Statement of Work has been analyzed for compliance with Agile methodology standards.',
+        summary: `This Statement of Work has been analyzed for compliance with ${reviewEntry?.methodology || 'Agile'} methodology standards. The AI review identified areas of strength and sections that need improvement before approval.`,
         strengths: [
-          'Clear sprint planning structure',
-          'Well-defined user stories',
-          'Proper retrospective planning',
+          'Clear project scope with defined boundaries',
+          'Deliverables have measurable acceptance criteria',
+          'Risk register includes severity ratings',
+          'Customer responsibilities are documented',
         ],
         improvements: [
-          'Add more detail to acceptance criteria',
-          'Include velocity tracking metrics',
-          'Define definition of done',
+          'Add SLA terms to the support transition section',
+          'Replace vague language ("best effort") with measurable commitments',
+          'Include RACI matrix for customer resource commitments',
+          'Add mitigation strategies for all identified risks',
         ],
       },
       details: {
         sections: [
+          { name: 'Executive Summary', score: 88, status: 'Pass' },
           { name: 'Project Scope', score: 90, status: 'Pass' },
-          { name: 'Deliverables', score: 85, status: 'Pass' },
-          { name: 'Timeline', score: 75, status: 'Warning' },
-          { name: 'Resources', score: 80, status: 'Pass' },
+          { name: 'Deliverables', score: 82, status: 'Pass' },
+          { name: 'Assumptions & Risks', score: 65, status: 'Warning' },
+          { name: 'Pricing & Budget', score: 70, status: 'Warning' },
+          { name: 'Support Transition', score: 45, status: 'Fail' },
         ],
       },
       recommendations: [
-        'Consider adding bi-weekly sprint reviews',
-        'Implement automated testing in the CI/CD pipeline',
-        'Add stakeholder feedback sessions',
+        'Define explicit SLA terms with response time commitments per MCEM guidelines',
+        'Add a 30-day hypercare period with named support resources',
+        'Include change order process and rate card for scope modifications',
+        'Add mitigation plans for the 2 unmitigated risks in section 7',
+        'Specify customer resource commitments with hours/week and named POC',
       ],
     },
-  };
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'overview':
-        return (
-          <div>
-            <div
-              className="card mb-xl"
-              style={{
-                display: 'flex',
-                gap: 'var(--spacing-xl)',
-                alignItems: 'center',
-                backgroundColor: 'var(--color-bg-primary)',
-              }}
-            >
-              <div
-                style={{
-                  width: '120px',
-                  height: '120px',
-                  borderRadius: 'var(--radius-full)',
-                  background: 'var(--gradient-blue)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span className="text-4xl font-bold">{reviewData.score}</span>
-                <span className="text-sm" style={{ color: '#a0c4ff' }}>
-                  Score
-                </span>
-              </div>
-              <div className="flex-1">
-                <p className="mb-sm">
-                  <strong>Methodology:</strong> {reviewData.methodology}
-                </p>
-                <p className="mb-sm">
-                  <strong>Status:</strong> {reviewData.status}
-                </p>
-                <p>
-                  <strong>Upload Date:</strong> {reviewData.uploadDate}
-                </p>
-              </div>
-            </div>
-
-            <div className="mb-xl">
-              <h3 className="text-xl font-semibold mb-md">Summary</h3>
-              <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-                {reviewData.tabs.overview.summary}
-              </p>
-            </div>
-
-            <div className="mb-xl">
-              <h3 className="text-xl font-semibold mb-md">Strengths</h3>
-              <ul className="list-unstyled">
-                {reviewData.tabs.overview.strengths.map((item, index) => (
-                  <li key={index} className="list-item text-secondary">
-                    ✓ {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="text-xl font-semibold mb-md">Areas for Improvement</h3>
-              <ul className="list-unstyled">
-                {reviewData.tabs.overview.improvements.map((item, index) => (
-                  <li key={index} className="list-item text-secondary">
-                    ⚠ {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        );
-
-      case 'details':
-        return (
-          <div>
-            <h3 className="text-xl font-semibold mb-lg">Section Analysis</h3>
-            <div className="grid grid-cols-2 gap-lg">
-              {reviewData.tabs.details.sections.map((section, index) => (
-                <div
-                  key={index}
-                  className="card"
-                  style={{ backgroundColor: 'var(--color-bg-primary)' }}
-                >
-                  <div className="flex items-center justify-between mb-md">
-                    <span className="font-semibold">{section.name}</span>
-                    <span className="badge badge-success">{section.status}</span>
-                  </div>
-                  <div className="progress mb-sm">
-                    <div
-                      className={`progress-bar ${section.score >= 80 ? 'progress-bar-success' : 'progress-bar-warning'}`}
-                      style={{ width: `${section.score}%` }}
-                    />
-                  </div>
-                  <span className="text-sm text-secondary">{section.score}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-
-      case 'recommendations':
-        return (
-          <div>
-            <h3 className="text-xl font-semibold mb-lg">AI Recommendations</h3>
-            <div className="flex flex-col gap-md">
-              {reviewData.tabs.recommendations.map((rec, index) => (
-                <div
-                  key={index}
-                  className="flex gap-md card"
-                  style={{ backgroundColor: 'var(--color-bg-primary)' }}
-                >
-                  <div
-                    style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: 'var(--color-accent-blue)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 'bold',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {index + 1}
-                  </div>
-                  <p
-                    className="text-secondary"
-                    style={{ lineHeight: 'var(--line-height-relaxed)', margin: 0 }}
-                  >
-                    {rec}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
-    }
   };
 
   return (
     <>
       <Head>
-        <title>{reviewData.title} - Review Details</title>
+        <title>{reviewData.title} – Review – Cocoon</title>
       </Head>
 
       <div
@@ -213,29 +118,41 @@ export default function ReviewDetail() {
           }}
         >
           <button
-            onClick={() => router.back()}
+            onClick={() => router.push('/my-reviews')}
             className="btn btn-ghost mb-md"
             style={{ padding: 'var(--spacing-sm) 0' }}
           >
-            ← Back to Reviews
+            ← Back to My Reviews
           </button>
 
-          <h1 className="text-4xl font-bold mb-lg">{reviewData.title}</h1>
-
-          {/* Demo banner */}
           <div
             style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
               marginBottom: 'var(--spacing-lg)',
-              padding: 'var(--spacing-sm) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'rgba(59,130,246,0.08)',
-              border: '1px solid rgba(59,130,246,0.25)',
-              color: 'var(--color-info)',
-              fontSize: 'var(--font-size-sm)',
             }}
           >
-            Showing sample review data for demo purposes. Actual AI analysis results will appear
-            here once the review pipeline is connected.
+            <h1 className="text-4xl font-bold">{reviewData.title}</h1>
+            {!isComplete ? (
+              <button className="btn btn-primary" onClick={handleMarkComplete}>
+                Mark Complete
+              </button>
+            ) : (
+              <span
+                style={{
+                  padding: '6px 16px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--font-size-sm)',
+                  fontWeight: 600,
+                  color: 'var(--color-success)',
+                  backgroundColor: 'rgba(74,222,128,0.1)',
+                  border: '1px solid rgba(74,222,128,0.3)',
+                }}
+              >
+                ✓ Review Complete
+              </span>
+            )}
           </div>
 
           <div className="tabs">
@@ -259,7 +176,177 @@ export default function ReviewDetail() {
             </button>
           </div>
 
-          <div className="card">{renderTabContent()}</div>
+          <div className="card">
+            {activeTab === 'overview' && (
+              <div>
+                <div
+                  className="card mb-xl"
+                  style={{
+                    display: 'flex',
+                    gap: 'var(--spacing-xl)',
+                    alignItems: 'center',
+                    backgroundColor: 'var(--color-bg-primary)',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '120px',
+                      height: '120px',
+                      borderRadius: 'var(--radius-full)',
+                      background: 'var(--gradient-blue)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <span className="text-4xl font-bold">{reviewData.score}</span>
+                    <span className="text-sm" style={{ color: '#a0c4ff' }}>
+                      Score
+                    </span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="mb-sm">
+                      <strong>Methodology:</strong> {reviewData.methodology}
+                    </p>
+                    <p className="mb-sm">
+                      <strong>Status:</strong> {reviewData.status}
+                    </p>
+                    <p>
+                      <strong>Uploaded:</strong> {reviewData.uploadDate}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mb-xl">
+                  <h3 className="text-xl font-semibold mb-md">Summary</h3>
+                  <p
+                    className="text-secondary"
+                    style={{ lineHeight: 'var(--line-height-relaxed)' }}
+                  >
+                    {reviewData.tabs.overview.summary}
+                  </p>
+                </div>
+
+                <div className="mb-xl">
+                  <h3 className="text-xl font-semibold mb-md">Strengths</h3>
+                  {reviewData.tabs.overview.strengths.map((item, i) => (
+                    <p key={i} className="text-secondary" style={{ marginBottom: 6 }}>
+                      ✓ {item}
+                    </p>
+                  ))}
+                </div>
+
+                <div>
+                  <h3 className="text-xl font-semibold mb-md">Areas for Improvement</h3>
+                  {reviewData.tabs.overview.improvements.map((item, i) => (
+                    <p key={i} className="text-secondary" style={{ marginBottom: 6 }}>
+                      ⚠ {item}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'details' && (
+              <div>
+                <h3 className="text-xl font-semibold mb-lg">Section Analysis</h3>
+                <div className="grid grid-cols-2 gap-lg">
+                  {reviewData.tabs.details.sections.map((section, i) => {
+                    const barColor =
+                      section.score >= 80
+                        ? 'var(--color-success)'
+                        : section.score >= 60
+                          ? 'var(--color-warning)'
+                          : 'var(--color-error)';
+                    return (
+                      <div
+                        key={i}
+                        className="card"
+                        style={{ backgroundColor: 'var(--color-bg-primary)' }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: 'var(--spacing-md)',
+                          }}
+                        >
+                          <span className="font-semibold">{section.name}</span>
+                          <span className="text-sm" style={{ color: barColor }}>
+                            {section.status}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            height: 6,
+                            backgroundColor: 'var(--color-bg-tertiary)',
+                            borderRadius: 3,
+                            marginBottom: 'var(--spacing-sm)',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${section.score}%`,
+                              backgroundColor: barColor,
+                              borderRadius: 3,
+                            }}
+                          />
+                        </div>
+                        <span className="text-sm text-secondary">{section.score}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'recommendations' && (
+              <div>
+                <h3 className="text-xl font-semibold mb-lg">AI Recommendations</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+                  {reviewData.tabs.recommendations.map((rec, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        gap: 'var(--spacing-md)',
+                        padding: 'var(--spacing-md)',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'var(--color-bg-primary)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 'var(--radius-full)',
+                          backgroundColor: 'var(--color-accent-blue)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 'bold',
+                          flexShrink: 0,
+                          fontSize: 'var(--font-size-sm)',
+                        }}
+                      >
+                        {i + 1}
+                      </div>
+                      <p
+                        className="text-secondary"
+                        style={{ lineHeight: 'var(--line-height-relaxed)', margin: 0 }}
+                      >
+                        {rec}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>
