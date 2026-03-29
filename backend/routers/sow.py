@@ -742,11 +742,33 @@ def _extract_text_pdf(file_path: str) -> str:
 
 
 def _extract_text_docx(file_path: str) -> str:
-    """Extract text from a DOCX file using python-docx."""
-    import docx
+    """Extract text from a DOCX file without external dependencies by reading
+    the document.xml inside the .docx ZIP and extracting text nodes.
+    """
+    import zipfile
+    from xml.etree import ElementTree as ET
 
-    doc = docx.Document(file_path)
-    return "\n".join(p.text for p in doc.paragraphs)
+    try:
+        with zipfile.ZipFile(file_path) as z:
+            xml = z.read("word/document.xml")
+    except (zipfile.BadZipFile, KeyError):
+        return ""
+
+    try:
+        tree = ET.fromstring(xml)
+    except ET.ParseError:
+        return ""
+
+    # WordprocessingML namespace
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+    paragraphs: list[str] = []
+    for p in tree.findall(".//w:p", ns):
+        texts = [t.text for t in p.findall(".//w:t", ns) if t.text]
+        if texts:
+            paragraphs.append("".join(texts))
+
+    return "\n".join(paragraphs)
 
 
 def _detect_sections(full_text: str, required_sections: list[dict]) -> list[SectionResult]:
