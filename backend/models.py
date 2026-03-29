@@ -192,6 +192,18 @@ class HistoryEntry(BaseModel):
     diff: dict[str, Any] | None = None
 
 
+class HistoryEntryResponse(BaseModel):
+    """History entry with SoW title for user-centric history views."""
+
+    id: int
+    sow_id: int | None = None
+    changed_by: int | None = None
+    change_type: str | None = None
+    changed_at: datetime
+    diff: dict[str, Any] | None = None
+    sow_title: str | None = None
+
+
 class CollaborationEntry(BaseModel):
     """Collaboration (user↔SOW role) row — PDF §2.5."""
 
@@ -199,3 +211,24 @@ class CollaborationEntry(BaseModel):
     sow_id: int | None = None
     user_id: int
     role: str | None = None
+
+
+# ── Document Parsing ────────────────────────────────────────────────────────
+
+
+class SectionResult(BaseModel):
+    """Result of detecting a single required section in an uploaded document."""
+
+    name: str
+    displayName: str
+    found: bool
+    content: str | None = None
+    issues: list[str] = []
+
+
+class ParseResult(BaseModel):
+    """Result of parsing an uploaded SoW document against methodology rules."""
+
+    sections: list[SectionResult]
+    missingKeywords: list[str] = []
+    violations: list[dict[str, Any]] = []

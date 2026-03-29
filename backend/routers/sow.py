@@ -48,9 +48,18 @@ from typing import Any
 
 import database
 from auth import CurrentUser
-from config import MAX_UPLOAD_SIZE_MB, UPLOAD_DIR
+from config import MAX_UPLOAD_SIZE_MB, RULES_DIR, UPLOAD_DIR
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from models import SoWCreate, SoWResponse, SoWStatusUpdate, SoWSummary, SoWUpdate
+from models import (
+    HistoryEntryResponse,
+    ParseResult,
+    SectionResult,
+    SoWCreate,
+    SoWResponse,
+    SoWStatusUpdate,
+    SoWSummary,
+    SoWUpdate,
+)
 
 router = APIRouter(prefix="/api/sow", tags=["sow"])
 
@@ -120,6 +129,62 @@ async def _seed_collaboration(conn, sow_id: int, user_id: int, role: str = "auth
         user_id,
         role,
     )
+
+
+async def _insert_history(
+    conn, sow_id: int, user_id: int, change_type: str, diff: dict | None = None
+) -> None:
+    """Record an audit-trail entry in the ``history`` table.
+
+    Called inside the same transaction as the mutation so the history row
+    is always consistent with the change it describes.
+    """
+    await conn.execute(
+        """
+        INSERT INTO history (sow_id, changed_by, change_type, diff)
+        VALUES ($1, $2, $3, $4::jsonb)
+        """,
+        sow_id,
+        user_id,
+        change_type,
+        json.dumps(diff) if diff else None,
+    )
+
+
+# ── History ──────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/history/me",
+    response_model=list[HistoryEntryResponse],
+    summary="List change history for the current user",
+)
+async def get_my_history(
+    current_user: CurrentUser,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[HistoryEntryResponse]:
+    """Return all history entries where the authenticated user is the author
+    of the change, ordered most-recent first.  Includes the SoW title via a
+    LEFT JOIN so that entries for deleted SoWs still appear (with null title).
+    """
+    async with database.pg_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT h.id, h.sow_id, h.changed_by, h.change_type,
+                   h.changed_at, h.diff, s.title AS sow_title
+            FROM   history h
+            LEFT JOIN sow_documents s ON s.id = h.sow_id
+            WHERE  h.changed_by = $1
+            ORDER BY h.changed_at DESC
+            LIMIT $2 OFFSET $3
+            """,
+            current_user.id,
+            limit,
+            offset,
+        )
+
+    return [HistoryEntryResponse(**dict(r)) for r in rows]
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -271,6 +336,11 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
         # 4. Seed collaboration so the creator can access this SoW via /api/my-sows
         await _seed_collaboration(conn, sow_id=row["id"], user_id=current_user.id)
 
+        # 5. Audit trail
+        await _insert_history(
+            conn, sow_id=row["id"], user_id=current_user.id, change_type="created"
+        )
+
     return _row_to_response(dict(row))
 
 
@@ -362,6 +432,9 @@ async def upload_sow(
 
         # Seed collaboration so the uploader can access via /api/my-sows
         await _seed_collaboration(conn, sow_id=sow_id, user_id=current_user.id)
+
+        # Audit trail
+        await _insert_history(conn, sow_id=sow_id, user_id=current_user.id, change_type="created")
 
     # ── Save file to disk (UUID name prevents directory traversal) ──────
     safe_filename = f"{sow_id}_{uuid.uuid4().hex}{ext}"
@@ -491,12 +564,40 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
         for i, col in enumerate(updates)
     )
 
-    async with database.pg_pool.acquire() as conn:
+    async with database.pg_pool.acquire() as conn, conn.transaction():
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        # Capture old values for the diff
+        old_row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not old_row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
         row = await conn.fetchrow(
             f"UPDATE sow_documents SET {set_clause} WHERE id = ${len(params)} RETURNING *",
             *params,
         )
+
+        # Build diff of changed fields (skip updated_at and JSONB for brevity)
+        diff = {}
+        for col in updates:
+            if col in ("updated_at", "content", "metadata"):
+                continue
+            old_val = old_row.get(col)
+            new_val = row.get(col)
+            if old_val != new_val:
+                diff[col] = {
+                    "old": str(old_val) if old_val is not None else None,
+                    "new": str(new_val) if new_val is not None else None,
+                }
+
+        if diff:
+            await _insert_history(
+                conn,
+                sow_id=sow_id,
+                user_id=current_user.id,
+                change_type="updated",
+                diff=diff,
+            )
 
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -528,8 +629,11 @@ async def update_sow_status(
             detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(_VALID_STATUSES)}",
         )
 
-    async with database.pg_pool.acquire() as conn:
+    async with database.pg_pool.acquire() as conn, conn.transaction():
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        old_status = await conn.fetchval("SELECT status FROM sow_documents WHERE id = $1", sow_id)
+
         row = await conn.fetchrow(
             """
             UPDATE sow_documents
@@ -540,6 +644,15 @@ async def update_sow_status(
             payload.status,
             sow_id,
         )
+
+        if row and old_status != payload.status:
+            await _insert_history(
+                conn,
+                sow_id=sow_id,
+                user_id=current_user.id,
+                change_type="status_change",
+                diff={"old_status": old_status, "new_status": payload.status},
+            )
 
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -562,11 +675,291 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
     Raises **404** if the SoW does not exist or the current user is not a
     collaborator on it.
     """
-    async with database.pg_pool.acquire() as conn:
+    async with database.pg_pool.acquire() as conn, conn.transaction():
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        # Record deletion before the CASCADE removes related rows.
+        # The FK is ON DELETE SET NULL so the history row survives.
+        await _insert_history(
+            conn,
+            sow_id=sow_id,
+            user_id=current_user.id,
+            change_type="deleted",
+        )
+
         result = await conn.execute("DELETE FROM sow_documents WHERE id = $1", sow_id)
 
     if result == "DELETE 0":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
     return {"deleted": sow_id}
+
+
+# ── Parse (document section extraction + rule-based validation) ──────────────
+
+_SECTION_MARKERS: dict[str, list[str]] = {
+    "executiveSummary": ["executive summary", "overview", "introduction"],
+    "scope": [
+        "project scope",
+        "scope of work",
+        "in scope",
+        "out of scope",
+        "in-scope",
+        "out-of-scope",
+    ],
+    "deliverables": ["deliverable", "deliverables", "project deliverables", "outputs"],
+    "approach": ["delivery approach", "approach", "delivery method", "methodology approach"],
+    "customerResponsibilities": [
+        "customer responsibilities",
+        "client responsibilities",
+        "customer obligations",
+    ],
+    "supportTransitionPlan": [
+        "support transition",
+        "support plan",
+        "hypercare",
+        "support and transition",
+    ],
+    "assumptions": ["assumptions", "project assumptions"],
+    "risks": ["risks", "risk register", "risk assessment"],
+}
+
+_METHODOLOGY_RULES_KEY: dict[str, str] = {
+    "Agile Sprint Delivery": "agile",
+    "Sure Step 365": "sure-step-365",
+    "Waterfall": "waterfall",
+    "Cloud Adoption": "cloud-adoption",
+}
+
+
+def _extract_text_pdf(file_path: str) -> str:
+    """Extract text from a PDF file using PyPDF2."""
+    from PyPDF2 import PdfReader
+
+    reader = PdfReader(file_path)
+    pages = [page.extract_text() or "" for page in reader.pages]
+    return "\n".join(pages)
+
+
+def _extract_text_docx(file_path: str) -> str:
+    """Extract text from a DOCX file using python-docx."""
+    import docx
+
+    doc = docx.Document(file_path)
+    return "\n".join(p.text for p in doc.paragraphs)
+
+
+def _detect_sections(full_text: str, required_sections: list[dict]) -> list[SectionResult]:
+    """Detect required sections in the extracted document text.
+
+    Uses a two-pass approach:
+    1. Find section heading positions by scanning for marker phrases
+    2. Extract content between detected headings
+    """
+    lines = full_text.split("\n")
+    text_lower = full_text.lower()
+
+    # Build a list of (line_index, section_key) for detected headings
+    heading_positions: list[tuple[int, str]] = []
+    for section_key, markers in _SECTION_MARKERS.items():
+        for i, line in enumerate(lines):
+            line_lower = line.strip().lower()
+            # Prefer short lines that look like headings
+            if len(line.strip()) < 120:
+                for marker in markers:
+                    if marker in line_lower:
+                        heading_positions.append((i, section_key))
+                        break
+                if heading_positions and heading_positions[-1] == (i, section_key):
+                    break  # found this section, stop checking markers
+
+    # Sort by line position and deduplicate (keep first occurrence per section)
+    heading_positions.sort(key=lambda x: x[0])
+    seen_sections: set[str] = set()
+    unique_positions: list[tuple[int, str]] = []
+    for pos, key in heading_positions:
+        if key not in seen_sections:
+            seen_sections.add(key)
+            unique_positions.append((pos, key))
+
+    # Extract content between headings
+    section_content: dict[str, str] = {}
+    for idx, (line_pos, section_key) in enumerate(unique_positions):
+        start = line_pos + 1
+        end = unique_positions[idx + 1][0] if idx + 1 < len(unique_positions) else len(lines)
+        content = "\n".join(lines[start:end]).strip()
+        section_content[section_key] = content[:2000]  # cap at 2000 chars
+
+    # Build results for each required section
+    results: list[SectionResult] = []
+    for req in required_sections:
+        key = req["section"]
+        found = key in section_content
+        content = section_content.get(key)
+
+        issues: list[str] = []
+        if not found:
+            # Fallback: check if any marker keyword appears anywhere in text
+            markers = _SECTION_MARKERS.get(key, [])
+            if any(m in text_lower for m in markers):
+                found = True
+                issues.append("Section content detected but no clear heading found")
+            else:
+                issues.append(
+                    req.get("errorMessage", f"Required section '{req['displayName']}' not found")
+                )
+
+        if found and content:
+            min_len = req.get("minLength")
+            if min_len and len(content) < min_len:
+                issues.append(f"Content is {len(content)} characters, minimum is {min_len}")
+
+        results.append(
+            SectionResult(
+                name=key,
+                displayName=req["displayName"],
+                found=found,
+                content=content,
+                issues=issues,
+            )
+        )
+
+    return results
+
+
+def _check_methodology_keywords(full_text: str, methodology: str | None) -> list[str]:
+    """Return methodology keywords that are missing from the document text."""
+    if not methodology:
+        return []
+    rules_key = _METHODOLOGY_RULES_KEY.get(methodology)
+    if not rules_key:
+        return []
+
+    rules_path = os.path.join(RULES_DIR, "methodology", "methodology-alignment.json")
+    if not os.path.isfile(rules_path):
+        return []
+
+    with open(rules_path) as f:
+        rules = json.load(f)
+
+    method_rules = rules.get("methodologies", {}).get(rules_key)
+    if not method_rules:
+        return []
+
+    text_lower = full_text.lower()
+    missing = [
+        kw for kw in method_rules.get("requiredKeywords", []) if kw.lower() not in text_lower
+    ]
+    return missing
+
+
+def _check_banned_phrases(full_text: str) -> list[dict[str, Any]]:
+    """Scan document text for banned phrases and return violations with context."""
+    rules_path = os.path.join(RULES_DIR, "compliance", "banned-phrases.json")
+    if not os.path.isfile(rules_path):
+        return []
+
+    with open(rules_path) as f:
+        rules = json.load(f)
+
+    text_lower = full_text.lower()
+    violations: list[dict[str, Any]] = []
+
+    for entry in rules.get("bannedPhrases", []):
+        phrase = entry["phrase"].lower()
+        pos = text_lower.find(phrase)
+        if pos != -1:
+            # Extract context snippet around the match
+            start = max(0, pos - 40)
+            end = min(len(full_text), pos + len(phrase) + 40)
+            context = full_text[start:end].replace("\n", " ").strip()
+
+            violations.append(
+                {
+                    "phrase": entry["phrase"],
+                    "severity": entry.get("severity", "warning"),
+                    "category": entry.get("category", ""),
+                    "suggestion": entry.get("suggestion", ""),
+                    "reason": entry.get("reason", ""),
+                    "context": context,
+                }
+            )
+
+    return violations
+
+
+@router.post(
+    "/{sow_id}/parse",
+    response_model=ParseResult,
+    summary="Parse an uploaded SoW document against methodology rules",
+)
+async def parse_sow(sow_id: int, current_user: CurrentUser) -> ParseResult:
+    """Extract text from the uploaded file and validate it against the
+    methodology's required sections, keywords, and compliance rules.
+
+    Returns structured results showing which sections were found, which
+    methodology keywords are missing, and any banned-phrase violations.
+    """
+    async with database.pg_pool.acquire() as conn:
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        row = await conn.fetchrow(
+            "SELECT metadata, methodology FROM sow_documents WHERE id = $1", sow_id
+        )
+
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+    metadata = row["metadata"]
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+
+    file_name = (metadata or {}).get("file_path")
+    if not file_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No uploaded file associated with this SoW",
+        )
+
+    file_path = os.path.join(UPLOAD_DIR, file_name)
+    resolved = os.path.realpath(file_path)
+    if not resolved.startswith(os.path.realpath(UPLOAD_DIR)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file path")
+    if not os.path.isfile(resolved):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Uploaded file not found on disk"
+        )
+
+    # Extract text based on file extension
+    ext = Path(resolved).suffix.lower()
+    if ext == ".pdf":
+        full_text = _extract_text_pdf(resolved)
+    elif ext == ".docx":
+        full_text = _extract_text_docx(resolved)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type '{ext}'",
+        )
+
+    if not full_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Could not extract any text from the uploaded file",
+        )
+
+    # Load required sections definition
+    req_path = os.path.join(RULES_DIR, "compliance", "required-elements.json")
+    required_sections: list[dict] = []
+    if os.path.isfile(req_path):
+        with open(req_path) as f:
+            required_sections = json.load(f).get("requiredSections", [])
+
+    sections = _detect_sections(full_text, required_sections)
+    missing_keywords = _check_methodology_keywords(full_text, row["methodology"])
+    violations = _check_banned_phrases(full_text)
+
+    return ParseResult(
+        sections=sections,
+        missingKeywords=missing_keywords,
+        violations=violations,
+    )

@@ -17,6 +17,7 @@ export default function Navigation() {
     { href: '/ai-review', label: 'AI Review' },
     { href: '/review-history', label: 'Review History' },
     { href: '/my-reviews', label: 'My Reviews' },
+    { href: '/business-logic', label: 'Business Logic' },
   ];
 
   const navLinkStyle = (path) => ({

@@ -40,6 +40,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from routers.auth import router as auth_router
+from routers.rules import router as rules_router
 from routers.sow import router as sow_router
 from status import router as status_router
 from validators import (
@@ -253,16 +254,26 @@ async def lifespan(app: FastAPI):
         # ------------------------------------------------------------------ #
         # 7. HISTORY  (audit log)                                             #
         # PDF §2.4: id (+ application columns for full audit trail)           #
+        # sow_id uses ON DELETE SET NULL so audit records survive SoW         #
+        # deletion (the sow_title is captured in the diff where useful).      #
         # ------------------------------------------------------------------ #
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS history (
                 id          SERIAL PRIMARY KEY,
-                sow_id      INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
+                sow_id      INTEGER REFERENCES sow_documents(id) ON DELETE SET NULL,
                 changed_by  INTEGER REFERENCES users(id),
                 change_type TEXT,
                 changed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 diff        JSONB
             );
+        """)
+        # Migration: change existing CASCADE to SET NULL for audit preservation
+        await conn.execute("""
+            DO $$ BEGIN
+                ALTER TABLE history DROP CONSTRAINT IF EXISTS history_sow_id_fkey;
+                ALTER TABLE history ADD CONSTRAINT history_sow_id_fkey
+                    FOREIGN KEY (sow_id) REFERENCES sow_documents(id) ON DELETE SET NULL;
+            END $$;
         """)
 
         # ------------------------------------------------------------------ #
@@ -288,8 +299,9 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_sow_cycle       ON sow_documents(cycle);",
             "CREATE INDEX IF NOT EXISTS idx_sow_content_id  ON sow_documents(content_id);",
             "CREATE INDEX IF NOT EXISTS idx_review_sow_id   ON review_results(sow_id);",
-            "CREATE INDEX IF NOT EXISTS idx_history_sow_id  ON history(sow_id);",
-            "CREATE INDEX IF NOT EXISTS idx_collab_sow_id   ON collaboration(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_history_sow_id     ON history(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_history_changed_by ON history(changed_by);",
+            "CREATE INDEX IF NOT EXISTS idx_collab_sow_id      ON collaboration(sow_id);",
             "CREATE INDEX IF NOT EXISTS idx_collab_user_id  ON collaboration(user_id);",
         ]:
             await conn.execute(idx_ddl)
@@ -335,6 +347,7 @@ app.add_middleware(
 app.include_router(status_router)  # /status  (HTML status page)
 app.include_router(auth_router)  # /api/auth/...
 app.include_router(sow_router)  # /api/sow/...
+app.include_router(rules_router)  # /api/rules/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
