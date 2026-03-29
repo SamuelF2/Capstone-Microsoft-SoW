@@ -401,7 +401,7 @@ function SaveIndicator({ savedAt }) {
 export default function DraftPage() {
   const router = useRouter();
   const { id } = router.query;
-  const { token } = useAuth();
+  const { authFetch } = useAuth();
 
   const [sowData, setSowData] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
@@ -443,12 +443,9 @@ export default function DraftPage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await fetch(`/api/sow/${id}/status`, {
+      const res = await authFetch(`/api/sow/${id}/status`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'in_review' }),
       });
 

@@ -17,6 +17,39 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const msalRef = useRef(getMsalInstance());
+  const tokenRef = useRef(null);
+
+  // ── Token acquisition (silent with interactive fallback) ──────────────────
+  // Uses the ID token (not a custom API access token) for backend auth.
+  // The ID token contains all claims the backend needs (oid, name, email, roles)
+  // and avoids the need to configure "Expose an API" scopes in the App Registration.
+  const _acquireToken = async (msal) => {
+    const account = msal.getActiveAccount();
+    if (!account) return tokenRef.current; // fallback to cached token
+
+    try {
+      const response = await msal.acquireTokenSilent({
+        ...loginRequest,
+        account,
+      });
+      tokenRef.current = response.idToken;
+      return response.idToken;
+    } catch (err) {
+      // If silent fails, try popup — but if that also fails (COOP, blocked),
+      // fall back to the last known good token
+      if (err instanceof InteractionRequiredAuthError || err instanceof BrowserAuthError) {
+        try {
+          const response = await msal.acquireTokenPopup(loginRequest);
+          tokenRef.current = response.idToken;
+          return response.idToken;
+        } catch {
+          // Popup blocked or COOP issue — use cached token if still valid
+          return tokenRef.current;
+        }
+      }
+      return tokenRef.current;
+    }
+  };
 
   // ── Initialize MSAL and rehydrate session ─────────────────────────────────
   useEffect(() => {
@@ -53,33 +86,10 @@ export function AuthProvider({ children }) {
     init();
   }, []);
 
-  // ── Token acquisition (silent with interactive fallback) ──────────────────
-  // Uses the ID token (not a custom API access token) for backend auth.
-  // The ID token contains all claims the backend needs (oid, name, email, roles)
-  // and avoids the need to configure "Expose an API" scopes in the App Registration.
-  const _acquireToken = async (msal) => {
-    const account = msal.getActiveAccount();
-    if (!account) return null;
-
-    try {
-      const response = await msal.acquireTokenSilent({
-        ...loginRequest,
-        account,
-      });
-      return response.idToken;
-    } catch (err) {
-      if (err instanceof InteractionRequiredAuthError || err instanceof BrowserAuthError) {
-        const response = await msal.acquireTokenPopup(loginRequest);
-        return response.idToken;
-      }
-      throw err;
-    }
-  };
-
-  /** Get an access token for API calls. */
+  /** Get a token for API calls. */
   const getAccessToken = useCallback(async () => {
     const msal = msalRef.current;
-    if (!msal) return null;
+    if (!msal) return tokenRef.current;
     return _acquireToken(msal);
   }, []);
 
@@ -91,10 +101,11 @@ export function AuthProvider({ children }) {
     const response = await msal.loginPopup(loginRequest);
     msal.setActiveAccount(response.account);
 
-    // Use the ID token directly from loginPopup — no need for a second silent acquisition
-    const token = response.idToken;
+    // Cache the ID token
+    tokenRef.current = response.idToken;
+
     const meRes = await fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${response.idToken}` },
     });
     if (meRes.ok) {
       setUser(await meRes.json());
@@ -114,12 +125,13 @@ export function AuthProvider({ children }) {
         // User may have closed the popup — clear local state anyway
       }
     }
+    tokenRef.current = null;
     setUser(null);
   }, []);
 
   /**
    * Fetch wrapper that automatically acquires and attaches the Entra
-   * access token as a Bearer header.
+   * ID token as a Bearer header.
    */
   const authFetch = useCallback(
     async (url, options = {}) => {
@@ -136,7 +148,7 @@ export function AuthProvider({ children }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, authFetch }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, authFetch, getAccessToken }}>
       {children}
     </AuthContext.Provider>
   );

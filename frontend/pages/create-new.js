@@ -22,7 +22,7 @@ function FieldError({ message }) {
 
 export default function CreateNew() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { authFetch } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({
@@ -59,9 +59,9 @@ export default function CreateNew() {
 
     try {
       // POST to backend — backend generates the canonical integer ID
-      const res = await fetch('/api/sow', {
+      const res = await authFetch('/api/sow', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: form.sowTitle,
           cycle: parseInt(form.cycle, 10) || 1,

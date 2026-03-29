@@ -122,8 +122,6 @@ async def lifespan(app: FastAPI):
                 updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_oid ON users(oid);")
         # Migration: make hashed_password nullable for existing databases
         await conn.execute("""
             DO $$ BEGIN
@@ -137,6 +135,8 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS oid TEXT UNIQUE;",
         ]:
             await conn.execute(col_ddl)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_oid ON users(oid);")
 
         # ------------------------------------------------------------------ #
         # 2. AI SUGGESTION                                                    #

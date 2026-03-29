@@ -104,6 +104,67 @@ const MOCK_RECOMMENDATIONS = {
       checked: false,
     },
   ],
+  suggestions: [
+    {
+      section: 'Scope',
+      line: '3.2',
+      type: 'rewrite',
+      original: 'We will provide best effort support during the transition period.',
+      suggested:
+        'Microsoft will provide Severity-1 incident response within 4 business hours during the 30-day hypercare period.',
+      reason:
+        'Replace vague "best effort" commitment with measurable SLA terms per MCEM guidelines.',
+    },
+    {
+      section: 'Deliverables',
+      line: '4.1',
+      type: 'add',
+      original: 'Architecture design document.',
+      suggested:
+        'Architecture design document — includes deployment topology, data flow diagrams, security boundary mapping, and disaster recovery plan. Acceptance criteria: approved by customer technical lead within 5 business days.',
+      reason:
+        'Deliverable lacks acceptance criteria. SDMPlus requires measurable AC for every deliverable.',
+    },
+    {
+      section: 'Assumptions',
+      line: '6.3',
+      type: 'rewrite',
+      original: 'Customer will provide necessary access and resources.',
+      suggested:
+        'Customer will provision VPN access for 5 named Microsoft consultants within 10 business days of SOW signature. Customer will assign a dedicated technical POC available 4 hours/week.',
+      reason: 'Assumption is too vague — specify quantity, timeline, and commitment level.',
+    },
+    {
+      section: 'Risks',
+      line: '7.2',
+      type: 'add',
+      original: 'Data migration may encounter unexpected schema differences.',
+      suggested:
+        'Data migration may encounter unexpected schema differences. Mitigation: allocate 2-week discovery sprint for schema analysis before migration begins. Contingency: 15% buffer on migration timeline. Severity: Medium. Probability: High.',
+      reason:
+        'Risk identified but missing mitigation strategy, severity rating, and probability assessment.',
+    },
+    {
+      section: 'Pricing',
+      line: '8.1',
+      type: 'flag',
+      original: 'Total engagement value: $2,400,000 (Fixed Fee).',
+      suggested:
+        'Total engagement value: $2,400,000 (Fixed Fee). Includes 8% risk reserve ($192,000) per ESAP Type-2 requirements. Change orders billed at T&M rates per approved rate card.',
+      reason:
+        'Fixed-fee engagements over $1M require explicit risk reserve allocation and change order terms.',
+    },
+    {
+      section: 'Support Transition',
+      line: '9.1',
+      type: 'add',
+      original: '',
+      suggested:
+        'Post-delivery support transition plan: 30-day hypercare period with dedicated L2 engineer. Knowledge transfer sessions (3x per week) for customer ops team. Runbook handoff with incident escalation matrix. RACI: Microsoft leads hypercare; customer assumes ownership on Day 31.',
+      reason:
+        'Support transition plan is entirely missing. Required for all delivery methodologies per MCEM.',
+    },
+  ],
   similarSows: [
     { title: 'Contoso Cloud Adoption Phase 2', methodology: 'Cloud Adoption', similarity: 0.89 },
     {
@@ -478,6 +539,138 @@ function ChecklistSection({ checklist }) {
   );
 }
 
+const SUGGESTION_TYPE_STYLES = {
+  rewrite: { label: 'Rewrite', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
+  add: { label: 'Add', color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
+  flag: { label: 'Flag', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+};
+
+function SuggestionsSection({ suggestions }) {
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-accent-blue)' }}>&#9998;</span> Section Suggestions
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--color-text-secondary)',
+            fontWeight: 400,
+          }}
+        >
+          {suggestions.length} suggestions
+        </span>
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+        {suggestions.map((s, i) => {
+          const typeStyle = SUGGESTION_TYPE_STYLES[s.type] || SUGGESTION_TYPE_STYLES.flag;
+          return (
+            <div
+              key={i}
+              style={{
+                padding: 'var(--spacing-lg)',
+                borderRadius: 'var(--radius-lg)',
+                backgroundColor: 'var(--color-bg-tertiary)',
+                border: '1px solid var(--color-border-default)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 'var(--spacing-md)',
+                }}
+              >
+                <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
+                  {s.section}
+                  <span className="text-tertiary" style={{ fontWeight: 400, marginLeft: 6 }}>
+                    Line {s.line}
+                  </span>
+                </span>
+                <span
+                  style={{
+                    padding: '2px 10px',
+                    borderRadius: 'var(--radius-full)',
+                    fontSize: 'var(--font-size-xs)',
+                    fontWeight: 600,
+                    backgroundColor: typeStyle.bg,
+                    color: typeStyle.color,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  {typeStyle.label}
+                </span>
+              </div>
+
+              {s.original && (
+                <div
+                  style={{
+                    padding: 'var(--spacing-sm) var(--spacing-md)',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'rgba(239,68,68,0.06)',
+                    borderLeft: '3px solid rgba(239,68,68,0.4)',
+                    marginBottom: 'var(--spacing-sm)',
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: 'var(--font-size-sm)',
+                      color: 'var(--color-text-tertiary)',
+                      textDecoration: 'line-through',
+                      lineHeight: 'var(--line-height-relaxed)',
+                      margin: 0,
+                    }}
+                  >
+                    {s.original}
+                  </p>
+                </div>
+              )}
+
+              <div
+                style={{
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'rgba(74,222,128,0.06)',
+                  borderLeft: '3px solid rgba(74,222,128,0.4)',
+                  marginBottom: 'var(--spacing-sm)',
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-success)',
+                    lineHeight: 'var(--line-height-relaxed)',
+                    margin: 0,
+                  }}
+                >
+                  {s.suggested}
+                </p>
+              </div>
+
+              <p
+                className="text-secondary"
+                style={{
+                  fontSize: 'var(--font-size-xs)',
+                  lineHeight: 'var(--line-height-relaxed)',
+                  margin: 0,
+                  fontStyle: 'italic',
+                }}
+              >
+                {s.reason}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SimilarSowsSection({ similarSows }) {
   return (
     <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
@@ -532,7 +725,7 @@ function SimilarSowsSection({ similarSows }) {
 
 export default function AIReview() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { authFetch } = useAuth();
   const [file, setFile] = useState(null);
   const [methodology, setMethodology] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -596,11 +789,8 @@ export default function AIReview() {
       formData.append('file', file);
       formData.append('methodology', methodology);
 
-      const res = await fetch('/api/sow/upload', {
+      const res = await authFetch('/api/sow/upload', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
         body: formData,
       });
 
@@ -628,6 +818,23 @@ export default function AIReview() {
       setRecommendations(data);
       setIsAnalyzing(false);
       setShowResults(true);
+
+      // Save to review-registry so My Reviews and Review History can find it
+      const reviewEntry = {
+        id: `review-${Date.now()}`,
+        title: file?.name?.replace(/\.[^.]+$/, '') || 'Untitled SoW',
+        methodology,
+        uploadedAt: new Date().toISOString(),
+        status: 'Pending Review',
+        score: 72, // mock score
+      };
+      try {
+        const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
+        registry.unshift(reviewEntry);
+        localStorage.setItem('review-registry', JSON.stringify(registry));
+      } catch {
+        // localStorage not available
+      }
     } catch (err) {
       setError(err.message);
       setIsUploading(false);
@@ -899,6 +1106,7 @@ export default function AIReview() {
 
               <ApprovalSection approval={recommendations.approval} />
               <ViolationsSection violations={recommendations.violations} />
+              <SuggestionsSection suggestions={recommendations.suggestions} />
               <RisksSection risks={recommendations.risks} />
               <ChecklistSection checklist={recommendations.checklist} />
               <SimilarSowsSection similarSows={recommendations.similarSows} />
