@@ -440,21 +440,35 @@ export default function DraftPage() {
 
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // Readiness checks
+  // ── Methodology-aware readiness checks ────────────────────────────────────
+  const methodology = sowData?.deliveryMethodology;
+
   const hasExecutiveSummary = !!(
     sowData?.executiveSummary &&
     Object.keys(sowData.executiveSummary).some((k) => sowData.executiveSummary[k])
   );
-  const hasProjectScope = !!(
-    sowData?.projectScope && Object.keys(sowData.projectScope).some((k) => sowData.projectScope[k])
+
+  // Scope: Cloud Adoption uses cloudAdoptionScope, others use projectScope
+  const scopeKey = methodology === 'Cloud Adoption' ? 'cloudAdoptionScope' : 'projectScope';
+  const scopeLabel = methodology === 'Cloud Adoption' ? 'Cloud Adoption Scope' : 'Project Scope';
+  const hasScope = !!(
+    sowData?.[scopeKey] && Object.keys(sowData[scopeKey]).some((k) => sowData[scopeKey][k])
   );
-  const hasDeliverables = !!(
-    sowData?.deliverables &&
-    (Array.isArray(sowData.deliverables)
-      ? sowData.deliverables.length > 0
-      : Object.keys(sowData.deliverables).some((k) => sowData.deliverables[k]))
-  );
-  const allRequiredMet = hasExecutiveSummary && hasProjectScope && hasDeliverables;
+
+  // Deliverables: Sure Step 365 uses phasesDeliverables, others use deliverables
+  const deliverablesKey = methodology === 'Sure Step 365' ? 'phasesDeliverables' : 'deliverables';
+  const deliverablesLabel =
+    methodology === 'Sure Step 365'
+      ? 'Phases & deliverables defined'
+      : 'At least one deliverable added';
+  const hasDeliverables = (() => {
+    const val = sowData?.[deliverablesKey];
+    if (!val) return false;
+    if (Array.isArray(val)) return val.length > 0;
+    return Object.keys(val).some((k) => val[k]);
+  })();
+
+  const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
   // Submit the SoW for review — calls submit-for-review then redirects to AI review
   const handleSubmitForReview = async () => {
@@ -867,10 +881,10 @@ export default function DraftPage() {
               <span
                 style={{
                   fontSize: 'var(--font-size-sm)',
-                  color: hasProjectScope ? 'var(--color-success)' : 'var(--color-error)',
+                  color: hasScope ? 'var(--color-success)' : 'var(--color-error)',
                 }}
               >
-                {hasProjectScope ? '✓' : '✗'} Project Scope defined
+                {hasScope ? '✓' : '✗'} {scopeLabel} defined
               </span>
               <span
                 style={{
@@ -878,7 +892,7 @@ export default function DraftPage() {
                   color: hasDeliverables ? 'var(--color-success)' : 'var(--color-error)',
                 }}
               >
-                {hasDeliverables ? '✓' : '✗'} At least one deliverable added
+                {hasDeliverables ? '✓' : '✗'} {deliverablesLabel}
               </span>
             </div>
           </div>

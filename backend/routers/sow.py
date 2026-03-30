@@ -1155,13 +1155,27 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                 content = json.loads(content)
             content = content or {}
 
+            methodology = row.get("methodology") or ""
+
             missing: list[str] = []
             if not content.get("executiveSummary"):
                 missing.append("Executive Summary")
-            if not content.get("projectScope") and not content.get("scope"):
-                missing.append("Project Scope")
-            if not content.get("deliverables"):
-                missing.append("Deliverables")
+
+            # Scope: Cloud Adoption uses cloudAdoptionScope, others use projectScope
+            if methodology == "Cloud Adoption":
+                if not content.get("cloudAdoptionScope"):
+                    missing.append("Cloud Adoption Scope")
+            else:
+                if not content.get("projectScope") and not content.get("scope"):
+                    missing.append("Project Scope")
+
+            # Deliverables: Sure Step 365 uses phasesDeliverables, others use deliverables
+            if methodology == "Sure Step 365":
+                if not content.get("phasesDeliverables"):
+                    missing.append("Phases & Deliverables")
+            else:
+                if not content.get("deliverables"):
+                    missing.append("Deliverables")
 
             if missing:
                 raise HTTPException(
