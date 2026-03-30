@@ -1,26 +1,57 @@
+/**
+ * pages/my-reviews.js
+ *
+ * Displays SoWs assigned to the current user for review.
+ * Data comes from GET /api/review/assigned — no localStorage.
+ */
+
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { useAuth } from '../lib/auth';
+import Spinner from '../components/Spinner';
 
-const STATUS_STYLES = {
-  'Pending Review': {
+const ASSIGNMENT_STATUS_STYLES = {
+  pending: {
     color: 'var(--color-info)',
     bg: 'rgba(59, 130, 246, 0.1)',
     border: 'rgba(59, 130, 246, 0.3)',
     dot: 'var(--color-info)',
+    label: 'Pending',
   },
-  'In Progress': {
+  in_progress: {
     color: 'var(--color-accent-purple-light)',
     bg: 'rgba(139, 92, 246, 0.1)',
     border: 'rgba(139, 92, 246, 0.3)',
     dot: 'var(--color-accent-purple-light)',
+    label: 'In Progress',
   },
-  Completed: {
+  completed: {
     color: 'var(--color-success)',
     bg: 'rgba(74, 222, 128, 0.1)',
     border: 'rgba(74, 222, 128, 0.3)',
     dot: 'var(--color-success)',
+    label: 'Completed',
   },
+};
+
+const ESAP_STYLES = {
+  'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
+  'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
+  'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
+};
+
+const ROLE_DISPLAY = {
+  'solution-architect': 'Solution Architect',
+  'sqa-reviewer': 'SQA Reviewer',
+  cpl: 'Customer Practice Lead',
+  cdp: 'Customer Delivery Partner',
+  'delivery-manager': 'Delivery Manager',
+};
+
+const STAGE_DISPLAY = {
+  'internal-review': 'Internal Review',
+  'drm-approval': 'DRM Approval',
 };
 
 function formatDate(iso) {
@@ -36,13 +67,27 @@ function formatDate(iso) {
   }
 }
 
-function ReviewCard({ review }) {
+function formatDeal(v) {
+  if (v == null) return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : '$' + n.toLocaleString('en-US');
+}
+
+// ── ReviewCard ────────────────────────────────────────────────────────────────
+
+function ReviewCard({ assignment }) {
   const router = useRouter();
-  const statusStyle = STATUS_STYLES[review.status] || STATUS_STYLES['Pending Review'];
+  const style = ASSIGNMENT_STATUS_STYLES[assignment.status] || ASSIGNMENT_STATUS_STYLES.pending;
+  const esapStyle = ESAP_STYLES[assignment.esap_level] || {};
+  const deal = formatDeal(assignment.deal_value);
+  const reviewPath =
+    assignment.stage === 'drm-approval'
+      ? `/drm-review/${assignment.sow_id}`
+      : `/internal-review/${assignment.sow_id}`;
 
   return (
     <div
-      onClick={() => router.push(`/review/${review.id}`)}
+      onClick={() => router.push(reviewPath)}
       style={{
         display: 'flex',
         alignItems: 'stretch',
@@ -62,16 +107,7 @@ function ReviewCard({ review }) {
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
-      {/* Left accent stripe */}
-      <div
-        style={{
-          width: '5px',
-          flexShrink: 0,
-          backgroundColor: statusStyle.dot,
-        }}
-      />
-
-      {/* Main content */}
+      <div style={{ width: '5px', flexShrink: 0, backgroundColor: style.dot }} />
       <div
         style={{
           flex: 1,
@@ -90,54 +126,75 @@ function ReviewCard({ review }) {
           }}
         >
           <h3 className="text-lg font-semibold" style={{ margin: 0 }}>
-            {review.title}
+            {assignment.sow_title}
           </h3>
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 12px',
-              borderRadius: 'var(--radius-full)',
-              fontSize: 'var(--font-size-xs)',
-              fontWeight: 'var(--font-weight-semibold)',
-              color: statusStyle.color,
-              backgroundColor: statusStyle.bg,
-              border: `1px solid ${statusStyle.border}`,
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <div style={{ display: 'flex', gap: 'var(--spacing-xs)', flexShrink: 0 }}>
+            {assignment.esap_level && (
+              <span
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  ...esapStyle,
+                }}
+              >
+                {assignment.esap_level.toUpperCase()}
+              </span>
+            )}
             <span
               style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: statusStyle.dot,
-                flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '3px 10px',
+                borderRadius: 'var(--radius-full)',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-semibold)',
+                color: style.color,
+                backgroundColor: style.bg,
+                border: `1px solid ${style.border}`,
               }}
-            />
-            {review.status}
-          </span>
+            >
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  backgroundColor: style.dot,
+                  flexShrink: 0,
+                }}
+              />
+              {style.label}
+            </span>
+          </div>
         </div>
-
         <div style={{ display: 'flex', gap: 'var(--spacing-xl)', flexWrap: 'wrap' }}>
-          <span className="text-sm text-secondary">
-            <strong style={{ color: 'var(--color-text-primary)' }}>Methodology:</strong>{' '}
-            {review.methodology}
-          </span>
-          <span className="text-sm text-secondary">
-            <strong style={{ color: 'var(--color-text-primary)' }}>Uploaded:</strong>{' '}
-            {formatDate(review.uploadedAt)}
-          </span>
-          {review.score != null && (
+          {assignment.customer_name && (
             <span className="text-sm text-secondary">
-              <strong style={{ color: 'var(--color-text-primary)' }}>Score:</strong> {review.score}
+              <strong style={{ color: 'var(--color-text-primary)' }}>Customer:</strong>{' '}
+              {assignment.customer_name}
             </span>
           )}
+          <span className="text-sm text-secondary">
+            <strong style={{ color: 'var(--color-text-primary)' }}>Your Role:</strong>{' '}
+            {ROLE_DISPLAY[assignment.reviewer_role] || assignment.reviewer_role}
+          </span>
+          <span className="text-sm text-secondary">
+            <strong style={{ color: 'var(--color-text-primary)' }}>Stage:</strong>{' '}
+            {STAGE_DISPLAY[assignment.stage] || assignment.stage}
+          </span>
+          {deal && (
+            <span className="text-sm text-secondary">
+              <strong style={{ color: 'var(--color-text-primary)' }}>Deal:</strong> {deal}
+            </span>
+          )}
+          <span className="text-sm text-secondary">
+            <strong style={{ color: 'var(--color-text-primary)' }}>Assigned:</strong>{' '}
+            {formatDate(assignment.assigned_at)}
+          </span>
         </div>
       </div>
-
-      {/* Right panel */}
       <div
         style={{
           display: 'flex',
@@ -151,7 +208,7 @@ function ReviewCard({ review }) {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            router.push(`/review/${review.id}`);
+            router.push(reviewPath);
           }}
           className="btn btn-primary btn-sm"
         >
@@ -162,29 +219,51 @@ function ReviewCard({ review }) {
   );
 }
 
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function MyReviews() {
   const router = useRouter();
-  const [reviews, setReviews] = useState([]);
+  const { user, authFetch } = useAuth();
+  const [assignments, setAssignments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState('pending');
 
   useEffect(() => {
-    try {
-      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
-      // My Reviews shows only non-completed reviews
-      setReviews(registry.filter((r) => r.status !== 'Completed'));
-    } catch {
-      setReviews([]);
-    }
-  }, []);
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    authFetch('/api/review/assigned')
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load reviews (${res.status})`);
+        return res.json();
+      })
+      .then((data) => {
+        setAssignments(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [user, authFetch]);
 
-  const pending = reviews.filter((r) => r.status === 'Pending Review');
-  const inProgress = reviews.filter((r) => r.status === 'In Progress');
+  const pending = assignments.filter((a) => a.status === 'pending');
+  const inProgress = assignments.filter((a) => a.status === 'in_progress');
+  const completed = assignments.filter((a) => a.status === 'completed');
+  const tabItems = [
+    { key: 'pending', label: 'Pending', count: pending.length },
+    { key: 'in_progress', label: 'In Progress', count: inProgress.length },
+    { key: 'completed', label: 'Completed', count: completed.length },
+  ];
+  const visibleAssignments =
+    activeTab === 'pending' ? pending : activeTab === 'in_progress' ? inProgress : completed;
 
   return (
     <>
       <Head>
         <title>My Reviews – Cocoon</title>
       </Head>
-
       <div
         style={{
           minHeight: 'calc(100vh - 80px)',
@@ -193,7 +272,6 @@ export default function MyReviews() {
         }}
       >
         <div style={{ maxWidth: 'var(--container-lg)', margin: '0 auto' }}>
-          {/* Header */}
           <div
             style={{
               display: 'flex',
@@ -205,7 +283,7 @@ export default function MyReviews() {
             <div>
               <h1 className="text-4xl font-bold mb-sm">My Reviews</h1>
               <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-                SoWs uploaded for AI review that need your attention.
+                SoWs assigned to you for review.
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => router.push('/ai-review')}>
@@ -213,89 +291,106 @@ export default function MyReviews() {
             </button>
           </div>
 
-          {/* Summary chips */}
-          {reviews.length > 0 && (
+          {loading && (
+            <div
+              style={{ display: 'flex', justifyContent: 'center', padding: 'var(--spacing-3xl)' }}
+            >
+              <Spinner />
+            </div>
+          )}
+
+          {error && !loading && (
             <div
               style={{
-                display: 'flex',
-                gap: 'var(--spacing-md)',
-                marginBottom: 'var(--spacing-2xl)',
-                flexWrap: 'wrap',
+                padding: 'var(--spacing-lg)',
+                borderRadius: 'var(--radius-lg)',
+                backgroundColor: 'rgba(239,68,68,0.1)',
+                color: 'var(--color-error)',
+                marginBottom: 'var(--spacing-xl)',
               }}
             >
-              {Object.entries(
-                reviews.reduce((acc, r) => {
-                  acc[r.status] = (acc[r.status] || 0) + 1;
-                  return acc;
-                }, {})
-              ).map(([status, count]) => {
-                const st = STATUS_STYLES[status] || STATUS_STYLES['Pending Review'];
-                return (
-                  <span
-                    key={status}
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 'var(--spacing-xs)',
+                  marginBottom: 'var(--spacing-xl)',
+                  borderBottom: '1px solid var(--color-border-default)',
+                }}
+              >
+                {tabItems.map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key)}
                     style={{
-                      padding: '6px 14px',
-                      borderRadius: 'var(--radius-full)',
+                      background: 'none',
+                      border: 'none',
+                      padding: '8px 16px',
+                      cursor: 'pointer',
                       fontSize: 'var(--font-size-sm)',
-                      fontWeight: 'var(--font-weight-medium)',
-                      color: st.color,
-                      backgroundColor: st.bg,
-                      border: `1px solid ${st.border}`,
+                      fontWeight: activeTab === tab.key ? 'var(--font-weight-semibold)' : 'normal',
+                      color:
+                        activeTab === tab.key
+                          ? 'var(--color-accent-purple, #7c3aed)'
+                          : 'var(--color-text-secondary)',
+                      borderBottom:
+                        activeTab === tab.key
+                          ? '2px solid var(--color-accent-purple, #7c3aed)'
+                          : '2px solid transparent',
+                      marginBottom: '-1px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
                     }}
                   >
-                    {count} {status}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Pending Review */}
-          {pending.length > 0 && (
-            <section style={{ marginBottom: 'var(--spacing-2xl)' }}>
-              <h2
-                className="text-xl font-semibold mb-lg"
-                style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-              >
-                <span style={{ color: 'var(--color-info)' }}>&#9679;</span> Pending Review
-              </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                {pending.map((r) => (
-                  <ReviewCard key={r.id} review={r} />
+                    {tab.label}
+                    {tab.count > 0 && (
+                      <span
+                        style={{
+                          padding: '1px 7px',
+                          borderRadius: 'var(--radius-full)',
+                          fontSize: '11px',
+                          backgroundColor:
+                            activeTab === tab.key
+                              ? 'var(--color-accent-purple, #7c3aed)'
+                              : 'var(--color-bg-tertiary)',
+                          color: activeTab === tab.key ? '#fff' : 'var(--color-text-secondary)',
+                        }}
+                      >
+                        {tab.count}
+                      </span>
+                    )}
+                  </button>
                 ))}
               </div>
-            </section>
-          )}
 
-          {/* In Progress */}
-          {inProgress.length > 0 && (
-            <section>
-              <h2
-                className="text-xl font-semibold mb-lg"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                In Progress
-              </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-                {inProgress.map((r) => (
-                  <ReviewCard key={r.id} review={r} />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Empty state */}
-          {reviews.length === 0 && (
-            <div className="card text-center" style={{ padding: 'var(--spacing-3xl)' }}>
-              <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>📄</div>
-              <h3 className="text-xl font-semibold mb-sm">No reviews yet</h3>
-              <p className="text-secondary" style={{ marginBottom: 'var(--spacing-lg)' }}>
-                Upload a SoW for AI review to get started.
-              </p>
-              <button className="btn btn-primary" onClick={() => router.push('/ai-review')}>
-                Upload for Review
-              </button>
-            </div>
+              {visibleAssignments.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+                  {visibleAssignments.map((a) => (
+                    <ReviewCard key={a.id} assignment={a} />
+                  ))}
+                </div>
+              ) : (
+                <div className="card text-center" style={{ padding: 'var(--spacing-3xl)' }}>
+                  <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>📋</div>
+                  <h3 className="text-xl font-semibold mb-sm">
+                    No {tabItems.find((t) => t.key === activeTab)?.label.toLowerCase()} reviews
+                  </h3>
+                  <p className="text-secondary">
+                    {activeTab === 'pending'
+                      ? 'No reviews are waiting for you right now.'
+                      : activeTab === 'in_progress'
+                        ? 'No reviews currently in progress.'
+                        : 'No completed reviews yet.'}
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

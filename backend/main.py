@@ -40,6 +40,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from routers.auth import router as auth_router
+from routers.review import router as review_router
 from routers.rules import router as rules_router
 from routers.sow import router as sow_router
 from status import router as status_router
@@ -403,6 +404,7 @@ app.add_middleware(
 app.include_router(status_router)  # /status  (HTML status page)
 app.include_router(auth_router)  # /api/auth/...
 app.include_router(sow_router)  # /api/sow/...
+app.include_router(review_router)  # /api/review/...
 app.include_router(rules_router)  # /api/rules/...
 
 
