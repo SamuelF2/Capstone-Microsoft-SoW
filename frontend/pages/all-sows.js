@@ -20,9 +20,14 @@ import Spinner from '../components/Spinner';
 
 const STATUS_COLOR = {
   draft: 'var(--color-text-secondary)',
-  in_review: 'var(--color-warning)',
+  ai_review: 'var(--color-accent-blue, #1967d2)',
+  internal_review: 'var(--color-warning)',
+  drm_review: 'var(--color-accent-purple, #7c3aed)',
   approved: 'var(--color-success)',
+  finalized: 'var(--color-accent-blue, #3f51b5)',
   rejected: 'var(--color-error)',
+  // legacy
+  in_review: 'var(--color-warning)',
 };
 
 function formatDealValue(raw) {
@@ -86,10 +91,28 @@ export default function AllSoWs() {
   });
 
   const handleRowClick = (sow) => {
-    if (sow.status === 'draft') {
-      router.push(`/draft/${sow.id}`);
-    } else {
-      router.push(`/review/${sow.id}`);
+    switch (sow.status) {
+      case 'draft':
+      case 'rejected':
+        router.push(`/draft/${sow.id}`);
+        break;
+      case 'ai_review':
+        router.push(`/ai-review?sowId=${sow.id}`);
+        break;
+      case 'internal_review':
+        router.push(`/internal-review/${sow.id}`);
+        break;
+      case 'drm_review':
+        router.push(`/drm-review/${sow.id}`);
+        break;
+      case 'approved':
+        router.push(`/finalize/${sow.id}`);
+        break;
+      case 'finalized':
+        router.push(`/finalize/${sow.id}`);
+        break;
+      default:
+        router.push(`/draft/${sow.id}`);
     }
   };
 
@@ -207,8 +230,11 @@ export default function AllSoWs() {
             >
               <option value="All">All Statuses</option>
               <option value="draft">Draft</option>
-              <option value="in_review">In Review</option>
+              <option value="ai_review">AI Review</option>
+              <option value="internal_review">Internal Review</option>
+              <option value="drm_review">DRM Review</option>
               <option value="approved">Approved</option>
+              <option value="finalized">Finalized</option>
               <option value="rejected">Rejected</option>
             </select>
           </div>

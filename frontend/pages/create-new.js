@@ -69,9 +69,9 @@ export default function CreateNew() {
           customer_name: form.customerName,
           opportunity_id: form.opportunityId,
           deal_value: form.dealValue ? parseFloat(form.dealValue) : null,
+          estimated_margin: form.estimatedMargin ? parseFloat(form.estimatedMargin) : null,
           metadata: {
             workOrderNumber: form.workOrderNumber,
-            estimatedMargin: form.estimatedMargin,
             customerLegalName: form.customerLegalName,
           },
         }),

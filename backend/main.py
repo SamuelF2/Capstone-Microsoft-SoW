@@ -234,6 +234,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS customer_name TEXT;",
             "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS opportunity_id TEXT;",
             "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS deal_value NUMERIC;",
+            # Phase 1: ESAP + margin columns
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS esap_level TEXT;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS estimated_margin NUMERIC;",
+            # Phase 4: finalization columns
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;",
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_by INTEGER REFERENCES users(id);",
         ]:
             await conn.execute(col_ddl)
 
@@ -290,7 +296,51 @@ async def lifespan(app: FastAPI):
         """)
 
         # ------------------------------------------------------------------ #
-        # 9. INDEXES                                                          #
+        # 9. REVIEW ASSIGNMENTS  (Phase 1+: per-SoW review duties)           #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS review_assignments (
+                id                  SERIAL PRIMARY KEY,
+                sow_id              INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
+                user_id             INTEGER NOT NULL REFERENCES users(id),
+                reviewer_role       TEXT NOT NULL,
+                stage               TEXT NOT NULL,
+                status              TEXT NOT NULL DEFAULT 'pending',
+                decision            TEXT,
+                comments            TEXT,
+                conditions          JSONB,
+                checklist_responses JSONB,
+                assigned_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at        TIMESTAMPTZ
+            );
+        """)
+
+        # Phase 2: enhance review_results with additional columns
+        for col_ddl in [
+            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS reviewer_user_id INTEGER REFERENCES users(id);",
+            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS review_stage TEXT;",
+            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS checklist_responses JSONB;",
+            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS decision TEXT;",
+            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS conditions JSONB;",
+        ]:
+            await conn.execute(col_ddl)
+
+        # ------------------------------------------------------------------ #
+        # 10. HANDOFF PACKAGES  (Phase 4: finalization)                       #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS handoff_packages (
+                id              SERIAL PRIMARY KEY,
+                sow_id          INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
+                created_by      INTEGER REFERENCES users(id),
+                document_path   TEXT,
+                package_data    JSONB,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 11. INDEXES                                                         #
         # ------------------------------------------------------------------ #
         for idx_ddl in [
             "CREATE INDEX IF NOT EXISTS idx_sow_status      ON sow_documents(status);",
@@ -303,6 +353,12 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_history_changed_by ON history(changed_by);",
             "CREATE INDEX IF NOT EXISTS idx_collab_sow_id      ON collaboration(sow_id);",
             "CREATE INDEX IF NOT EXISTS idx_collab_user_id  ON collaboration(user_id);",
+            # review_assignments indexes
+            "CREATE INDEX IF NOT EXISTS idx_review_assignments_sow    ON review_assignments(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_review_assignments_user   ON review_assignments(user_id);",
+            "CREATE INDEX IF NOT EXISTS idx_review_assignments_status ON review_assignments(status);",
+            # handoff_packages index
+            "CREATE INDEX IF NOT EXISTS idx_handoff_sow ON handoff_packages(sow_id);",
         ]:
             await conn.execute(idx_ddl)
 

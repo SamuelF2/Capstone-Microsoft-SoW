@@ -51,6 +51,7 @@ from auth import CurrentUser
 from config import MAX_UPLOAD_SIZE_MB, RULES_DIR, UPLOAD_DIR
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from models import (
+    AIAnalysisResult,
     HistoryEntryResponse,
     ParseResult,
     SectionResult,
@@ -60,10 +61,30 @@ from models import (
     SoWSummary,
     SoWUpdate,
 )
+from services.ai import analyze_sow
 
 router = APIRouter(prefix="/api/sow", tags=["sow"])
 
-_VALID_STATUSES = {"draft", "in_review", "approved", "rejected"}
+_VALID_STATUSES = {
+    "draft",
+    "ai_review",
+    "internal_review",
+    "drm_review",
+    "approved",
+    "finalized",
+    "rejected",
+}
+
+_VALID_TRANSITIONS: dict[str, set[str]] = {
+    "draft": {"ai_review"},
+    "ai_review": {"internal_review", "draft"},
+    "internal_review": {"drm_review", "rejected", "draft"},
+    "drm_review": {"approved", "rejected", "internal_review"},
+    "approved": {"finalized"},
+    "rejected": {"draft"},
+    "finalized": set(),
+}
+
 _VALID_METHODOLOGIES = {"Agile Sprint Delivery", "Sure Step 365", "Waterfall", "Cloud Adoption"}
 _VALID_EXTENSIONS = {".pdf", ".docx"}
 _MAX_UPLOAD_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
@@ -151,6 +172,24 @@ async def _insert_history(
     )
 
 
+def _compute_esap_level(deal_value: float | None, margin: float | None) -> str:
+    """Determine ESAP type from deal value and estimated margin.
+
+    Rules from Data/rules/workflow/esap-workflow.json:
+      type-1: dealValue > $5M  OR  margin < 10%
+      type-2: $1M < dealValue <= $5M  OR  10% <= margin < 15%
+      type-3: dealValue <= $1M  AND  margin >= 15%
+    """
+    dv = deal_value or 0
+    mg = margin if margin is not None else 100
+
+    if dv > 5_000_000 or mg < 10:
+        return "type-1"
+    if dv > 1_000_000 or mg < 15:
+        return "type-2"
+    return "type-3"
+
+
 # ── History ──────────────────────────────────────────────────────────────────
 
 
@@ -235,6 +274,7 @@ async def list_sows(
     query = f"""
         SELECT  s.id, s.title, s.status, s.cycle, s.methodology,
                 s.customer_name, s.opportunity_id, s.deal_value,
+                s.esap_level, s.estimated_margin,
                 s.client_id, s.updated_at
         FROM    sow_documents s
         JOIN    collaboration c ON c.sow_id = s.id
@@ -317,8 +357,9 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
             """
             INSERT INTO sow_documents
                 (title, cycle, content_id, client_id, methodology,
-                 customer_name, opportunity_id, deal_value, content, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+                 customer_name, opportunity_id, deal_value,
+                 estimated_margin, content, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb)
             RETURNING *
             """,
             payload.title,
@@ -329,6 +370,7 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
             payload.customer_name,
             payload.opportunity_id,
             payload.deal_value,
+            payload.estimated_margin,
             content_json,
             metadata_json,
         )
@@ -545,6 +587,15 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
         return _row_to_response(dict(row))
 
+    # Finalization guard — reject edits to locked SoWs
+    async with database.pg_pool.acquire() as conn:
+        cur_status = await conn.fetchval("SELECT status FROM sow_documents WHERE id = $1", sow_id)
+    if cur_status == "finalized":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot edit a finalized SoW",
+        )
+
     if "methodology" in updates and updates["methodology"] not in _VALID_METHODOLOGIES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -617,9 +668,10 @@ async def update_sow_status(
 ) -> SoWResponse:
     """Change the workflow status of a SoW.
 
-    Valid values: ``draft`` | ``in_review`` | ``approved`` | ``rejected``
+    Enforces valid transitions defined in ``_VALID_TRANSITIONS``.
 
     Raises **400** for unrecognised statuses.
+    Raises **409** for invalid transitions.
     Raises **404** if the SoW does not exist or the current user is not a
     collaborator on it.
     """
@@ -633,6 +685,16 @@ async def update_sow_status(
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         old_status = await conn.fetchval("SELECT status FROM sow_documents WHERE id = $1", sow_id)
+        if old_status is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        allowed = _VALID_TRANSITIONS.get(old_status, set())
+        if payload.status not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot transition from '{old_status}' to '{payload.status}'. "
+                f"Allowed: {sorted(allowed)}",
+            )
 
         row = await conn.fetchrow(
             """
@@ -674,7 +736,17 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
     Raises **404** if the SoW does not exist or the current user is not a
     collaborator on it.
+    Raises **409** if the SoW is finalized.
     """
+    # Finalization guard
+    async with database.pg_pool.acquire() as conn:
+        cur_status = await conn.fetchval("SELECT status FROM sow_documents WHERE id = $1", sow_id)
+    if cur_status == "finalized":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a finalized SoW",
+        )
+
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
@@ -985,3 +1057,251 @@ async def parse_sow(sow_id: int, current_user: CurrentUser) -> ParseResult:
         missingKeywords=missing_keywords,
         violations=violations,
     )
+
+
+# ── Submit for Review ────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{sow_id}/submit-for-review",
+    response_model=SoWResponse,
+    summary="Submit a draft SoW for AI review",
+)
+async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWResponse:
+    """Validate exit criteria, compute ESAP level, and transition to ``ai_review``.
+
+    Both entry paths (template draft and upload) pass through this endpoint.
+    After AI review, the user calls ``proceed-to-review`` to advance to
+    ``internal_review``.
+
+    Raises **409** if the SoW is not in ``draft`` status.
+    Raises **422** if required exit criteria are not met.
+    """
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        if row["status"] != "draft":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW status is '{row['status']}', must be 'draft' to submit for review",
+            )
+
+        # Validate exit criteria
+        # Upload path: if metadata has file_path, this is an uploaded document — skip content checks
+        metadata = row["metadata"]
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata)
+        is_upload = bool((metadata or {}).get("file_path"))
+
+        if not is_upload:
+            content = row["content"]
+            if isinstance(content, str):
+                content = json.loads(content)
+            content = content or {}
+
+            missing: list[str] = []
+            if not content.get("executiveSummary"):
+                missing.append("Executive Summary")
+            if not content.get("projectScope") and not content.get("scope"):
+                missing.append("Project Scope")
+            if not content.get("deliverables"):
+                missing.append("Deliverables")
+
+            if missing:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Missing required sections: {', '.join(missing)}",
+                )
+
+        # Compute ESAP level
+        esap = _compute_esap_level(
+            deal_value=float(row["deal_value"]) if row["deal_value"] else None,
+            margin=float(row["estimated_margin"]) if row["estimated_margin"] else None,
+        )
+
+        # Update SoW: set ESAP level, transition to ai_review
+        updated = await conn.fetchrow(
+            """
+            UPDATE sow_documents
+            SET esap_level = $1, status = 'ai_review', updated_at = NOW()
+            WHERE id = $2
+            RETURNING *
+            """,
+            esap,
+            sow_id,
+        )
+
+        await _insert_history(
+            conn,
+            sow_id=sow_id,
+            user_id=current_user.id,
+            change_type="submitted_for_review",
+            diff={"esap_level": esap, "old_status": "draft", "new_status": "ai_review"},
+        )
+
+    return _row_to_response(dict(updated))
+
+
+# ── AI Analysis ──────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{sow_id}/ai-analyze",
+    response_model=AIAnalysisResult,
+    summary="Run AI analysis on a SoW",
+)
+async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult:
+    """Trigger AI analysis on a SoW and store results in ``ai_suggestion``.
+
+    Returns the full analysis result. The SoW must be in ``ai_review`` or
+    ``draft`` status (to allow optional pre-submission analysis).
+    """
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        if row["status"] not in ("draft", "ai_review"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW status is '{row['status']}', must be 'draft' or 'ai_review' for AI analysis",
+            )
+
+        content = row["content"]
+        if isinstance(content, str):
+            content = json.loads(content)
+        content = content or {}
+
+        # Call AI service stub
+        result = await analyze_sow(content, row["methodology"] or "")
+
+        # Store in ai_suggestion table
+        ai_id = await conn.fetchval(
+            """
+            INSERT INTO ai_suggestion (flag, validation_recommendation, risks)
+            VALUES ($1, $2::jsonb, $3::jsonb)
+            RETURNING id
+            """,
+            result.approval.level,
+            json.dumps(
+                result.model_dump(include={"violations", "checklist", "suggestions", "approval"})
+            ),
+            json.dumps([r.model_dump() for r in result.risks]),
+        )
+
+        # Link to SoW
+        await conn.execute(
+            "UPDATE sow_documents SET ai_suggestion_id = $1, updated_at = NOW() WHERE id = $2",
+            ai_id,
+            sow_id,
+        )
+
+        await _insert_history(
+            conn,
+            sow_id=sow_id,
+            user_id=current_user.id,
+            change_type="ai_analysis",
+            diff={"ai_suggestion_id": ai_id, "overall_score": result.overall_score},
+        )
+
+    return result
+
+
+# ── Proceed to Internal Review ───────────────────────────────────────────────
+
+
+@router.post(
+    "/{sow_id}/proceed-to-review",
+    response_model=SoWResponse,
+    summary="Advance from AI review to internal review",
+)
+async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWResponse:
+    """Assign internal-review reviewers and transition to ``internal_review``.
+
+    Requires the SoW to be in ``ai_review`` status. Assigns one user per
+    required reviewer role for the ``internal-review`` stage based on the
+    ESAP level.
+    """
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        if row["status"] != "ai_review":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW status is '{row['status']}', must be 'ai_review' to proceed",
+            )
+
+        esap = row["esap_level"] or "type-3"
+
+        # Load required approvers from ESAP rules
+        esap_path = os.path.join(RULES_DIR, "workflow", "esap-workflow.json")
+        required_roles: list[str] = []
+        if os.path.isfile(esap_path):
+            with open(esap_path) as f:
+                esap_rules = json.load(f)
+            level_rules = esap_rules.get("esapLevels", {}).get(esap, {})
+            for approver in level_rules.get("requiredApprovers", []):
+                if approver.get("stage") == "internal-review" and approver.get("required"):
+                    required_roles.append(approver["role"])
+
+        # Fallback: always require SA
+        if not required_roles:
+            required_roles = ["solution-architect"]
+
+        # Assign one user per required role
+        for role in required_roles:
+            reviewer = await conn.fetchrow(
+                "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
+                role,
+            )
+            if reviewer:
+                # Create review assignment
+                await conn.execute(
+                    """
+                    INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
+                    VALUES ($1, $2, $3, 'internal-review')
+                    ON CONFLICT DO NOTHING
+                    """,
+                    sow_id,
+                    reviewer["id"],
+                    role,
+                )
+                # Add to collaboration if not already present
+                await _seed_collaboration(
+                    conn, sow_id=sow_id, user_id=reviewer["id"], role="reviewer"
+                )
+
+        # Transition to internal_review
+        updated = await conn.fetchrow(
+            """
+            UPDATE sow_documents
+            SET status = 'internal_review', updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            """,
+            sow_id,
+        )
+
+        await _insert_history(
+            conn,
+            sow_id=sow_id,
+            user_id=current_user.id,
+            change_type="proceeded_to_review",
+            diff={
+                "old_status": "ai_review",
+                "new_status": "internal_review",
+                "assigned_roles": required_roles,
+            },
+        )
+
+    return _row_to_response(dict(updated))

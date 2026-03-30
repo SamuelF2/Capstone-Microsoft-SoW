@@ -119,6 +119,7 @@ class SoWCreate(BaseModel):
     customer_name: str | None = None
     opportunity_id: str | None = None
     deal_value: float | None = None
+    estimated_margin: float | None = None
     content: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -133,6 +134,7 @@ class SoWUpdate(BaseModel):
     customer_name: str | None = None
     opportunity_id: str | None = None
     deal_value: float | None = None
+    estimated_margin: float | None = None
     content: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -152,6 +154,8 @@ class SoWResponse(BaseModel):
     cycle: int | None = None
     content_id: int | None = None
     ai_suggestion_id: int | None = None
+    esap_level: str | None = None
+    estimated_margin: float | None = None
     uploaded_at: datetime
     updated_at: datetime
     client_id: str | None = None
@@ -161,6 +165,8 @@ class SoWResponse(BaseModel):
     deal_value: float | None = None
     content: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    finalized_at: datetime | None = None
+    finalized_by: int | None = None
 
 
 class SoWSummary(BaseModel):
@@ -174,6 +180,8 @@ class SoWSummary(BaseModel):
     customer_name: str | None = None
     opportunity_id: str | None = None
     deal_value: float | None = None
+    esap_level: str | None = None
+    estimated_margin: float | None = None
     client_id: str | None = None
     updated_at: datetime
 
@@ -232,3 +240,205 @@ class ParseResult(BaseModel):
     sections: list[SectionResult]
     missingKeywords: list[str] = []
     violations: list[dict[str, Any]] = []
+
+
+# ── AI Analysis  (Phase 1) ──────────────────────────────────────────────────
+
+
+class ViolationResult(BaseModel):
+    """A single rule violation found in the SoW."""
+
+    rule: str
+    severity: str  # "high", "medium", "low"
+    message: str
+    section: str | None = None
+
+
+class RiskResult(BaseModel):
+    """A single identified risk."""
+
+    category: str  # "Staffing", "Timeline", "Budget", etc.
+    level: str  # "high", "medium", "low"
+    description: str
+
+
+class ApprovalRouting(BaseModel):
+    """AI-determined approval routing recommendation."""
+
+    level: str  # "Green", "Yellow", "Red"
+    esap_type: str  # "Type-1", "Type-2", "Type-3"
+    reason: str
+    chain: list[str]  # ["Solution Architect", "SQA Reviewer", ...]
+
+
+class ChecklistSuggestion(BaseModel):
+    """AI-suggested checklist item."""
+
+    id: str
+    text: str
+    category: str
+    required: bool
+    auto_result: str | None = None  # "pass", "fail", "warning", None
+
+
+class SectionSuggestion(BaseModel):
+    """AI-suggested content improvement for a section."""
+
+    section: str
+    current_text: str | None = None
+    suggested_text: str | None = None
+    rationale: str | None = None
+
+
+class AIAnalysisResult(BaseModel):
+    """Complete AI analysis result for a SoW."""
+
+    violations: list[ViolationResult]
+    risks: list[RiskResult]
+    approval: ApprovalRouting
+    checklist: list[ChecklistSuggestion]
+    suggestions: list[SectionSuggestion]
+    overall_score: float | None = None  # 0-100
+    summary: str | None = None
+
+
+# ── Review  (Phase 2) ───────────────────────────────────────────────────────
+
+
+class ReviewAssignment(BaseModel):
+    """A single review assignment row."""
+
+    id: int
+    sow_id: int
+    user_id: int
+    reviewer_role: str
+    stage: str
+    status: str  # pending, in_progress, completed
+    decision: str | None = None
+    comments: str | None = None
+    conditions: list[str] | None = None
+    checklist_responses: list[dict[str, Any]] | None = None
+    assigned_at: datetime
+    completed_at: datetime | None = None
+
+
+class ReviewAssignmentSummary(BaseModel):
+    """Review assignment with joined SoW fields for list views."""
+
+    id: int
+    sow_id: int
+    sow_title: str
+    sow_status: str
+    methodology: str | None = None
+    customer_name: str | None = None
+    deal_value: float | None = None
+    esap_level: str | None = None
+    reviewer_role: str
+    stage: str
+    status: str
+    assigned_at: datetime
+    completed_at: datetime | None = None
+
+
+class ChecklistItemModel(BaseModel):
+    """A single checklist item from review-checklists.json."""
+
+    id: str
+    text: str
+    required: bool
+    category: str
+    help_text: str | None = Field(default=None, alias="helpText")
+
+    model_config = {"populate_by_name": True}
+
+
+class ReviewChecklistResponse(BaseModel):
+    """Full checklist for a reviewer."""
+
+    reviewer_role: str
+    display_name: str
+    focus_areas: list[str]
+    items: list[ChecklistItemModel]
+    saved_responses: list[dict[str, Any]] | None = None
+
+
+class ReviewProgressPayload(BaseModel):
+    """Partial save of review progress."""
+
+    checklist_responses: list[dict[str, Any]]
+    comments: str | None = None
+
+
+class ReviewSubmitPayload(BaseModel):
+    """Final review decision submission."""
+
+    decision: str  # "approved", "rejected", "approved-with-conditions"
+    checklist_responses: list[dict[str, Any]]
+    comments: str | None = None
+    conditions: list[str] | None = None
+
+
+class ReviewAssignmentStatusSummary(BaseModel):
+    """Summary of a single reviewer's status within a review."""
+
+    reviewer_role: str
+    display_name: str
+    stage: str
+    status: str
+    decision: str | None = None
+    completed_at: datetime | None = None
+
+
+class ReviewStatus(BaseModel):
+    """Aggregated review status for a SoW."""
+
+    sow_id: int
+    current_stage: str
+    esap_level: str | None = None
+    assignments: list[ReviewAssignmentStatusSummary]
+    gating_rules_met: bool
+    outstanding_requirements: list[str]
+
+
+# ── Send-Back  (Phase 3) ────────────────────────────────────────────────────
+
+
+class SendBackPayload(BaseModel):
+    """Payload for sending a SoW back to a previous stage."""
+
+    target_stage: str  # "draft" or "internal_review"
+    comments: str
+    action_items: list[str] | None = None
+
+
+# ── Finalize & Handoff  (Phase 4) ───────────────────────────────────────────
+
+
+class HandoffPackagePayload(BaseModel):
+    """Input for creating a handoff package."""
+
+    delivery_team: list[dict[str, Any]]
+    key_contacts: list[dict[str, Any]]
+    kickoff_date: str | None = None
+    special_instructions: str | None = None
+    notes: str | None = None
+
+
+class HandoffPackageResponse(BaseModel):
+    """Handoff package output."""
+
+    id: int
+    sow_id: int
+    created_by: int | None = None
+    document_path: str | None = None
+    package_data: dict[str, Any]
+    created_at: datetime
+
+
+class DocumentGenerationResponse(BaseModel):
+    """Result of document generation."""
+
+    file_path: str
+    file_name: str
+    format: str
+    size_bytes: int

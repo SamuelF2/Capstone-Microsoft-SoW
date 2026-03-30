@@ -107,10 +107,7 @@ export default function Home() {
               <button className="btn btn-primary btn-lg" onClick={() => router.push('/create-new')}>
                 Create New SOW
               </button>
-              <button
-                className="btn btn-secondary btn-lg"
-                onClick={() => router.push('/review-history')}
-              >
+              <button className="btn btn-secondary btn-lg" onClick={() => router.push('/all-sows')}>
                 View All SoWs
               </button>
             </div>
