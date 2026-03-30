@@ -362,6 +362,58 @@ async def _seed_collaboration(conn, sow_id: int, user_id: int, role: str = "revi
     )
 
 
+async def _create_assignment_with_prior(
+    conn, *, sow_id: int, user_id: int, reviewer_role: str, stage: str
+) -> None:
+    """Create a review assignment, carrying over checklist_responses and comments
+    from the most recent prior assignment for the same sow/role/stage (if any).
+
+    This lets reviewers see and edit their previous responses when a SoW is
+    resubmitted after rejection.  Skips creation if the user already has a
+    pending/in-progress assignment for this sow + role + stage.
+    """
+    existing = await conn.fetchval(
+        """
+        SELECT 1 FROM review_assignments
+        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3
+          AND stage = $4 AND status IN ('pending', 'in_progress')
+        """,
+        sow_id,
+        user_id,
+        reviewer_role,
+        stage,
+    )
+    if existing:
+        return  # already has an active assignment for this role
+
+    prior = await conn.fetchrow(
+        """
+        SELECT checklist_responses, comments FROM review_assignments
+        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3 AND stage = $4
+          AND status IN ('completed', 'canceled')
+        ORDER BY COALESCE(completed_at, assigned_at) DESC
+        LIMIT 1
+        """,
+        sow_id,
+        user_id,
+        reviewer_role,
+        stage,
+    )
+    await conn.execute(
+        """
+        INSERT INTO review_assignments
+            (sow_id, user_id, reviewer_role, stage, checklist_responses, comments)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        """,
+        sow_id,
+        user_id,
+        reviewer_role,
+        stage,
+        prior["checklist_responses"] if prior else None,
+        prior["comments"] if prior else None,
+    )
+
+
 # ── GET /api/review/assigned ──────────────────────────────────────────────────
 
 
@@ -393,8 +445,11 @@ async def get_assigned_reviews(
         conditions.append(f"ra.status = ${len(params)}")
 
     where = " AND ".join(conditions)
+    # Use DISTINCT ON to return only the latest assignment per
+    # (sow, role, stage), avoiding stale rows from prior cycles.
     query = f"""
-        SELECT ra.id, ra.sow_id,
+        SELECT DISTINCT ON (ra.sow_id, ra.reviewer_role, ra.stage)
+               ra.id, ra.sow_id,
                s.title       AS sow_title,
                s.status      AS sow_status,
                s.methodology,
@@ -409,7 +464,7 @@ async def get_assigned_reviews(
         FROM   review_assignments ra
         JOIN   sow_documents s ON s.id = ra.sow_id
         WHERE  {where}
-        ORDER BY ra.assigned_at DESC
+        ORDER BY ra.sow_id, ra.reviewer_role, ra.stage, ra.assigned_at DESC
     """
     async with database.pg_pool.acquire() as conn:
         rows = await conn.fetch(query, *params)
@@ -431,8 +486,13 @@ async def get_checklist(sow_id: int, current_user: CurrentUser) -> ReviewCheckli
     Includes any previously saved checklist_responses so reviewers can resume.
     """
     async with database.pg_pool.acquire() as conn:
+        # Prefer a pending/in-progress assignment so authors with multiple
+        # role assignments cycle through them one at a time.
         assignment = await conn.fetchrow(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2",
+            """SELECT * FROM review_assignments
+               WHERE sow_id = $1 AND user_id = $2
+               ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END
+               LIMIT 1""",
             sow_id,
             current_user.id,
         )
@@ -478,7 +538,10 @@ async def save_progress(
     """
     async with database.pg_pool.acquire() as conn:
         assignment = await conn.fetchrow(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2",
+            """SELECT * FROM review_assignments
+               WHERE sow_id = $1 AND user_id = $2
+               ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END
+               LIMIT 1""",
             sow_id,
             current_user.id,
         )
@@ -495,14 +558,12 @@ async def save_progress(
             SET    checklist_responses = $1::jsonb,
                    comments            = $2,
                    status              = $3
-            WHERE  sow_id  = $4
-              AND  user_id = $5
+            WHERE  id = $4
             """,
             json.dumps(payload.checklist_responses),
             payload.comments,
             new_status,
-            sow_id,
-            current_user.id,
+            assignment["id"],
         )
 
     return {"saved": True}
@@ -551,8 +612,13 @@ async def submit_review(
         )
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
+        # Prefer a pending/in-progress assignment so authors with multiple
+        # role assignments cycle through them one at a time.
         assignment = await conn.fetchrow(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2",
+            """SELECT * FROM review_assignments
+               WHERE sow_id = $1 AND user_id = $2
+               ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END
+               LIMIT 1""",
             sow_id,
             current_user.id,
         )
@@ -588,7 +654,7 @@ async def submit_review(
 
         now = datetime.now(UTC)
 
-        # Mark this assignment as completed
+        # Mark this specific assignment as completed (by id, not user+sow)
         await conn.execute(
             """
             UPDATE review_assignments
@@ -598,16 +664,14 @@ async def submit_review(
                    conditions          = $3::jsonb,
                    checklist_responses = $4::jsonb,
                    completed_at        = $5
-            WHERE  sow_id  = $6
-              AND  user_id = $7
+            WHERE  id = $6
             """,
             payload.decision,
             payload.comments,
             json.dumps(payload.conditions) if payload.conditions else None,
             json.dumps(payload.checklist_responses),
             now,
-            sow_id,
-            current_user.id,
+            assignment["id"],
         )
 
         # Audit: insert into review_results
@@ -643,7 +707,10 @@ async def submit_review(
             },
         )
 
-        # Rejection: send SoW back to draft and cancel peer assignments at this stage
+        # Rejection: send SoW back to draft and cancel all other pending
+        # assignments at this stage (including the current user's other role
+        # assignments, which matter when the author holds multiple roles for
+        # testing).
         if payload.decision == "rejected":
             await conn.execute(
                 "UPDATE sow_documents SET status = 'draft', updated_at = NOW() WHERE id = $1",
@@ -653,13 +720,13 @@ async def submit_review(
                 """
                 UPDATE review_assignments
                 SET    status = 'canceled'
-                WHERE  sow_id   = $1
-                  AND  user_id != $2
-                  AND  status  IN ('pending', 'in_progress')
-                  AND  stage    = $3
+                WHERE  sow_id  = $1
+                  AND  id     != $2
+                  AND  status IN ('pending', 'in_progress')
+                  AND  stage   = $3
                 """,
                 sow_id,
-                current_user.id,
+                assignment["id"],
                 assignment["stage"],
             )
             await _insert_history(
@@ -685,14 +752,27 @@ async def submit_review(
     summary="Get the aggregated review status for a SoW",
 )
 async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewStatus:
-    """Return all assignments for the SoW and whether gating rules are satisfied."""
+    """Return the *current-cycle* assignments for a SoW and whether gating rules
+    are satisfied.
+
+    Only the most recent assignment per (user, reviewer_role, stage) is
+    returned.  This prevents stale rows from prior reject/resubmit cycles from
+    polluting the status view or incorrectly satisfying gating rules.
+    """
     async with database.pg_pool.acquire() as conn:
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
+        # Fetch only the latest assignment per (user, role, stage).
+        # DISTINCT ON keeps the row with the highest assigned_at for each group.
         rows = await conn.fetch(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 ORDER BY assigned_at",
+            """
+            SELECT DISTINCT ON (user_id, reviewer_role, stage) *
+            FROM   review_assignments
+            WHERE  sow_id = $1
+            ORDER  BY user_id, reviewer_role, stage, assigned_at DESC
+            """,
             sow_id,
         )
 
@@ -773,8 +853,15 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
         # ── Branch: internal_review → drm_review ─────────────────────────────
         if sow["status"] == "internal_review":
             required_roles = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
+            # Only consider the latest assignment per (user, role) to avoid
+            # counting stale approvals from prior reject/resubmit cycles.
             existing = await conn.fetch(
-                "SELECT * FROM review_assignments WHERE sow_id = $1 AND stage = 'internal-review'",
+                """
+                SELECT DISTINCT ON (user_id, reviewer_role) *
+                FROM   review_assignments
+                WHERE  sow_id = $1 AND stage = 'internal-review'
+                ORDER  BY user_id, reviewer_role, assigned_at DESC
+                """,
                 sow_id,
             )
             completed_roles = {
@@ -793,7 +880,7 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     ),
                 )
 
-            # Assign DRM reviewers
+            # Assign DRM reviewers, carrying over any prior responses
             drm_roles = _DRM_REQUIRED.get(esap, ["cpl"])
             assigned: list[str] = []
             for role in drm_roles:
@@ -802,18 +889,27 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     role,
                 )
                 if reviewer:
-                    await conn.execute(
-                        """
-                        INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
-                        VALUES ($1, $2, $3, 'drm-approval')
-                        ON CONFLICT DO NOTHING
-                        """,
-                        sow_id,
-                        reviewer["id"],
-                        role,
+                    await _create_assignment_with_prior(
+                        conn,
+                        sow_id=sow_id,
+                        user_id=reviewer["id"],
+                        reviewer_role=role,
+                        stage="drm-approval",
                     )
                     await _seed_collaboration(conn, sow_id, reviewer["id"], "approver")
                     assigned.append(role)
+
+            # TESTING: Also assign the author as every DRM reviewer role so
+            # they can walk through the full pipeline solo.  Remove this block
+            # once proper role assignment is in place.
+            for role in drm_roles:
+                await _create_assignment_with_prior(
+                    conn,
+                    sow_id=sow_id,
+                    user_id=current_user.id,
+                    reviewer_role=role,
+                    stage="drm-approval",
+                )
 
             await conn.execute(
                 "UPDATE sow_documents SET status = 'drm_review', updated_at = NOW() WHERE id = $1",
@@ -837,7 +933,12 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
         elif sow["status"] == "drm_review":
             required_roles = _DRM_REQUIRED.get(esap, ["cpl"])
             existing = await conn.fetch(
-                "SELECT * FROM review_assignments WHERE sow_id = $1 AND stage = 'drm-approval'",
+                """
+                SELECT DISTINCT ON (user_id, reviewer_role) *
+                FROM   review_assignments
+                WHERE  sow_id = $1 AND stage = 'drm-approval'
+                ORDER  BY user_id, reviewer_role, assigned_at DESC
+                """,
                 sow_id,
             )
             completed_roles = {
@@ -905,7 +1006,10 @@ async def get_drm_summary(sow_id: int, current_user: CurrentUser) -> dict:
     """
     async with database.pg_pool.acquire() as conn:
         assignment = await conn.fetchrow(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'",
+            """SELECT * FROM review_assignments
+               WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'
+               ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END
+               LIMIT 1""",
             sow_id,
             current_user.id,
         )
@@ -1078,7 +1182,10 @@ async def send_back(
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
         assignment = await conn.fetchrow(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'",
+            """SELECT * FROM review_assignments
+               WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'
+               ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END
+               LIMIT 1""",
             sow_id,
             current_user.id,
         )
@@ -1100,7 +1207,7 @@ async def send_back(
 
         now = datetime.now(UTC)
 
-        # Mark the submitter's assignment as completed/rejected
+        # Mark the submitter's specific assignment as completed/rejected
         await conn.execute(
             """
             UPDATE review_assignments
@@ -1108,13 +1215,11 @@ async def send_back(
                    decision     = 'rejected',
                    comments     = $1,
                    completed_at = $2
-            WHERE  sow_id  = $3
-              AND  user_id = $4
+            WHERE  id = $3
             """,
             payload.comments,
             now,
-            sow_id,
-            current_user.id,
+            assignment["id"],
         )
 
         # Cancel other pending DRM assignments
@@ -1161,16 +1266,23 @@ async def send_back(
                     ir_role,
                 )
                 if reviewer:
-                    await conn.execute(
-                        """
-                        INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
-                        VALUES ($1, $2, $3, 'internal-review')
-                        ON CONFLICT DO NOTHING
-                        """,
-                        sow_id,
-                        reviewer["id"],
-                        ir_role,
+                    await _create_assignment_with_prior(
+                        conn,
+                        sow_id=sow_id,
+                        user_id=reviewer["id"],
+                        reviewer_role=ir_role,
+                        stage="internal-review",
                     )
+
+            # TESTING: Also re-assign the author for each role
+            for ir_role in roles_needed:
+                await _create_assignment_with_prior(
+                    conn,
+                    sow_id=sow_id,
+                    user_id=current_user.id,
+                    reviewer_role=ir_role,
+                    stage="internal-review",
+                )
 
         # Update SoW status
         await conn.execute(

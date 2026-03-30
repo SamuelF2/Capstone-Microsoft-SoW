@@ -91,7 +91,6 @@ export default function AISuggestionsPanel({
           borderBottom: collapsed ? 'none' : '1px solid var(--color-border-default)',
         }}
       >
-        <span style={{ fontSize: '1rem' }}>🤖</span>
         <span
           style={{
             flex: 1,

@@ -129,13 +129,23 @@ export default function Navigation() {
         {/* User section */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
           {/* Avatar + name */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+          <Link
+            href="/account"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--spacing-sm)',
+              textDecoration: 'none',
+            }}
+          >
             <div
               style={{
                 width: '32px',
                 height: '32px',
                 borderRadius: 'var(--radius-full)',
-                backgroundColor: 'var(--color-accent-blue)',
+                backgroundColor: isActive('/account')
+                  ? 'var(--color-accent-purple)'
+                  : 'var(--color-accent-blue)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -143,6 +153,8 @@ export default function Navigation() {
                 fontWeight: 'var(--font-weight-semibold)',
                 color: '#fff',
                 flexShrink: 0,
+                cursor: 'pointer',
+                transition: 'background-color var(--transition-base)',
               }}
             >
               {initials}
@@ -159,7 +171,7 @@ export default function Navigation() {
             >
               {displayName}
             </span>
-          </div>
+          </Link>
 
           {/* Logout */}
           <button

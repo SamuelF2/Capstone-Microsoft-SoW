@@ -147,8 +147,15 @@ export function AuthProvider({ children }) {
     [getAccessToken]
   );
 
+  /** Override the user's role locally for testing purposes. */
+  const overrideRole = useCallback((role) => {
+    setUser((prev) => (prev ? { ...prev, role } : prev));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, authFetch, getAccessToken }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, logout, authFetch, getAccessToken, overrideRole }}
+    >
       {children}
     </AuthContext.Provider>
   );

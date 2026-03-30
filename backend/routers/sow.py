@@ -190,6 +190,58 @@ def _compute_esap_level(deal_value: float | None, margin: float | None) -> str:
     return "type-3"
 
 
+async def _create_assignment_with_prior(
+    conn, *, sow_id: int, user_id: int, reviewer_role: str, stage: str
+) -> None:
+    """Create a review assignment, carrying over checklist_responses and comments
+    from the most recent prior assignment for the same sow/role/stage (if any).
+
+    This lets reviewers see and edit their previous responses when a SoW is
+    resubmitted after rejection.  Skips creation if the user already has a
+    pending/in-progress assignment for this sow + role + stage.
+    """
+    existing = await conn.fetchval(
+        """
+        SELECT 1 FROM review_assignments
+        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3
+          AND stage = $4 AND status IN ('pending', 'in_progress')
+        """,
+        sow_id,
+        user_id,
+        reviewer_role,
+        stage,
+    )
+    if existing:
+        return  # already has an active assignment for this role
+
+    prior = await conn.fetchrow(
+        """
+        SELECT checklist_responses, comments FROM review_assignments
+        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3 AND stage = $4
+          AND status IN ('completed', 'canceled')
+        ORDER BY COALESCE(completed_at, assigned_at) DESC
+        LIMIT 1
+        """,
+        sow_id,
+        user_id,
+        reviewer_role,
+        stage,
+    )
+    await conn.execute(
+        """
+        INSERT INTO review_assignments
+            (sow_id, user_id, reviewer_role, stage, checklist_responses, comments)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        """,
+        sow_id,
+        user_id,
+        reviewer_role,
+        stage,
+        prior["checklist_responses"] if prior else None,
+        prior["comments"] if prior else None,
+    )
+
+
 # ── History ──────────────────────────────────────────────────────────────────
 
 
@@ -1258,28 +1310,38 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
         if not required_roles:
             required_roles = ["solution-architect"]
 
-        # Assign one user per required role
+        # Assign one user per required role, carrying over any prior responses
         for role in required_roles:
             reviewer = await conn.fetchrow(
                 "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
                 role,
             )
             if reviewer:
-                # Create review assignment
-                await conn.execute(
-                    """
-                    INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
-                    VALUES ($1, $2, $3, 'internal-review')
-                    ON CONFLICT DO NOTHING
-                    """,
-                    sow_id,
-                    reviewer["id"],
-                    role,
+                await _create_assignment_with_prior(
+                    conn,
+                    sow_id=sow_id,
+                    user_id=reviewer["id"],
+                    reviewer_role=role,
+                    stage="internal-review",
                 )
                 # Add to collaboration if not already present
                 await _seed_collaboration(
                     conn, sow_id=sow_id, user_id=reviewer["id"], role="reviewer"
                 )
+
+        # TESTING: Also assign the author as every required reviewer role so
+        # they can walk through the full pipeline solo.  Remove this block
+        # once proper role assignment is in place.
+        # (_create_assignment_with_prior already skips if a pending assignment
+        #  exists, so no extra existence check needed here.)
+        for role in required_roles:
+            await _create_assignment_with_prior(
+                conn,
+                sow_id=sow_id,
+                user_id=current_user.id,
+                reviewer_role=role,
+                stage="internal-review",
+            )
 
         # Transition to internal_review
         updated = await conn.fetchrow(

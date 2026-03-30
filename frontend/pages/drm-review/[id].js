@@ -91,7 +91,6 @@ function InternalReviewBanner({ reviewStatus }) {
           borderBottom: expanded ? '1px solid var(--color-border-default)' : 'none',
         }}
       >
-        <span style={{ fontSize: '1rem' }}>📋</span>
         <span
           style={{
             flex: 1,
