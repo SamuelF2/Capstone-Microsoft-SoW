@@ -10,7 +10,9 @@ Endpoints
   POST /api/review/{sow_id}/save-progress  Save partial checklist progress
   POST /api/review/{sow_id}/submit         Submit final review decision
   GET  /api/review/{sow_id}/status         Aggregated review status for a SoW
-  POST /api/review/{sow_id}/advance        Advance from internal review → DRM review
+  POST /api/review/{sow_id}/advance        Advance SoW through workflow stages
+  GET  /api/review/{sow_id}/drm-summary    Role-tailored summary for DRM reviewers
+  POST /api/review/{sow_id}/send-back      Return SoW to a previous stage with feedback
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from models import (
     ReviewProgressPayload,
     ReviewStatus,
     ReviewSubmitPayload,
+    SendBackPayload,
 )
 
 router = APIRouter(prefix="/api/review", tags=["review"])
@@ -159,6 +162,143 @@ _DEFAULT_CHECKLISTS: dict[str, dict] = {
                 "required": False,
                 "category": "Commercial Terms",
                 "helpText": "Who is contacted if commercial disputes or delivery issues arise?",
+            },
+        ],
+    },
+    "cpl": {
+        "displayName": "Customer Practice Lead",
+        "focusAreas": ["Financial Viability", "Standards Compliance", "Scope Management"],
+        "items": [
+            {
+                "id": "cpl-001",
+                "text": "Margin meets practice target or documented exception approved",
+                "required": True,
+                "category": "Financial Viability",
+                "helpText": "Standard target is 18%. If below, a finance exception must be documented.",
+            },
+            {
+                "id": "cpl-002",
+                "text": "Deal structure aligns with commercial policy (T&M vs Fixed-Price thresholds)",
+                "required": True,
+                "category": "Financial Viability",
+                "helpText": "Fixed-price deals over $500K require additional commercial approval.",
+            },
+            {
+                "id": "cpl-003",
+                "text": "SoW methodology aligns with practice standards",
+                "required": True,
+                "category": "Standards Compliance",
+                "helpText": "Agile, Sure Step, or approved custom methodology must be explicitly named.",
+            },
+            {
+                "id": "cpl-004",
+                "text": "No banned phrases or non-standard commitments present",
+                "required": True,
+                "category": "Standards Compliance",
+                "helpText": "Refer to the prohibited language register for terms that require legal sign-off.",
+            },
+            {
+                "id": "cpl-005",
+                "text": "Scope boundaries clearly defined (in-scope and out-of-scope)",
+                "required": True,
+                "category": "Scope Management",
+                "helpText": "Ambiguous scope is the #1 source of delivery disputes.",
+            },
+            {
+                "id": "cpl-006",
+                "text": "Customer responsibilities and dependencies documented",
+                "required": False,
+                "category": "Scope Management",
+                "helpText": "What must the customer provide for delivery to succeed?",
+            },
+        ],
+    },
+    "cdp": {
+        "displayName": "Customer Delivery Partner",
+        "focusAreas": ["Account Alignment", "Customer Success", "Consumption Goals"],
+        "items": [
+            {
+                "id": "cdp-001",
+                "text": "Customer objectives and success criteria are clearly articulated",
+                "required": True,
+                "category": "Customer Success",
+                "helpText": "What does the customer consider a successful outcome?",
+            },
+            {
+                "id": "cdp-002",
+                "text": "Deliverables align with customer's strategic goals",
+                "required": True,
+                "category": "Account Alignment",
+                "helpText": "Check the account plan for strategic priorities that should be reflected.",
+            },
+            {
+                "id": "cdp-003",
+                "text": "Support and transition plan defined for post-delivery",
+                "required": True,
+                "category": "Customer Success",
+                "helpText": "How does the customer run the solution after delivery completes?",
+            },
+            {
+                "id": "cdp-004",
+                "text": "Customer consumption / Azure adoption goals addressed",
+                "required": True,
+                "category": "Consumption Goals",
+                "helpText": "Does the delivery plan drive measurable Azure consumption growth?",
+            },
+            {
+                "id": "cdp-005",
+                "text": "Key customer stakeholders identified and engaged",
+                "required": False,
+                "category": "Account Alignment",
+                "helpText": "Executive sponsor, project owner, and technical lead should be named.",
+            },
+        ],
+    },
+    "delivery-manager": {
+        "displayName": "Delivery Manager",
+        "focusAreas": ["Deliverability", "Resourcing", "Timeline", "Risk Management"],
+        "items": [
+            {
+                "id": "dm-001",
+                "text": "Resource plan is realistic and team is available for the stated timeline",
+                "required": True,
+                "category": "Resourcing",
+                "helpText": "Verify named or role-based resources are not double-booked.",
+            },
+            {
+                "id": "dm-002",
+                "text": "Delivery methodology is appropriate for scope and timeline",
+                "required": True,
+                "category": "Deliverability",
+                "helpText": "Waterfall for well-defined scope, Agile for iterative or exploratory work.",
+            },
+            {
+                "id": "dm-003",
+                "text": "Key milestones and go/no-go checkpoints are defined",
+                "required": True,
+                "category": "Timeline",
+                "helpText": "At minimum: kick-off, mid-point review, and acceptance gate.",
+            },
+            {
+                "id": "dm-004",
+                "text": "Risk register is present and mitigations are actionable",
+                "required": True,
+                "category": "Risk Management",
+                "helpText": "Risks must have owners and mitigation actions, not just descriptions.",
+            },
+            {
+                "id": "dm-005",
+                "text": "Dependencies on customer environment or third parties are listed",
+                "required": True,
+                "category": "Deliverability",
+                "helpText": "External dependencies are the most common source of delivery delays.",
+            },
+            {
+                "id": "dm-006",
+                "text": "Escalation path for delivery blockers is defined",
+                "required": False,
+                "category": "Risk Management",
+                "helpText": "Who does the PM escalate to if a blocker threatens the timeline?",
             },
         ],
     },
@@ -613,80 +753,443 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
 
 @router.post(
     "/{sow_id}/advance",
-    summary="Advance the SoW from internal review to DRM review",
+    summary="Advance the SoW through the workflow (internal review → DRM review → approved)",
 )
-async def advance_to_drm(sow_id: int, current_user: CurrentUser) -> dict:
-    """Check internal-review gating rules, assign DRM reviewers, advance to ``drm_review``.
+async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
+    """Advance the SoW to the next stage, checking all gating rules.
 
-    Raises **409** if not all required internal-review approvals are in.
+    - ``internal_review`` → ``drm_review``: requires all internal-review approvals
+    - ``drm_review`` → ``approved``: requires all DRM approvals
+
+    Raises **409** if gating rules are not satisfied.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
-        if sow["status"] != "internal_review":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"SoW must be in 'internal_review' to advance; currently '{sow['status']}'",
-            )
-
         esap = sow["esap_level"] or "type-3"
-        required_roles = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
 
-        existing = await conn.fetch(
-            "SELECT * FROM review_assignments WHERE sow_id = $1 AND stage = 'internal-review'",
-            sow_id,
-        )
-        completed_roles = {
-            r["reviewer_role"]
-            for r in existing
-            if r["status"] == "completed"
-            and r["decision"] in ("approved", "approved-with-conditions")
-        }
-        outstanding = [role for role in required_roles if role not in completed_roles]
-        if outstanding:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Gating rules not met. Pending approvals from: "
-                    + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
-                ),
+        # ── Branch: internal_review → drm_review ─────────────────────────────
+        if sow["status"] == "internal_review":
+            required_roles = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
+            existing = await conn.fetch(
+                "SELECT * FROM review_assignments WHERE sow_id = $1 AND stage = 'internal-review'",
+                sow_id,
             )
+            completed_roles = {
+                r["reviewer_role"]
+                for r in existing
+                if r["status"] == "completed"
+                and r["decision"] in ("approved", "approved-with-conditions")
+            }
+            outstanding = [role for role in required_roles if role not in completed_roles]
+            if outstanding:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Gating rules not met. Pending approvals from: "
+                        + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
+                    ),
+                )
 
-        # Assign DRM reviewers
-        drm_roles = _DRM_REQUIRED.get(esap, ["cpl"])
-        assigned: list[str] = []
-        for role in drm_roles:
-            reviewer = await conn.fetchrow(
-                "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
-                role,
-            )
-            if reviewer:
-                await conn.execute(
-                    """
-                    INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
-                    VALUES ($1, $2, $3, 'drm-approval')
-                    ON CONFLICT DO NOTHING
-                    """,
-                    sow_id,
-                    reviewer["id"],
+            # Assign DRM reviewers
+            drm_roles = _DRM_REQUIRED.get(esap, ["cpl"])
+            assigned: list[str] = []
+            for role in drm_roles:
+                reviewer = await conn.fetchrow(
+                    "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
                     role,
                 )
-                await _seed_collaboration(conn, sow_id, reviewer["id"], "approver")
-                assigned.append(role)
+                if reviewer:
+                    await conn.execute(
+                        """
+                        INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
+                        VALUES ($1, $2, $3, 'drm-approval')
+                        ON CONFLICT DO NOTHING
+                        """,
+                        sow_id,
+                        reviewer["id"],
+                        role,
+                    )
+                    await _seed_collaboration(conn, sow_id, reviewer["id"], "approver")
+                    assigned.append(role)
 
-        # Advance status
-        await conn.execute(
-            "UPDATE sow_documents SET status = 'drm_review', updated_at = NOW() WHERE id = $1",
+            await conn.execute(
+                "UPDATE sow_documents SET status = 'drm_review', updated_at = NOW() WHERE id = $1",
+                sow_id,
+            )
+            await _insert_history(
+                conn,
+                sow_id,
+                current_user.id,
+                "advanced_to_drm",
+                {"esap_level": esap, "assigned_drm_roles": assigned},
+            )
+            return {
+                "advanced": True,
+                "sow_id": sow_id,
+                "new_status": "drm_review",
+                "assigned_roles": assigned,
+            }
+
+        # ── Branch: drm_review → approved ─────────────────────────────────────
+        elif sow["status"] == "drm_review":
+            required_roles = _DRM_REQUIRED.get(esap, ["cpl"])
+            existing = await conn.fetch(
+                "SELECT * FROM review_assignments WHERE sow_id = $1 AND stage = 'drm-approval'",
+                sow_id,
+            )
+            completed_roles = {
+                r["reviewer_role"]
+                for r in existing
+                if r["status"] == "completed"
+                and r["decision"] in ("approved", "approved-with-conditions")
+            }
+            outstanding = [role for role in required_roles if role not in completed_roles]
+            if outstanding:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "DRM gating rules not met. Pending approvals from: "
+                        + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
+                    ),
+                )
+
+            await conn.execute(
+                "UPDATE sow_documents SET status = 'approved', updated_at = NOW() WHERE id = $1",
+                sow_id,
+            )
+            await _insert_history(
+                conn,
+                sow_id,
+                current_user.id,
+                "drm_approved",
+                {"esap_level": esap},
+            )
+            return {"advanced": True, "sow_id": sow_id, "new_status": "approved"}
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW in '{sow['status']}' cannot be advanced",
+            )
+
+
+# ── GET /api/review/{sow_id}/drm-summary ─────────────────────────────────────
+
+
+def _safe_json(value: Any) -> Any:
+    """Parse a value that may already be a dict/list or a JSON string."""
+    if value is None:
+        return None
+    if isinstance(value, dict | list):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return value
+
+
+@router.get(
+    "/{sow_id}/drm-summary",
+    summary="Role-tailored DRM summary for the current reviewer",
+)
+async def get_drm_summary(sow_id: int, current_user: CurrentUser) -> dict:
+    """Return a persona-specific summary of the SoW for DRM stage reviewers.
+
+    The shape of the response depends on the reviewer's role:
+    - **cpl**: financials, standards compliance, scope summary
+    - **cdp**: account info, customer success, consumption goals
+    - **delivery-manager**: delivery plan, risk register, timeline
+    """
+    async with database.pg_pool.acquire() as conn:
+        assignment = await conn.fetchrow(
+            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'",
+            sow_id,
+            current_user.id,
+        )
+        if not assignment:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No DRM assignment for this SoW",
+            )
+
+        sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not sow:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        # Internal review results with reviewer roles
+        internal_rows = await conn.fetch(
+            """
+            SELECT rr.decision, rr.findings, rr.conditions, ra.reviewer_role
+            FROM   review_results  rr
+            LEFT JOIN review_assignments ra
+                   ON ra.sow_id = rr.sow_id
+                  AND ra.user_id = rr.reviewer_user_id
+                  AND ra.stage = 'internal-review'
+            WHERE  rr.sow_id = $1
+              AND  rr.review_stage = 'internal-review'
+            ORDER BY rr.reviewed_at DESC
+            """,
             sow_id,
         )
+
+        # Latest AI analysis
+        ai_row = await conn.fetchrow(
+            "SELECT result FROM ai_suggestions WHERE sow_id = $1 ORDER BY created_at DESC LIMIT 1",
+            sow_id,
+        )
+
+    role = assignment["reviewer_role"]
+    content = _safe_json(sow["content"]) or {}
+
+    # ── Build internal review summary ────────────────────────────────────────
+    internal_summary: dict[str, Any] = {}
+    for r in internal_rows:
+        reviewer_role = r["reviewer_role"] or "unknown"
+        key = reviewer_role.replace("-", "_")
+        if key not in internal_summary:
+            conditions = _safe_json(r["conditions"])
+            findings = _safe_json(r["findings"]) or {}
+            internal_summary[key] = {
+                "decision": r["decision"],
+                "comments": findings.get("comments"),
+                "conditions": conditions,
+            }
+
+    # ── AI insights ──────────────────────────────────────────────────────────
+    ai_insights: dict[str, Any] | None = None
+    if ai_row:
+        ai_data = _safe_json(ai_row["result"]) or {}
+        ai_insights = {
+            "summary": ai_data.get("summary"),
+            "overall_score": ai_data.get("overall_score"),
+            "approval": ai_data.get("approval"),
+            "high_violations": [
+                v for v in ai_data.get("violations", []) if v.get("severity") == "high"
+            ],
+            "risks": ai_data.get("risks", []),
+        }
+
+    # ── Scope helpers ────────────────────────────────────────────────────────
+    scope = content.get("scope") or {}
+    if isinstance(scope, list):
+        scope = {}
+    in_scope = scope.get("in_scope") or []
+    out_scope = scope.get("out_scope") or []
+    customer_resp = scope.get("customer_responsibilities") or []
+
+    # ── Role-specific response ───────────────────────────────────────────────
+    if role == "cpl":
+        pricing = content.get("pricing") or {}
+        if isinstance(pricing, list) and pricing:
+            pricing = pricing[0]
+        return {
+            "role": role,
+            "financials": {
+                "deal_value": sow["deal_value"],
+                "estimated_margin": pricing.get("margin") if isinstance(pricing, dict) else None,
+                "pricing_breakdown": pricing if isinstance(pricing, dict) else None,
+            },
+            "standards_compliance": {
+                "methodology": sow["methodology"],
+                "high_violations": ai_insights.get("high_violations") if ai_insights else [],
+            },
+            "scope_summary": {
+                "in_scope_count": len(in_scope),
+                "out_scope_count": len(out_scope),
+                "customer_responsibilities_count": len(customer_resp),
+            },
+            "internal_review_summary": internal_summary,
+            "ai_insights": ai_insights,
+        }
+
+    elif role == "cdp":
+        deliverables = content.get("deliverables") or []
+        return {
+            "role": role,
+            "account_info": {
+                "customer_name": sow["customer_name"],
+                "deal_value": sow["deal_value"],
+            },
+            "customer_success": {
+                "deliverables_count": len(deliverables) if isinstance(deliverables, list) else 0,
+                "support_transition_defined": bool(content.get("support_transition")),
+                "customer_responsibilities": customer_resp,
+            },
+            "internal_review_summary": internal_summary,
+            "ai_insights": ai_insights,
+        }
+
+    else:  # delivery-manager
+        resources = content.get("resources") or []
+        risks = content.get("risks") or []
+        timeline = content.get("timeline") or {}
+        high_risks = [r for r in risks if isinstance(r, dict) and r.get("level") == "high"]
+        has_mitigations = any(r.get("mitigation") for r in risks if isinstance(r, dict))
+        return {
+            "role": role,
+            "delivery_plan": {
+                "methodology": sow["methodology"],
+                "team_structure": resources if isinstance(resources, list) else [],
+                "resource_count": len(resources) if isinstance(resources, list) else 0,
+            },
+            "risk_register": {
+                "total_risks": len(risks) if isinstance(risks, list) else 0,
+                "high_risks": high_risks,
+                "mitigations_defined": has_mitigations,
+            },
+            "timeline": timeline if isinstance(timeline, dict) else {},
+            "internal_review_summary": internal_summary,
+            "ai_insights": ai_insights,
+        }
+
+
+# ── POST /api/review/{sow_id}/send-back ──────────────────────────────────────
+
+
+@router.post(
+    "/{sow_id}/send-back",
+    summary="Return a SoW to a previous stage with feedback",
+)
+async def send_back(
+    sow_id: int,
+    payload: SendBackPayload,
+    current_user: CurrentUser,
+) -> dict:
+    """Send a SoW back from DRM review to draft or internal review.
+
+    Clears pending DRM assignments, records a rejection audit entry, and
+    optionally re-creates internal-review assignments when targeting
+    ``internal_review``.
+    """
+    valid_targets = {"draft", "internal_review"}
+    if payload.target_stage not in valid_targets:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid target_stage. Must be one of {sorted(valid_targets)}",
+        )
+    if not payload.comments:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Comments are required for send-back",
+        )
+
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        assignment = await conn.fetchrow(
+            "SELECT * FROM review_assignments WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'",
+            sow_id,
+            current_user.id,
+        )
+        if not assignment:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No DRM assignment for this SoW",
+            )
+
+        sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not sow:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        if sow["status"] not in ("drm_review", "internal_review"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW is in '{sow['status']}' status — cannot send back",
+            )
+
+        now = datetime.now(UTC)
+
+        # Mark the submitter's assignment as completed/rejected
+        await conn.execute(
+            """
+            UPDATE review_assignments
+            SET    status       = 'completed',
+                   decision     = 'rejected',
+                   comments     = $1,
+                   completed_at = $2
+            WHERE  sow_id  = $3
+              AND  user_id = $4
+            """,
+            payload.comments,
+            now,
+            sow_id,
+            current_user.id,
+        )
+
+        # Cancel other pending DRM assignments
+        await conn.execute(
+            """
+            UPDATE review_assignments
+            SET    status = 'canceled'
+            WHERE  sow_id   = $1
+              AND  user_id != $2
+              AND  stage    = 'drm-approval'
+              AND  status  IN ('pending', 'in_progress')
+            """,
+            sow_id,
+            current_user.id,
+        )
+
+        # Audit entry
+        await conn.execute(
+            """
+            INSERT INTO review_results
+                (sow_id, reviewer, score, findings, reviewed_at,
+                 reviewer_user_id, review_stage, checklist_responses, decision, conditions)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10::jsonb)
+            """,
+            sow_id,
+            current_user.email,
+            None,
+            json.dumps({"comments": payload.comments, "action_items": payload.action_items}),
+            now,
+            current_user.id,
+            "drm-approval",
+            json.dumps([]),
+            "rejected",
+            None,
+        )
+
+        # If sending back to internal_review, re-create SA/SQA assignments
+        if payload.target_stage == "internal_review":
+            esap = sow["esap_level"] or "type-3"
+            roles_needed = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
+            for ir_role in roles_needed:
+                reviewer = await conn.fetchrow(
+                    "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
+                    ir_role,
+                )
+                if reviewer:
+                    await conn.execute(
+                        """
+                        INSERT INTO review_assignments (sow_id, user_id, reviewer_role, stage)
+                        VALUES ($1, $2, $3, 'internal-review')
+                        ON CONFLICT DO NOTHING
+                        """,
+                        sow_id,
+                        reviewer["id"],
+                        ir_role,
+                    )
+
+        # Update SoW status
+        await conn.execute(
+            "UPDATE sow_documents SET status = $1, updated_at = NOW() WHERE id = $2",
+            payload.target_stage,
+            sow_id,
+        )
+
         await _insert_history(
             conn,
             sow_id,
             current_user.id,
-            "advanced_to_drm",
-            {"esap_level": esap, "assigned_drm_roles": assigned},
+            "sent_back",
+            {
+                "target_stage": payload.target_stage,
+                "reason": payload.comments,
+                "action_items": payload.action_items,
+                "sent_back_by_role": assignment["reviewer_role"],
+            },
         )
 
-    return {"advanced": True, "sow_id": sow_id, "assigned_roles": assigned}
+    return {"sent_back": True, "sow_id": sow_id, "target_stage": payload.target_stage}
