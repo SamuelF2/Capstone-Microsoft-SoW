@@ -690,38 +690,41 @@ export default function DrmReview() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  const loadAll = useCallback(async () => {
-    if (!id || !user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [sowRes, checklistRes, statusRes] = await Promise.all([
-        authFetch(`/api/sow/${id}`),
-        authFetch(`/api/review/${id}/checklist`),
-        authFetch(`/api/review/${id}/status`),
-      ]);
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!id || !user) return;
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const [sowRes, checklistRes, statusRes] = await Promise.all([
+          authFetch(`/api/sow/${id}`),
+          authFetch(`/api/review/${id}/checklist`),
+          authFetch(`/api/review/${id}/status`),
+        ]);
 
-      if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
-      if (!checklistRes.ok) throw new Error(`Checklist load failed (${checklistRes.status})`);
-      if (!statusRes.ok) throw new Error(`Status load failed (${statusRes.status})`);
+        if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
+        if (!checklistRes.ok) throw new Error(`Checklist load failed (${checklistRes.status})`);
+        if (!statusRes.ok) throw new Error(`Status load failed (${statusRes.status})`);
 
-      const [sowData, checklistData, statusData] = await Promise.all([
-        sowRes.json(),
-        checklistRes.json(),
-        statusRes.json(),
-      ]);
+        const [sowData, checklistData, statusData] = await Promise.all([
+          sowRes.json(),
+          checklistRes.json(),
+          statusRes.json(),
+        ]);
 
-      setSow(sowData);
-      setChecklistItems(checklistData.items || []);
-      setChecklistRole(checklistData.reviewer_role || '');
-      setResponses(checklistData.saved_responses || []);
-      setReviewStatus(statusData);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, user, authFetch]);
+        setSow(sowData);
+        setChecklistItems(checklistData.items || []);
+        setChecklistRole(checklistData.reviewer_role || '');
+        setResponses(checklistData.saved_responses || []);
+        setReviewStatus(statusData);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [id, user, authFetch]
+  );
 
   useEffect(() => {
     loadAll();
@@ -748,7 +751,7 @@ export default function DrmReview() {
       });
       if (!res.ok) throw new Error('Save failed');
       showToast('Progress saved');
-      await loadAll();
+      await loadAll(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -776,7 +779,7 @@ export default function DrmReview() {
             ? 'Approved with conditions'
             : 'Decision submitted'
       );
-      await loadAll();
+      await loadAll(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -818,7 +821,7 @@ export default function DrmReview() {
         throw new Error(err.detail || `Advance failed (${res.status})`);
       }
       showToast('SoW approved and advanced!');
-      await loadAll();
+      await loadAll(true);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -831,7 +834,7 @@ export default function DrmReview() {
     try {
       const res = await authFetch(`/api/sow/${id}/analyze`, { method: 'POST' });
       if (!res.ok) throw new Error('AI analysis failed');
-      await loadAll();
+      await loadAll(true);
       showToast('AI analysis complete');
     } catch (err) {
       showToast(err.message, 'error');

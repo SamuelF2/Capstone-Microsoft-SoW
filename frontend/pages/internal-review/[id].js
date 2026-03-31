@@ -444,6 +444,7 @@ export default function InternalReview() {
 
   const [sow, setSow] = useState(null);
   const [checklist, setChecklist] = useState(null);
+  const [checklistRole, setChecklistRole] = useState('');
   const [responses, setResponses] = useState([]);
   const [reviewStatus, setReviewStatus] = useState(null);
   const [aiAnalysis, setAiAnalysis] = useState(null);
@@ -466,11 +467,10 @@ export default function InternalReview() {
 
   // ── Load SoW, checklist, review status ───────────────────────────────────
 
-  useEffect(() => {
-    if (!id || !user) return;
-
-    async function load() {
-      setLoading(true);
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!id || !user) return;
+      if (!silent) setLoading(true);
       setError(null);
       try {
         const [sowRes, checkRes, statusRes] = await Promise.all([
@@ -489,7 +489,9 @@ export default function InternalReview() {
         if (checkRes.ok) {
           const checkData = await checkRes.json();
           setChecklist(checkData);
+          setChecklistRole(checkData.reviewer_role || '');
           setResponses(checkData.saved_responses || []);
+          setComments('');
         }
 
         if (statusRes.ok) {
@@ -507,10 +509,13 @@ export default function InternalReview() {
       } finally {
         setLoading(false);
       }
-    }
+    },
+    [id, user, authFetch]
+  );
 
-    load();
-  }, [id, user, authFetch]);
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   // ── Save progress ─────────────────────────────────────────────────────────
 
@@ -554,11 +559,11 @@ export default function InternalReview() {
       showToast(
         decision === 'rejected' ? 'SoW returned to draft' : 'Review submitted successfully'
       );
-      // Reload review status
-      const statusRes = await authFetch(`/api/review/${id}/status`);
-      if (statusRes.ok) setReviewStatus(await statusRes.json());
       if (decision === 'rejected') {
         setTimeout(() => router.push('/my-reviews'), 1500);
+      } else {
+        // Reload everything so the next role's checklist appears
+        await loadAll(true);
       }
     } catch (err) {
       showToast(err.message, 'error');
@@ -609,9 +614,13 @@ export default function InternalReview() {
     responses.find((r) => r.id === i.id && r.checked)
   );
   const canApprove = requiredItems.length === 0 || checkedRequired.length === requiredItems.length;
-  const isMyReviewDone = reviewStatus?.assignments?.some(
-    (a) => a.status === 'completed' && a.stage === 'internal-review'
+  // Check if the *current* checklist role's assignment is completed.
+  // When the user holds multiple roles (e.g. SA + SQA for demo), this lets
+  // them cycle through each role one at a time.
+  const myCurrentAssignment = (reviewStatus?.assignments || []).find(
+    (a) => a.stage === 'internal-review' && a.reviewer_role === checklistRole
   );
+  const isMyReviewDone = myCurrentAssignment?.status === 'completed';
 
   // ── Loading / error states ────────────────────────────────────────────────
 

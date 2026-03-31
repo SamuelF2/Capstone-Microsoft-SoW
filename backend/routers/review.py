@@ -818,12 +818,24 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
     else:
         outstanding = []
 
+    # DEMO MODE: a single approval at any stage is sufficient to advance.
+    has_any_approval = (
+        any(
+            r["stage"] == stage_key
+            and r["status"] == "completed"
+            and r["decision"] in ("approved", "approved-with-conditions")
+            for r in rows
+        )
+        if stage_key
+        else False
+    )
+
     return ReviewStatus(
         sow_id=sow_id,
         current_stage=current_stage,
         esap_level=esap,
         assignments=assignments,
-        gating_rules_met=len(outstanding) == 0,
+        gating_rules_met=has_any_approval or len(outstanding) == 0,
         outstanding_requirements=outstanding,
     )
 
@@ -864,14 +876,20 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                 """,
                 sow_id,
             )
-            completed_roles = {
-                r["reviewer_role"]
-                for r in existing
-                if r["status"] == "completed"
+            # DEMO MODE: a single approval is sufficient to advance.
+            has_any_approval = any(
+                r["status"] == "completed"
                 and r["decision"] in ("approved", "approved-with-conditions")
-            }
-            outstanding = [role for role in required_roles if role not in completed_roles]
-            if outstanding:
+                for r in existing
+            )
+            if not has_any_approval:
+                completed_roles = {
+                    r["reviewer_role"]
+                    for r in existing
+                    if r["status"] == "completed"
+                    and r["decision"] in ("approved", "approved-with-conditions")
+                }
+                outstanding = [role for role in required_roles if role not in completed_roles]
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
@@ -941,14 +959,20 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                 """,
                 sow_id,
             )
-            completed_roles = {
-                r["reviewer_role"]
-                for r in existing
-                if r["status"] == "completed"
+            # DEMO MODE: a single approval is sufficient to advance.
+            has_any_approval = any(
+                r["status"] == "completed"
                 and r["decision"] in ("approved", "approved-with-conditions")
-            }
-            outstanding = [role for role in required_roles if role not in completed_roles]
-            if outstanding:
+                for r in existing
+            )
+            if not has_any_approval:
+                completed_roles = {
+                    r["reviewer_role"]
+                    for r in existing
+                    if r["status"] == "completed"
+                    and r["decision"] in ("approved", "approved-with-conditions")
+                }
+                outstanding = [role for role in required_roles if role not in completed_roles]
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
