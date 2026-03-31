@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { useAuth } from '../lib/auth';
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -21,13 +22,23 @@ export default function ReviewHistory() {
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
 
+  const { getToken } = useAuth();
+
   useEffect(() => {
-    try {
-      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
-      setReviews(registry.filter((r) => r.status === 'Completed'));
-    } catch {
-      setReviews([]);
+    async function load() {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sow/review-history`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to load history');
+        const data = await res.json();
+        setReviews(data);
+      } catch {
+        setReviews([]);
+      }
     }
+    load();
   }, []);
 
   const filtered = reviews.filter((r) => {

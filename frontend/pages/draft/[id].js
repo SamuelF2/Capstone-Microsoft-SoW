@@ -413,24 +413,41 @@ export default function DraftPage() {
   // Load SoW from localStorage
   useEffect(() => {
     if (!id) return;
-    const raw = localStorage.getItem(`sow-${id}`);
-    if (!raw) {
-      setNotFound(true);
-      return;
-    }
-    try {
-      setSowData(JSON.parse(raw));
-    } catch {
-      setNotFound(true);
-    }
+    authFetch(`/api/sow/${id}`)
+    .then((res) => {
+      if (res.status === 404) { setNotFound(true); return null; }
+      if (!res.ok) throw new Error('Failed to load');
+      return res.json();
+    })
+    .then((data) => {
+      if (data) {
+        const mapped = {
+          ...(data.content ?? {}),
+          sowTitle: data.title,
+          deliveryMethodology: data.methodology,
+          customerName: data.customer_name,
+          opportunityId: data.opportunity_id,
+          dealValue: data.deal_value,
+          status: data.status,
+        };
+        setSowData(mapped);
+      }
+    })
+    .catch(() => setNotFound(true));
   }, [id]);
 
   // Auto-save to localStorage whenever sowData changes
   useEffect(() => {
     if (!sowData || !id) return;
-    const updated = { ...sowData, updatedAt: new Date().toISOString() };
-    localStorage.setItem(`sow-${id}`, JSON.stringify(updated));
-    setSavedAt(updated.updatedAt);
+    const timer = setTimeout(async () => {
+      const res = await authFetch(`/api/sow/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: sowData }),
+      });
+      if (res.ok) setSavedAt(new Date().toISOString());
+    }, 1000); // debounce 1s
+    return () => clearTimeout(timer);
   }, [sowData, id]);
 
   // Update a top-level section of the SoW data
@@ -456,7 +473,6 @@ export default function DraftPage() {
 
       // Reflect new status in localStorage
       const updated = { ...sowData, status: 'in_review', updatedAt: new Date().toISOString() };
-      localStorage.setItem(`sow-${id}`, JSON.stringify(updated));
 
       router.push(`/review/${id}`);
     } catch (err) {

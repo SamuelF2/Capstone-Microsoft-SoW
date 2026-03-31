@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { useAuth } from '../../lib/auth';
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -21,45 +22,63 @@ export default function ReviewDetail() {
   const [activeTab, setActiveTab] = useState('overview');
   const [reviewEntry, setReviewEntry] = useState(null);
   const [isComplete, setIsComplete] = useState(false);
+  const { getToken } = useAuth();
 
   // Load review metadata from registry
   useEffect(() => {
     if (!id) return;
-    try {
-      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
-      const entry = registry.find((r) => String(r.id) === String(id));
-      if (entry) {
-        setReviewEntry(entry);
-        setIsComplete(entry.status === 'Completed');
+    async function load() {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sow/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 404) {
+          router.replace('/my-reviews');
+          return;
+        }
+        if (!res.ok) throw new Error('Failed to load');
+        const data = await res.json();
+        setReviewEntry({
+          sow_title: data.title,
+          sow_methodology: data.methodology,
+          reviewed_at: data.updated_at,
+          score: data.content?.score ?? null,
+          findings: data.content?.findings ?? {},
+        });
+        setIsComplete(data.status === 'approved' || data.status === 'rejected');
+      } catch {
+        router.replace('/my-reviews');
       }
-    } catch {
-      // registry not available
     }
+    load();
   }, [id]);
 
-  const handleMarkComplete = () => {
+  const handleMarkComplete = async () => {
     try {
-      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
-      const updated = registry.map((r) =>
-        String(r.id) === String(id)
-          ? { ...r, status: 'Completed', completedAt: new Date().toISOString() }
-          : r
-      );
-      localStorage.setItem('review-registry', JSON.stringify(updated));
+      const token = await getToken();
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/reviews/${id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ findings: { ...reviewEntry?.findings, status: 'Completed' } }),
+      });
       setIsComplete(true);
-      setReviewEntry((prev) => (prev ? { ...prev, status: 'Completed' } : prev));
+      setReviewEntry((prev) => prev ? { ...prev, findings: { ...prev.findings, status: 'Completed' } } : prev);
     } catch {
-      // localStorage not available
+      // handle error
     }
   };
 
   // Use registry data if available, fall back to generic sample data
   const reviewData = {
     id: id,
-    title: reviewEntry?.title || `SOW Review ${id}`,
-    methodology: reviewEntry?.methodology || 'Agile',
-    uploadDate: formatDate(reviewEntry?.uploadedAt) || '—',
-    status: reviewEntry?.status || 'Pending Review',
+    title: reviewEntry?.sow_title || `SOW Review ${id}`,
+    methodology: reviewEntry?.sow_methodology || 'Agile',
+    uploadDate: formatDate(reviewEntry?.reviewed_at) || '—',
+    status: reviewEntry?.findings?.status || 'Pending Review',
     score: reviewEntry?.score || 72,
     tabs: {
       overview: {

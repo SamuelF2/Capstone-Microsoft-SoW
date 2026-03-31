@@ -48,6 +48,7 @@ from validators import (
     format_knowledge_result,
     validate_knowledge_payload,
 )
+from routers.review import router as review_router
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
@@ -335,6 +336,7 @@ app.add_middleware(
 app.include_router(status_router)  # /status  (HTML status page)
 app.include_router(auth_router)  # /api/auth/...
 app.include_router(sow_router)  # /api/sow/...
+app.include_router(review_router) # /api/reviews/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

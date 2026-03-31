@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
+import { useAuth } from '../lib/auth';
 
 const STATUS_STYLES = {
   'Pending Review': {
@@ -166,14 +167,23 @@ export default function MyReviews() {
   const router = useRouter();
   const [reviews, setReviews] = useState([]);
 
+  const { getToken } = useAuth();
+
   useEffect(() => {
-    try {
-      const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
-      // My Reviews shows only non-completed reviews
-      setReviews(registry.filter((r) => r.status !== 'Completed'));
-    } catch {
-      setReviews([]);
+    async function load() {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sow/my-reviews`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to load reviews');
+        const data = await res.json();
+        setReviews(data);
+      } catch {
+        setReviews([]);
+      }
     }
+    load();
   }, []);
 
   const pending = reviews.filter((r) => r.status === 'Pending Review');

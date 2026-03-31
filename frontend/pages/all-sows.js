@@ -86,10 +86,10 @@ export default function AllSoWs() {
   });
 
   const handleRowClick = (sow) => {
-    if (sow.status === 'draft') {
+    if (sow.status === 'draft' || sow.status === 'in_review') {
       router.push(`/draft/${sow.id}`);
     } else {
-      router.push(`/review/${sow.id}`);
+      router.push(`/sow/${sow.id}`);
     }
   };
 
@@ -357,7 +357,7 @@ export default function AllSoWs() {
                             fontSize: 'var(--font-size-sm)',
                           }}
                         >
-                          {sow.status === 'draft' ? 'Edit →' : 'View →'}
+                          {sow.status === 'draft' || sow.status === 'in_review' ? 'Edit →' : 'View →'}
                         </span>
                       </td>
                     </motion.tr>
