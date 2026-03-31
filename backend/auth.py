@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ── Entra ID JWKS (RS256) ───────────────────────────────────────────────────
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="", auto_error=False)
 
 _jwks_cache: dict = {}
 _jwks_cache_expiry: float = 0

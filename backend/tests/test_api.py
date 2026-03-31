@@ -523,6 +523,7 @@ class TestUpdateSowStatus:
 
         _mock_pg_acquire(
             database,
+            fetchval="drm_review",
             fetchrow=_full_sow_row(status="approved"),
         )
 

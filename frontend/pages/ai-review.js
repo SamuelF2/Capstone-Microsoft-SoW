@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { useAuth } from '../lib/auth';
@@ -671,6 +672,141 @@ function SuggestionsSection({ suggestions }) {
   );
 }
 
+function SectionAnalysisSection({ sections, missingKeywords }) {
+  const found = sections.filter((s) => s.found).length;
+  return (
+    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
+      <h3
+        className="text-lg font-semibold mb-lg"
+        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+      >
+        <span style={{ color: 'var(--color-accent-blue)' }}>&#128196;</span> Section Analysis
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 'var(--font-size-sm)',
+            color: found === sections.length ? 'var(--color-success)' : 'var(--color-warning)',
+            fontWeight: 400,
+          }}
+        >
+          {found}/{sections.length} sections found
+        </span>
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+        {sections.map((s, i) => (
+          <div
+            key={i}
+            style={{
+              padding: 'var(--spacing-md) var(--spacing-lg)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--color-bg-tertiary)',
+              borderLeft: `3px solid ${s.found ? 'var(--color-success)' : 'var(--color-error)'}`,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: s.issues.length > 0 ? 'var(--spacing-xs)' : 0,
+              }}
+            >
+              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
+                {s.displayName}
+              </span>
+              <span
+                style={{
+                  padding: '2px 10px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 600,
+                  backgroundColor: s.found ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)',
+                  color: s.found ? '#4ade80' : '#ef4444',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {s.found ? 'Found' : 'Missing'}
+              </span>
+            </div>
+            {s.issues.length > 0 && (
+              <div style={{ marginTop: 'var(--spacing-xs)' }}>
+                {s.issues.map((issue, j) => (
+                  <p
+                    key={j}
+                    className="text-secondary"
+                    style={{
+                      fontSize: 'var(--font-size-xs)',
+                      lineHeight: 'var(--line-height-relaxed)',
+                      margin: 0,
+                    }}
+                  >
+                    {issue}
+                  </p>
+                ))}
+              </div>
+            )}
+            {s.found && s.content && (
+              <details style={{ marginTop: 'var(--spacing-sm)' }}>
+                <summary
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-tertiary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Preview extracted content
+                </summary>
+                <p
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-tertiary)',
+                    lineHeight: 'var(--line-height-relaxed)',
+                    marginTop: 'var(--spacing-xs)',
+                    whiteSpace: 'pre-wrap',
+                    maxHeight: '120px',
+                    overflow: 'auto',
+                  }}
+                >
+                  {s.content}
+                </p>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {missingKeywords && missingKeywords.length > 0 && (
+        <div style={{ marginTop: 'var(--spacing-lg)' }}>
+          <p
+            className="text-sm font-semibold mb-sm"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            Missing Methodology Keywords
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-xs)' }}>
+            {missingKeywords.map((kw, i) => (
+              <span
+                key={i}
+                style={{
+                  padding: '2px 10px',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--font-size-xs)',
+                  backgroundColor: 'rgba(251,191,36,0.12)',
+                  color: '#fbbf24',
+                  border: '1px solid rgba(251,191,36,0.3)',
+                }}
+              >
+                {kw}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SimilarSowsSection({ similarSows }) {
   return (
     <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
@@ -725,6 +861,7 @@ function SimilarSowsSection({ similarSows }) {
 
 export default function AIReview() {
   const router = useRouter();
+  const { sowId } = router.query; // set when coming from draft submit-for-review
   const { authFetch } = useAuth();
   const [file, setFile] = useState(null);
   const [methodology, setMethodology] = useState('');
@@ -735,6 +872,80 @@ export default function AIReview() {
   const [showResults, setShowResults] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [recommendations, setRecommendations] = useState(null);
+  const [currentSowId, setCurrentSowId] = useState(null);
+  const [isProceeding, setIsProceeding] = useState(false);
+
+  // If arriving from draft submit-for-review (Path A), auto-trigger AI analysis
+  useEffect(() => {
+    if (!sowId || !authFetch) return;
+    setCurrentSowId(sowId);
+    setIsAnalyzing(true);
+    setError(null);
+
+    authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail?.detail || `AI analysis failed (${res.status})`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        // Map API response to component format
+        setRecommendations({
+          violations: data.violations || [],
+          risks: data.risks || [],
+          approval: {
+            level: data.approval?.level || 'Yellow',
+            esapType: data.approval?.esap_type || 'Type-2',
+            reason: data.approval?.reason || '',
+            chain: data.approval?.chain || [],
+          },
+          checklist: (data.checklist || []).map((c) => ({
+            item: c.text,
+            required: c.required,
+            checked: false,
+          })),
+          suggestions: (data.suggestions || []).map((s) => ({
+            section: s.section,
+            line: '',
+            type: s.rationale?.includes('missing') ? 'add' : 'rewrite',
+            original: s.current_text || '',
+            suggested: s.suggested_text || '',
+            reason: s.rationale || '',
+          })),
+          similarSows: MOCK_RECOMMENDATIONS.similarSows,
+          sections: [],
+          missingKeywords: [],
+        });
+        setIsAnalyzing(false);
+        setShowResults(true);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setIsAnalyzing(false);
+      });
+  }, [sowId, authFetch]);
+
+  // Proceed to Internal Review (after AI review)
+  const handleProceedToReview = async () => {
+    const id = currentSowId;
+    if (!id) return;
+    setIsProceeding(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/sow/${id}/proceed-to-review`, { method: 'POST' });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Failed to proceed (${res.status})`);
+      }
+      router.push('/all-sows');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsProceeding(false);
+    }
+  };
 
   const processSelectedFile = (selected) => {
     const fileError = validateFile(selected);
@@ -799,42 +1010,65 @@ export default function AIReview() {
         throw new Error(detail?.detail || `Upload failed (${res.status})`);
       }
 
-      await res.json();
+      const sow = await res.json();
+      setCurrentSowId(sow.id);
 
-      // Upload succeeded — now fetch AI recommendations
+      // Upload succeeded — now submit for review (transitions to ai_review)
+      await authFetch(`/api/sow/${sow.id}/submit-for-review`, { method: 'POST' });
+
+      // Run AI analysis
       setIsUploading(false);
       setIsAnalyzing(true);
 
-      // Simulate analysis delay for demo
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const aiRes = await authFetch(`/api/sow/${sow.id}/ai-analyze`, { method: 'POST' });
+      if (!aiRes.ok) {
+        const detail = await aiRes.json().catch(() => ({}));
+        throw new Error(detail?.detail || `AI analysis failed (${aiRes.status})`);
+      }
+      const aiData = await aiRes.json();
 
-      // TODO: Replace mock data with API call when backend endpoint is ready
-      // const recRes = await fetch(`/api/sow/${sow.id}/recommendations`, {
-      //   headers: { Authorization: `Bearer ${token}` },
-      // });
-      // const data = await recRes.json();
-      const data = MOCK_RECOMMENDATIONS;
+      // Also parse for section analysis
+      let parseData = { sections: [], missingKeywords: [], violations: [] };
+      try {
+        const parseRes = await authFetch(`/api/sow/${sow.id}/parse`, { method: 'POST' });
+        if (parseRes.ok) {
+          parseData = await parseRes.json();
+        }
+      } catch {
+        // Parse is optional, AI analysis is the primary
+      }
+
+      // Merge AI analysis with parse results
+      const data = {
+        sections: parseData.sections || [],
+        missingKeywords: parseData.missingKeywords || [],
+        violations: aiData.violations || [],
+        risks: aiData.risks || [],
+        approval: {
+          level: aiData.approval?.level || 'Yellow',
+          esapType: aiData.approval?.esap_type || 'Type-2',
+          reason: aiData.approval?.reason || '',
+          chain: aiData.approval?.chain || [],
+        },
+        checklist: (aiData.checklist || []).map((c) => ({
+          item: c.text,
+          required: c.required,
+          checked: false,
+        })),
+        suggestions: (aiData.suggestions || []).map((s) => ({
+          section: s.section,
+          line: '',
+          type: s.rationale?.includes('missing') ? 'add' : 'rewrite',
+          original: s.current_text || '',
+          suggested: s.suggested_text || '',
+          reason: s.rationale || '',
+        })),
+        similarSows: MOCK_RECOMMENDATIONS.similarSows,
+      };
 
       setRecommendations(data);
       setIsAnalyzing(false);
       setShowResults(true);
-
-      // Save to review-registry so My Reviews and Review History can find it
-      const reviewEntry = {
-        id: `review-${Date.now()}`,
-        title: file?.name?.replace(/\.[^.]+$/, '') || 'Untitled SoW',
-        methodology,
-        uploadedAt: new Date().toISOString(),
-        status: 'Pending Review',
-        score: 72, // mock score
-      };
-      try {
-        const registry = JSON.parse(localStorage.getItem('review-registry') || '[]');
-        registry.unshift(reviewEntry);
-        localStorage.setItem('review-registry', JSON.stringify(registry));
-      } catch {
-        // localStorage not available
-      }
     } catch (err) {
       setError(err.message);
       setIsUploading(false);
@@ -1104,12 +1338,64 @@ export default function AIReview() {
                 </button>
               </div>
 
+              {recommendations.sections && recommendations.sections.length > 0 && (
+                <SectionAnalysisSection
+                  sections={recommendations.sections}
+                  missingKeywords={recommendations.missingKeywords}
+                />
+              )}
               <ApprovalSection approval={recommendations.approval} />
               <ViolationsSection violations={recommendations.violations} />
               <SuggestionsSection suggestions={recommendations.suggestions} />
               <RisksSection risks={recommendations.risks} />
               <ChecklistSection checklist={recommendations.checklist} />
-              <SimilarSowsSection similarSows={recommendations.similarSows} />
+              {recommendations.similarSows && recommendations.similarSows.length > 0 && (
+                <SimilarSowsSection similarSows={recommendations.similarSows} />
+              )}
+
+              {/* Action Bar — Proceed to Internal Review */}
+              {currentSowId && (
+                <div
+                  className="card"
+                  style={{
+                    padding: 'var(--spacing-lg) var(--spacing-xl)',
+                    borderLeft: '3px solid var(--color-accent-blue)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 'var(--spacing-md)',
+                  }}
+                >
+                  <div>
+                    {recommendations.approval && (
+                      <p className="text-sm" style={{ marginBottom: 'var(--spacing-xs)' }}>
+                        <strong>ESAP Level:</strong> {recommendations.approval.esapType} (
+                        {recommendations.approval.level})
+                      </p>
+                    )}
+                    {recommendations.approval?.chain && (
+                      <p className="text-sm text-secondary">
+                        <strong>Required Reviewers:</strong>{' '}
+                        {recommendations.approval.chain.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
+                    <button className="btn btn-secondary" onClick={() => router.push('/all-sows')}>
+                      Back to All SoWs
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleProceedToReview}
+                      disabled={isProceeding}
+                      style={{ opacity: isProceeding ? 0.6 : 1 }}
+                    >
+                      {isProceeding ? 'Proceeding…' : 'Proceed to Internal Review →'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

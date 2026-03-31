@@ -27,3 +27,8 @@ AZURE_AD_JWKS_URL: str = "https://login.microsoftonline.com/common/discovery/v2.
 # ── File Uploads ─────────────────────────────────────────────────────────────
 UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
 MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "25"))
+
+# ── Rules / Data ────────────────────────────────────────────────────────────
+RULES_DIR: str = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Data", "rules"
+)

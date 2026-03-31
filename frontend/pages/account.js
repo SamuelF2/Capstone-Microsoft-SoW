@@ -2,8 +2,17 @@ import { useState } from 'react';
 import Head from 'next/head';
 import { useAuth } from '../lib/auth';
 
+const AVAILABLE_ROLES = [
+  { value: 'consultant', label: 'Consultant (default)' },
+  { value: 'solution-architect', label: 'Solution Architect' },
+  { value: 'sqa-reviewer', label: 'SQA Reviewer' },
+  { value: 'cpl', label: 'CPL (Customer Practice Lead)' },
+  { value: 'cdp', label: 'CDP (Customer Delivery Partner)' },
+  { value: 'delivery-manager', label: 'Delivery Manager / ADL' },
+];
+
 export default function Account() {
-  const { user } = useAuth();
+  const { user, overrideRole } = useAuth();
   const [activeSection, setActiveSection] = useState('profile');
 
   const userData = {
@@ -166,6 +175,58 @@ export default function Account() {
                   <option>Waterfall</option>
                 </select>
               </div>
+            </div>
+
+            <div
+              className="mb-xl"
+              style={{
+                border: '1px dashed var(--color-border-default)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--spacing-lg)',
+                backgroundColor: 'var(--color-bg-secondary)',
+              }}
+            >
+              <h3 className="text-xl font-semibold mb-sm">
+                Role Override{' '}
+                <span
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    fontWeight: 'var(--font-weight-normal)',
+                    color: 'var(--color-text-tertiary)',
+                    border: '1px solid var(--color-border-default)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '2px 6px',
+                    marginLeft: '8px',
+                    verticalAlign: 'middle',
+                  }}
+                >
+                  Testing only
+                </span>
+              </h3>
+              <p className="text-sm text-secondary mb-md">
+                Simulate a different role to test the SoW pipeline. This overrides your role in the
+                current session only and does not persist.
+              </p>
+              <div className="form-group" style={{ maxWidth: '320px' }}>
+                <label className="form-label">Active Role</label>
+                <select
+                  className="form-select"
+                  value={user?.role || ''}
+                  onChange={(e) => overrideRole(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Select a role…
+                  </option>
+                  {AVAILABLE_ROLES.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-tertiary" style={{ marginTop: 'var(--spacing-sm)' }}>
+                Current role: <strong>{user?.role || '—'}</strong>
+              </p>
             </div>
 
             <button className="btn btn-primary">Save Settings</button>

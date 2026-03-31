@@ -20,9 +20,14 @@ import Spinner from '../components/Spinner';
 
 const STATUS_COLOR = {
   draft: 'var(--color-text-secondary)',
-  in_review: 'var(--color-warning)',
+  ai_review: 'var(--color-accent-blue, #1967d2)',
+  internal_review: 'var(--color-warning)',
+  drm_review: 'var(--color-accent-purple, #7c3aed)',
   approved: 'var(--color-success)',
+  finalized: 'var(--color-accent-blue, #3f51b5)',
   rejected: 'var(--color-error)',
+  // legacy
+  in_review: 'var(--color-warning)',
 };
 
 function formatDealValue(raw) {
@@ -41,6 +46,78 @@ function formatDate(iso) {
     });
   } catch {
     return iso;
+  }
+}
+
+// ── Status-aware action buttons ───────────────────────────────────────────────
+
+function SoWActions({ sow, router }) {
+  const { status, id } = sow;
+
+  const btn = (label, href, variant = 'secondary') => (
+    <button
+      key={label}
+      className={`btn btn-${variant} btn-sm`}
+      style={{ whiteSpace: 'nowrap' }}
+      onClick={(e) => {
+        e.stopPropagation();
+        router.push(href);
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  switch (status) {
+    case 'draft':
+    case 'rejected':
+      return (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {btn('Edit →', `/draft/${id}`, 'secondary')}
+        </div>
+      );
+
+    case 'ai_review':
+      return (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {btn('View AI Results →', `/ai-review?sowId=${id}`, 'secondary')}
+        </div>
+      );
+
+    case 'internal_review':
+      return (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {btn('Review Status →', `/internal-review/${id}`, 'secondary')}
+        </div>
+      );
+
+    case 'drm_review':
+      return (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {btn('DRM Status →', `/drm-review/${id}`, 'secondary')}
+        </div>
+      );
+
+    case 'approved':
+      return (
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {btn('Finalize →', `/finalize/${id}`, 'primary')}
+        </div>
+      );
+
+    case 'finalized':
+      return (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {btn('View →', `/finalize/${id}`, 'secondary')}
+        </div>
+      );
+
+    default:
+      return (
+        <span style={{ color: 'var(--color-accent-blue)', fontSize: 'var(--font-size-sm)' }}>
+          View →
+        </span>
+      );
   }
 }
 
@@ -86,10 +163,28 @@ export default function AllSoWs() {
   });
 
   const handleRowClick = (sow) => {
-    if (sow.status === 'draft' || sow.status === 'in_review') {
-      router.push(`/draft/${sow.id}`);
-    } else {
-      router.push(`/sow/${sow.id}`);
+    switch (sow.status) {
+      case 'draft':
+      case 'rejected':
+        router.push(`/draft/${sow.id}`);
+        break;
+      case 'ai_review':
+        router.push(`/ai-review?sowId=${sow.id}`);
+        break;
+      case 'internal_review':
+        router.push(`/internal-review/${sow.id}`);
+        break;
+      case 'drm_review':
+        router.push(`/drm-review/${sow.id}`);
+        break;
+      case 'approved':
+        router.push(`/finalize/${sow.id}`);
+        break;
+      case 'finalized':
+        router.push(`/finalize/${sow.id}`);
+        break;
+      default:
+        router.push(`/draft/${sow.id}`);
     }
   };
 
@@ -207,8 +302,11 @@ export default function AllSoWs() {
             >
               <option value="All">All Statuses</option>
               <option value="draft">Draft</option>
-              <option value="in_review">In Review</option>
+              <option value="ai_review">AI Review</option>
+              <option value="internal_review">Internal Review</option>
+              <option value="drm_review">DRM Review</option>
               <option value="approved">Approved</option>
+              <option value="finalized">Finalized</option>
               <option value="rejected">Rejected</option>
             </select>
           </div>
@@ -350,17 +448,11 @@ export default function AllSoWs() {
                         {formatDate(sow.updated_at)}
                       </td>
 
-                      <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
-                        <span
-                          style={{
-                            color: 'var(--color-accent-blue)',
-                            fontSize: 'var(--font-size-sm)',
-                          }}
-                        >
-                          {sow.status === 'draft' || sow.status === 'in_review'
-                            ? 'Edit →'
-                            : 'View →'}
-                        </span>
+                      <td
+                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <SoWActions sow={sow} router={router} />
                       </td>
                     </motion.tr>
                   ))}
