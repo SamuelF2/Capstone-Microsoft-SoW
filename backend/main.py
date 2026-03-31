@@ -35,7 +35,16 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 import database
-from config import DATABASE_URL, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+from config import (
+    DATABASE_URL,
+    NEO4J_PASSWORD,
+    NEO4J_URI,
+    NEO4J_USER,
+    PG_DB,
+    PG_HOST,
+    PG_PORT,
+    PG_USER,
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
@@ -72,29 +81,51 @@ async def lifespan(app: FastAPI):
     if not AZURE_AD_CLIENT_ID:
         print("WARNING: AZURE_AD_CLIENT_ID is empty — auth will reject all tokens")
 
-    # ── Connect databases (non-blocking) ─────────────────────────────────────
-    # Try once quickly. If it fails, start in degraded mode so the container
-    # passes Azure's startup probe. The /health endpoint reports status.
+    # ── Connect databases (with retry) ─────────────────────────────────────────
+    # Try multiple times so the API can wait for database containers to start.
+    # Azure Container Apps may start containers in any order.
 
-    # Neo4j — 5s hard timeout
-    try:
-        database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        database.neo4j_driver.verify_connectivity()
-        print("Neo4j connected")
-    except Exception as e:
-        print(f"Neo4j connection failed, starting in degraded mode: {e}")
-        database.neo4j_driver = None
+    max_retries = 6
+    retry_delay = 5  # seconds
 
-    # PostgreSQL — 5s hard timeout (asyncpg timeout alone can hang on DNS)
-    try:
-        database.pg_pool = await asyncio.wait_for(
-            asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10),
-            timeout=5,
-        )
-        print("PostgreSQL connected")
-    except Exception as e:
-        print(f"PostgreSQL connection failed, starting in degraded mode: {e}")
-        database.pg_pool = None
+    for attempt in range(1, max_retries + 1):
+        # Neo4j
+        if database.neo4j_driver is None:
+            try:
+                database.neo4j_driver = GraphDatabase.driver(
+                    NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)
+                )
+                database.neo4j_driver.verify_connectivity()
+                print("Neo4j connected")
+            except Exception as e:
+                print(f"Neo4j connection attempt {attempt}/{max_retries} failed: {e}")
+                database.neo4j_driver = None
+
+        # PostgreSQL
+        if database.pg_pool is None:
+            try:
+                database.pg_pool = await asyncio.wait_for(
+                    asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10),
+                    timeout=5,
+                )
+                print("PostgreSQL connected")
+            except Exception as e:
+                print(f"PostgreSQL connection attempt {attempt}/{max_retries} failed: {e}")
+                database.pg_pool = None
+
+        # Both connected — stop retrying
+        if database.neo4j_driver and database.pg_pool:
+            break
+
+        # Wait before next retry (unless last attempt)
+        if attempt < max_retries:
+            print(f"Retrying database connections in {retry_delay}s...")
+            await asyncio.sleep(retry_delay)
+
+    if not database.neo4j_driver:
+        print("WARNING: Neo4j unavailable after all retries — running in degraded mode")
+    if not database.pg_pool:
+        print("WARNING: PostgreSQL unavailable after all retries — running in degraded mode")
 
     # ── Schema bootstrap ─────────────────────────────────────────────────────
     # Core tables from infrastructure/postgres/init/01-init.sql are created on
@@ -411,6 +442,44 @@ app.include_router(rules_router)  # /api/rules/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/debug/connectivity", tags=["health"])
+async def debug_connectivity():
+    """Try fresh database connections and report detailed errors."""
+    results = {}
+
+    # Test PostgreSQL
+    try:
+        test_pool = await asyncio.wait_for(
+            asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=1),
+            timeout=5,
+        )
+        async with test_pool.acquire() as conn:
+            val = await conn.fetchval("SELECT 1")
+            results["postgres"] = f"connected, SELECT 1 = {val}"
+        await test_pool.close()
+    except Exception as e:
+        results["postgres"] = f"error: {type(e).__name__}: {e}"
+
+    # Test Neo4j
+    try:
+        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        driver.verify_connectivity()
+        results["neo4j"] = "connected"
+        driver.close()
+    except Exception as e:
+        results["neo4j"] = f"error: {type(e).__name__}: {e}"
+
+    results["config"] = {
+        "POSTGRES_HOST": PG_HOST,
+        "POSTGRES_PORT": PG_PORT,
+        "POSTGRES_DB": PG_DB,
+        "POSTGRES_USER": PG_USER,
+        "NEO4J_URI": NEO4J_URI,
+        "DATABASE_URL_HOST": DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "not set",
+    }
+    return results
 
 
 @app.get("/health", tags=["health"])

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import UTC, datetime
 
 from neo4j import Driver
@@ -225,6 +226,3 @@ def write_dynamic_relationship(
     except Exception as e:
         logger.debug(f"Dynamic relationship write failed: {e}")
         return False
-
-
-import re  # needed for write_dynamic_relationship

@@ -160,8 +160,8 @@ def _extract_docx(path: Path) -> dict:
     try:
         from docx import Document
         from docx.oxml.ns import qn
-    except ImportError:
-        raise ImportError("python-docx not installed. Run: uv add python-docx")
+    except ImportError as err:
+        raise ImportError("python-docx not installed. Run: uv add python-docx") from err
 
     doc = Document(str(path))
     title = path.stem.replace("_", " ")
@@ -266,8 +266,8 @@ def _extract_pdf(path: Path) -> dict:
     """
     try:
         import fitz  # pymupdf
-    except ImportError:
-        raise ImportError("pymupdf not installed. Run: uv add pymupdf")
+    except ImportError as err:
+        raise ImportError("pymupdf not installed. Run: uv add pymupdf") from err
 
     doc = fitz.open(str(path))
     title = path.stem.replace("_", " ")
@@ -304,7 +304,6 @@ def _extract_pdf(path: Path) -> dict:
         }
 
     # Determine heading threshold — top 15% of font sizes are headings
-    sizes = sorted(set(b["size"] for b in blocks), reverse=True)
     body_size = sorted([b["size"] for b in blocks])[len(blocks) // 2]  # median
     heading_threshold = body_size * 1.15
 
@@ -336,9 +335,8 @@ def _extract_pdf(path: Path) -> dict:
             current_heading = block["text"]
             current_level = 1 if block["size"] >= heading_threshold * 1.1 else 2
             current_content = []
-            if not title or title == path.stem.replace("_", " "):
-                if block["page"] == 1:
-                    title = block["text"]
+            if (not title or title == path.stem.replace("_", " ")) and block["page"] == 1:
+                title = block["text"]
         else:
             current_content.append(block["text"])
 
