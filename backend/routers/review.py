@@ -23,7 +23,7 @@ DELETE /api/reviews/{review_id}    Delete a review result
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import database
@@ -98,13 +98,9 @@ async def _require_collaborator(conn, sow_id: int, user_id: int) -> None:
 
 async def _get_review_sow_id(conn, review_id: int) -> int:
     """Return the sow_id for a review_results row, or raise 404."""
-    sow_id = await conn.fetchval(
-        "SELECT sow_id FROM review_results WHERE id = $1", review_id
-    )
+    sow_id = await conn.fetchval("SELECT sow_id FROM review_results WHERE id = $1", review_id)
     if sow_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Review not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
     return sow_id
 
 
@@ -343,9 +339,7 @@ async def delete_review(review_id: int, current_user: CurrentUser) -> dict:
         sow_id = await _get_review_sow_id(conn, review_id)
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
-        result = await conn.execute(
-            "DELETE FROM review_results WHERE id = $1", review_id
-        )
+        result = await conn.execute("DELETE FROM review_results WHERE id = $1", review_id)
 
     if result == "DELETE 0":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")

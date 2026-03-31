@@ -414,26 +414,29 @@ export default function DraftPage() {
   useEffect(() => {
     if (!id) return;
     authFetch(`/api/sow/${id}`)
-    .then((res) => {
-      if (res.status === 404) { setNotFound(true); return null; }
-      if (!res.ok) throw new Error('Failed to load');
-      return res.json();
-    })
-    .then((data) => {
-      if (data) {
-        const mapped = {
-          ...(data.content ?? {}),
-          sowTitle: data.title,
-          deliveryMethodology: data.methodology,
-          customerName: data.customer_name,
-          opportunityId: data.opportunity_id,
-          dealValue: data.deal_value,
-          status: data.status,
-        };
-        setSowData(mapped);
-      }
-    })
-    .catch(() => setNotFound(true));
+      .then((res) => {
+        if (res.status === 404) {
+          setNotFound(true);
+          return null;
+        }
+        if (!res.ok) throw new Error('Failed to load');
+        return res.json();
+      })
+      .then((data) => {
+        if (data) {
+          const mapped = {
+            ...(data.content ?? {}),
+            sowTitle: data.title,
+            deliveryMethodology: data.methodology,
+            customerName: data.customer_name,
+            opportunityId: data.opportunity_id,
+            dealValue: data.deal_value,
+            status: data.status,
+          };
+          setSowData(mapped);
+        }
+      })
+      .catch(() => setNotFound(true));
   }, [id]);
 
   // Auto-save to localStorage whenever sowData changes

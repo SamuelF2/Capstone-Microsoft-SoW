@@ -66,7 +66,9 @@ export default function ReviewDetail() {
         body: JSON.stringify({ findings: { ...reviewEntry?.findings, status: 'Completed' } }),
       });
       setIsComplete(true);
-      setReviewEntry((prev) => prev ? { ...prev, findings: { ...prev.findings, status: 'Completed' } } : prev);
+      setReviewEntry((prev) =>
+        prev ? { ...prev, findings: { ...prev.findings, status: 'Completed' } } : prev
+      );
     } catch {
       // handle error
     }

@@ -357,7 +357,9 @@ export default function AllSoWs() {
                             fontSize: 'var(--font-size-sm)',
                           }}
                         >
-                          {sow.status === 'draft' || sow.status === 'in_review' ? 'Edit →' : 'View →'}
+                          {sow.status === 'draft' || sow.status === 'in_review'
+                            ? 'Edit →'
+                            : 'View →'}
                         </span>
                       </td>
                     </motion.tr>
