@@ -42,6 +42,7 @@ from config import (
     NEO4J_USER,
     PG_DB,
     PG_HOST,
+    PG_PASSWORD,
     PG_PORT,
     PG_USER,
 )
@@ -470,6 +471,31 @@ async def debug_connectivity():
         driver.close()
     except Exception as e:
         results["neo4j"] = f"error: {type(e).__name__}: {e}"
+
+    # Also try connecting on port 80 (Container Apps internal ingress default)
+    try:
+        alt_url = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:80/{PG_DB}"
+        test_pool2 = await asyncio.wait_for(
+            asyncpg.create_pool(alt_url, min_size=1, max_size=1),
+            timeout=5,
+        )
+        async with test_pool2.acquire() as conn:
+            val = await conn.fetchval("SELECT 1")
+            results["postgres_port80"] = f"connected, SELECT 1 = {val}"
+        await test_pool2.close()
+    except Exception as e:
+        results["postgres_port80"] = f"error: {type(e).__name__}: {e}"
+
+    # Test raw TCP connectivity
+    import socket
+
+    for port in [80, 443, 5432]:
+        try:
+            sock = socket.create_connection((PG_HOST, port), timeout=3)
+            sock.close()
+            results[f"tcp_postgres_{port}"] = "open"
+        except Exception as e:
+            results[f"tcp_postgres_{port}"] = f"closed: {e}"
 
     results["config"] = {
         "POSTGRES_HOST": PG_HOST,

@@ -16,7 +16,7 @@ COPY pyproject.toml uv.lock* requirements.txt ./
 # Install Python dependencies with uv
 RUN uv pip install --system -r requirements.txt
 
-# Copy application code
+# Cache bust: v2
 COPY . .
 
 # Expose port
