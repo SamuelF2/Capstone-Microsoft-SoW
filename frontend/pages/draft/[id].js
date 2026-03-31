@@ -438,15 +438,53 @@ export default function DraftPage() {
     setSowData((prev) => ({ ...prev, [section]: value }));
   };
 
-  // Submit the SoW for review — sets status to in_review on the backend
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // ── Methodology-aware readiness checks ────────────────────────────────────
+  const methodology = sowData?.deliveryMethodology;
+
+  const hasExecutiveSummary = !!(
+    sowData?.executiveSummary &&
+    Object.keys(sowData.executiveSummary).some((k) => sowData.executiveSummary[k])
+  );
+
+  // Scope: Cloud Adoption uses cloudAdoptionScope, others use projectScope
+  const scopeKey = methodology === 'Cloud Adoption' ? 'cloudAdoptionScope' : 'projectScope';
+  const scopeLabel = methodology === 'Cloud Adoption' ? 'Cloud Adoption Scope' : 'Project Scope';
+  const hasScope = !!(
+    sowData?.[scopeKey] && Object.keys(sowData[scopeKey]).some((k) => sowData[scopeKey][k])
+  );
+
+  // Deliverables: Sure Step 365 uses phasesDeliverables, others use deliverables
+  const deliverablesKey = methodology === 'Sure Step 365' ? 'phasesDeliverables' : 'deliverables';
+  const deliverablesLabel =
+    methodology === 'Sure Step 365'
+      ? 'Phases & deliverables defined'
+      : 'At least one deliverable added';
+  const hasDeliverables = (() => {
+    const val = sowData?.[deliverablesKey];
+    if (!val) return false;
+    if (Array.isArray(val)) return val.length > 0;
+    return Object.keys(val).some((k) => val[k]);
+  })();
+
+  const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
+
+  // Submit the SoW for review — calls submit-for-review then redirects to AI review
   const handleSubmitForReview = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await authFetch(`/api/sow/${id}/status`, {
-        method: 'PUT',
+      // First, auto-save current content to backend
+      await authFetch(`/api/sow/${id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'in_review' }),
+        body: JSON.stringify({ content: sowData }),
+      });
+
+      // Then submit for review
+      const res = await authFetch(`/api/sow/${id}/submit-for-review`, {
+        method: 'POST',
       });
 
       if (!res.ok) {
@@ -454,15 +492,12 @@ export default function DraftPage() {
         throw new Error(detail?.detail || `Server error ${res.status}`);
       }
 
-      // Reflect new status in localStorage
-      const updated = { ...sowData, status: 'in_review', updatedAt: new Date().toISOString() };
-      localStorage.setItem(`sow-${id}`, JSON.stringify(updated));
-
-      router.push(`/review/${id}`);
+      router.push(`/ai-review?sowId=${id}`);
     } catch (err) {
       setSubmitError(err.message);
     } finally {
       setIsSubmitting(false);
+      setShowConfirm(false);
     }
   };
 
@@ -799,9 +834,9 @@ export default function DraftPage() {
             {isLastTab ? (
               <button
                 className="btn btn-primary"
-                onClick={handleSubmitForReview}
-                disabled={isSubmitting}
-                style={{ opacity: isSubmitting ? 0.6 : 1 }}
+                onClick={() => setShowConfirm(true)}
+                disabled={isSubmitting || !allRequiredMet}
+                style={{ opacity: isSubmitting || !allRequiredMet ? 0.6 : 1 }}
               >
                 {isSubmitting ? 'Submitting…' : 'Submit for Review →'}
               </button>
@@ -815,6 +850,107 @@ export default function DraftPage() {
             )}
           </div>
         </div>
+
+        {/* Submit Panel — Readiness checklist */}
+        <div
+          style={{
+            maxWidth: 'var(--container-xl)',
+            margin: '0 auto',
+            padding: '0 var(--spacing-xl) var(--spacing-2xl)',
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              padding: 'var(--spacing-lg) var(--spacing-xl)',
+              borderLeft: `3px solid ${allRequiredMet ? 'var(--color-success)' : 'var(--color-warning)'}`,
+            }}
+          >
+            <h3 className="text-base font-semibold" style={{ marginBottom: 'var(--spacing-md)' }}>
+              Ready to submit for review?
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
+              <span
+                style={{
+                  fontSize: 'var(--font-size-sm)',
+                  color: hasExecutiveSummary ? 'var(--color-success)' : 'var(--color-error)',
+                }}
+              >
+                {hasExecutiveSummary ? '✓' : '✗'} Executive Summary completed
+              </span>
+              <span
+                style={{
+                  fontSize: 'var(--font-size-sm)',
+                  color: hasScope ? 'var(--color-success)' : 'var(--color-error)',
+                }}
+              >
+                {hasScope ? '✓' : '✗'} {scopeLabel} defined
+              </span>
+              <span
+                style={{
+                  fontSize: 'var(--font-size-sm)',
+                  color: hasDeliverables ? 'var(--color-success)' : 'var(--color-error)',
+                }}
+              >
+                {hasDeliverables ? '✓' : '✗'} {deliverablesLabel}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Confirmation modal */}
+        {showConfirm && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}
+            onClick={() => setShowConfirm(false)}
+          >
+            <div
+              className="card"
+              style={{
+                maxWidth: '480px',
+                width: '90%',
+                padding: 'var(--spacing-xl)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold" style={{ marginBottom: 'var(--spacing-md)' }}>
+                Submit for Review
+              </h3>
+              <p
+                className="text-secondary"
+                style={{
+                  marginBottom: 'var(--spacing-lg)',
+                  lineHeight: 'var(--line-height-relaxed)',
+                }}
+              >
+                This will submit the SoW for AI analysis. After reviewing the AI recommendations,
+                you can proceed to internal review by the Solution Architect and SQA team.
+              </p>
+              <div
+                style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--spacing-md)' }}
+              >
+                <button className="btn btn-secondary" onClick={() => setShowConfirm(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleSubmitForReview}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Submitting…' : 'Submit'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

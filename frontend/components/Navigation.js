@@ -15,8 +15,10 @@ export default function Navigation() {
     { href: '/all-sows', label: 'All SoWs' },
     { href: '/create-new', label: 'Create New' },
     { href: '/ai-review', label: 'AI Review' },
-    { href: '/review-history', label: 'Review History' },
     { href: '/my-reviews', label: 'My Reviews' },
+    { href: '/drm-dashboard', label: 'DRM Dashboard', roles: ['cpl', 'cdp', 'delivery-manager'] },
+    { href: '/review-history', label: 'Review History' },
+    { href: '/business-logic', label: 'Business Logic' },
   ];
 
   const navLinkStyle = (path) => ({
@@ -100,38 +102,50 @@ export default function Navigation() {
 
         {/* Nav Links */}
         <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'center' }}>
-          {navLinks.map(({ href, label }) => (
-            <Link key={href} href={href} style={navLinkStyle(href)}>
-              {label}
-              {isActive(href) && (
-                <motion.div
-                  layoutId="nav-underline"
-                  style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: '2px',
-                    backgroundColor: 'var(--color-accent-blue)',
-                    borderRadius: '1px',
-                  }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                />
-              )}
-            </Link>
-          ))}
+          {navLinks
+            .filter((link) => !link.roles || link.roles.includes(user?.role))
+            .map(({ href, label }) => (
+              <Link key={href} href={href} style={navLinkStyle(href)}>
+                {label}
+                {isActive(href) && (
+                  <motion.div
+                    layoutId="nav-underline"
+                    style={{
+                      position: 'absolute',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: '2px',
+                      backgroundColor: 'var(--color-accent-blue)',
+                      borderRadius: '1px',
+                    }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  />
+                )}
+              </Link>
+            ))}
         </div>
 
         {/* User section */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
           {/* Avatar + name */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+          <Link
+            href="/account"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--spacing-sm)',
+              textDecoration: 'none',
+            }}
+          >
             <div
               style={{
                 width: '32px',
                 height: '32px',
                 borderRadius: 'var(--radius-full)',
-                backgroundColor: 'var(--color-accent-blue)',
+                backgroundColor: isActive('/account')
+                  ? 'var(--color-accent-purple)'
+                  : 'var(--color-accent-blue)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -139,6 +153,8 @@ export default function Navigation() {
                 fontWeight: 'var(--font-weight-semibold)',
                 color: '#fff',
                 flexShrink: 0,
+                cursor: 'pointer',
+                transition: 'background-color var(--transition-base)',
               }}
             >
               {initials}
@@ -155,7 +171,7 @@ export default function Navigation() {
             >
               {displayName}
             </span>
-          </div>
+          </Link>
 
           {/* Logout */}
           <button

@@ -107,10 +107,7 @@ export default function Home() {
               <button className="btn btn-primary btn-lg" onClick={() => router.push('/create-new')}>
                 Create New SOW
               </button>
-              <button
-                className="btn btn-secondary btn-lg"
-                onClick={() => router.push('/review-history')}
-              >
+              <button className="btn btn-secondary btn-lg" onClick={() => router.push('/all-sows')}>
                 View All SoWs
               </button>
             </div>
@@ -142,12 +139,27 @@ export default function Home() {
             >
               <div
                 style={{
-                  fontSize: '2rem',
                   marginBottom: 'var(--spacing-md)',
                   color: 'var(--color-success)',
                 }}
               >
-                📝
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                  <line x1="10" y1="9" x2="8" y2="9" />
+                </svg>
               </div>
               <h3 className="text-lg font-semibold mb-sm">Guided Authoring</h3>
               <p
@@ -171,12 +183,24 @@ export default function Home() {
             >
               <div
                 style={{
-                  fontSize: '2rem',
                   marginBottom: 'var(--spacing-md)',
                   color: 'var(--color-info)',
                 }}
               >
-                ✅
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  <polyline points="9 12 11 14 15 10" />
+                </svg>
               </div>
               <h3 className="text-lg font-semibold mb-sm">Built-in Quality</h3>
               <p
@@ -200,12 +224,26 @@ export default function Home() {
             >
               <div
                 style={{
-                  fontSize: '2rem',
                   marginBottom: 'var(--spacing-md)',
                   color: 'var(--color-accent-purple)',
                 }}
               >
-                👥
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
               </div>
               <h3 className="text-lg font-semibold mb-sm">Multi-Persona Workflow</h3>
               <p
@@ -229,12 +267,24 @@ export default function Home() {
             >
               <div
                 style={{
-                  fontSize: '2rem',
                   marginBottom: 'var(--spacing-md)',
                   color: 'var(--color-warning)',
                 }}
               >
-                ⚡
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
               </div>
               <h3 className="text-lg font-semibold mb-sm">Faster Approvals</h3>
               <p
