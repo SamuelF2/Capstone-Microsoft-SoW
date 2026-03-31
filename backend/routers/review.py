@@ -499,8 +499,8 @@ async def get_checklist(sow_id: int, current_user: CurrentUser) -> ReviewCheckli
 
     if not assignment:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No review assignment for this SoW",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SoW not found",
         )
 
     role = assignment["reviewer_role"]
@@ -547,8 +547,8 @@ async def save_progress(
         )
         if not assignment:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No review assignment for this SoW",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="SoW not found",
             )
 
         new_status = "in_progress" if assignment["status"] == "pending" else assignment["status"]
@@ -624,8 +624,8 @@ async def submit_review(
         )
         if not assignment:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No review assignment for this SoW",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="SoW not found",
             )
 
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
@@ -1015,8 +1015,8 @@ async def get_drm_summary(sow_id: int, current_user: CurrentUser) -> dict:
         )
         if not assignment:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No DRM assignment for this SoW",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="SoW not found",
             )
 
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
@@ -1039,9 +1039,14 @@ async def get_drm_summary(sow_id: int, current_user: CurrentUser) -> dict:
             sow_id,
         )
 
-        # Latest AI analysis
+        # Latest AI analysis — joined through sow_documents.ai_suggestion_id
         ai_row = await conn.fetchrow(
-            "SELECT result FROM ai_suggestions WHERE sow_id = $1 ORDER BY created_at DESC LIMIT 1",
+            """
+            SELECT a.flag, a.validation_recommendation, a.risks
+            FROM   sow_documents sd
+            JOIN   ai_suggestion a ON a.id = sd.ai_suggestion_id
+            WHERE  sd.id = $1
+            """,
             sow_id,
         )
 
@@ -1065,15 +1070,14 @@ async def get_drm_summary(sow_id: int, current_user: CurrentUser) -> dict:
     # ── AI insights ──────────────────────────────────────────────────────────
     ai_insights: dict[str, Any] | None = None
     if ai_row:
-        ai_data = _safe_json(ai_row["result"]) or {}
+        validation_rec = _safe_json(ai_row["validation_recommendation"]) or {}
+        risks_data = _safe_json(ai_row["risks"]) or []
         ai_insights = {
-            "summary": ai_data.get("summary"),
-            "overall_score": ai_data.get("overall_score"),
-            "approval": ai_data.get("approval"),
+            "approval": validation_rec.get("approval"),
             "high_violations": [
-                v for v in ai_data.get("violations", []) if v.get("severity") == "high"
+                v for v in validation_rec.get("violations", []) if v.get("severity") == "high"
             ],
-            "risks": ai_data.get("risks", []),
+            "risks": risks_data,
         }
 
     # ── Scope helpers ────────────────────────────────────────────────────────
@@ -1191,8 +1195,8 @@ async def send_back(
         )
         if not assignment:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No DRM assignment for this SoW",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="SoW not found",
             )
 
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)

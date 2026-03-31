@@ -181,7 +181,7 @@ def _compute_esap_level(deal_value: float | None, margin: float | None) -> str:
       type-3: dealValue <= $1M  AND  margin >= 15%
     """
     dv = deal_value or 0
-    mg = margin if margin is not None else 100
+    mg = margin if margin is not None else 0
 
     if dv > 5_000_000 or mg < 10:
         return "type-1"
