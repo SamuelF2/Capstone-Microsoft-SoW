@@ -1,11 +1,8 @@
 from __future__ import annotations
-
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
-
 from neo4j import Driver
-
 logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -214,24 +211,19 @@ def _vector_search(
     top_k:           int,
     sow_id:          Optional[str] = None,
 ) -> list[str]:
-    sow_filter = (
-        "AND (node)<-[:HAS_SECTION]-(:SOW {id: $sow_id})"
-        if sow_id and index_name == "section_embeddings"
-        else ""
-    )
     with driver.session() as session:
         rows = session.run(
             f"""
             CALL db.index.vector.queryNodes($index_name, $k, $vec)
             YIELD node, score
-            WHERE score > $threshold {sow_filter}
+            WHERE score > $threshold
+              AND ($sow_id IS NULL OR (node)<-[:HAS_SECTION]-(:SOW {{id: $sow_id}}))
             RETURN node.{id_field} AS id
             """,
             index_name=index_name, k=top_k, vec=query_vec,
             threshold=score_threshold, sow_id=sow_id,
         ).data()
     return [r["id"] for r in rows if r["id"]]
-
 
 def _expand_clauses_to_rules(driver: Driver, clause_ids: list[str]) -> set[str]:
     if not clause_ids:
@@ -252,32 +244,28 @@ def _expand_from_sections(
     if not sec_ids:
         return set(), set(), set(), set(), set()
 
-    methodology_filter = (
-        "AND (sow)-[:USES_METHODOLOGY]->(:Methodology {name: $methodology})"
-        if deal_ctx.methodology else ""
-    )
-
     with driver.session() as session:
         row = session.run(
-            f"""
+            """
             UNWIND $ids AS sid
-            MATCH (sec:Section {{id: sid}})
+            MATCH (sec:Section {id: sid})
             OPTIONAL MATCH (sec)-[:INSTANCE_OF]->(ct:ClauseType)-[:VALIDATED_BY]->(r:Rule)
             OPTIONAL MATCH (sec)-[:CONTAINS_BANNED_PHRASE]->(b:BannedPhrase)
             OPTIONAL MATCH (sow:SOW)-[:HAS_SECTION]->(sec)
             OPTIONAL MATCH (sow)-[:HAS_RISK]->(risk:Risk)
             OPTIONAL MATCH (sow)-[:HAS_DELIVERABLE]->(d:Deliverable)
-            OPTIONAL MATCH (ct)<-[:INSTANCE_OF]-(neighbor:Section)<-[:HAS_SECTION]-(sow)
-                {methodology_filter}
+            OPTIONAL MATCH (ct)<-[:INSTANCE_OF]-(neighbor:Section)<-[:HAS_SECTION]-(sow2:SOW)
             WHERE neighbor.id <> sid
+              AND ($methodology IS NULL OR sow2.methodology = $methodology)
             RETURN
-                collect(DISTINCT r.rule_id)     AS rule_ids,
-                collect(DISTINCT b.phrase)      AS banned_ids,
-                collect(DISTINCT risk.id)       AS risk_ids,
-                collect(DISTINCT d.id)          AS deliverable_ids,
-                collect(DISTINCT neighbor.id)   AS neighbor_ids
+                collect(DISTINCT r.rule_id)   AS rule_ids,
+                collect(DISTINCT b.phrase)    AS banned_ids,
+                collect(DISTINCT risk.id)     AS risk_ids,
+                collect(DISTINCT d.id)        AS deliverable_ids,
+                collect(DISTINCT neighbor.id) AS neighbor_ids
             """,
-            ids=sec_ids, methodology=deal_ctx.methodology,
+            ids=sec_ids,
+            methodology=deal_ctx.methodology,
         ).single()
 
     if not row:
@@ -364,35 +352,25 @@ def _fetch_deliverables(driver: Driver, ids: list[str]) -> list[dict]:
             ids=ids,
         ).data()
 
-
 def _fetch_cross_deal_sections(
-    driver:   Driver,
+    driver:     Driver,
     anchor_ids: list[str],
-    deal_ctx: DealContext,
-    limit:    int,
+    deal_ctx:   DealContext,
+    limit:      int,
 ) -> list[dict]:
     if not anchor_ids:
         return []
 
-    methodology_filter = (
-        "AND sow2.methodology = $methodology"
-        if deal_ctx.methodology else ""
-    )
-    exclude_filter = (
-        "AND sow2.id <> $sow_id"
-        if deal_ctx.sow_id else ""
-    )
-
     with driver.session() as session:
         return session.run(
-            f"""
+            """
             UNWIND $anchor_ids AS aid
-            MATCH (anchor:Section {{id: aid}})-[:INSTANCE_OF]->(ct:ClauseType)
+            MATCH (anchor:Section {id: aid})-[:INSTANCE_OF]->(ct:ClauseType)
                   <-[:INSTANCE_OF]-(other:Section)<-[:HAS_SECTION]-(sow2:SOW)
             WHERE other.id <> aid
               AND other.char_count > 100
-              {methodology_filter}
-              {exclude_filter}
+              AND ($methodology IS NULL OR sow2.methodology = $methodology)
+              AND ($sow_id IS NULL OR sow2.id <> $sow_id)
             RETURN DISTINCT
                 other.heading    AS heading,
                 other.content    AS content,
