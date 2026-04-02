@@ -27,6 +27,7 @@ from sow_kg.db import get_driver, init_schema
 from sow_kg.enrich import run_enrichment, semantic_search
 from sow_kg.ingest import get_banned_phrases, ingest_directory, ingest_file
 from sow_kg.ingest_json import ingest_all_json
+from sow_kg.ingest_csv import ingest_all_csv
 from sow_kg.queries import (
     find_similar_sows,
     get_approval_chain,
@@ -74,6 +75,7 @@ def ingest(data_dir: str, file: str, doc_type: str, clear: bool):
     console.print("[green]Schema ready[/]")
 
     ingest_all_json(driver, data_path)
+    ingest_all_csv(driver, data_path)
 
     banned = get_banned_phrases(driver)
 
