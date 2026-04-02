@@ -122,6 +122,10 @@ class SoWCreate(BaseModel):
     estimated_margin: float | None = None
     content: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    workflow_template_id: int | None = Field(
+        default=None,
+        description="Workflow template ID; defaults to the system default template",
+    )
 
 
 class SoWUpdate(BaseModel):
@@ -442,3 +446,81 @@ class DocumentGenerationResponse(BaseModel):
     file_name: str
     format: str
     size_bytes: int
+
+
+# ── Workflow Templates ───────────────────────────────────────────────────────
+
+
+class WorkflowStageRoleConfig(BaseModel):
+    """A reviewer role required at a workflow stage."""
+
+    role_key: str
+    is_required: bool = True
+    esap_levels: list[str] | None = None  # None = all levels
+
+
+class WorkflowStageConfig(BaseModel):
+    """A single stage within a workflow template."""
+
+    stage_key: str
+    display_name: str
+    stage_order: int
+    stage_type: str = "review"  # draft, ai_analysis, review, approval, terminal
+    roles: list[WorkflowStageRoleConfig] = []
+    config: dict[str, Any] = {}
+
+
+class WorkflowTransitionConfig(BaseModel):
+    """A valid transition between two stages."""
+
+    from_stage: str
+    to_stage: str
+
+
+class WorkflowData(BaseModel):
+    """Full workflow snapshot stored per-SoW."""
+
+    stages: list[WorkflowStageConfig]
+    transitions: list[WorkflowTransitionConfig]
+
+
+class WorkflowTemplateCreate(BaseModel):
+    """Payload for creating a new workflow template."""
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+    workflow_data: WorkflowData
+
+
+class WorkflowTemplateResponse(BaseModel):
+    """Full workflow template with stages, roles, and transitions."""
+
+    id: int
+    name: str
+    description: str | None = None
+    is_system: bool
+    workflow_data: WorkflowData
+    created_at: datetime
+
+
+class WorkflowTemplateSummary(BaseModel):
+    """Lightweight listing of a workflow template."""
+
+    id: int
+    name: str
+    description: str | None = None
+    is_system: bool
+    stage_count: int = 0
+    created_at: datetime
+
+
+class SoWWorkflowResponse(BaseModel):
+    """Per-SoW workflow instance."""
+
+    id: int
+    sow_id: int
+    template_id: int | None = None
+    current_stage: str
+    workflow_data: WorkflowData
+    created_at: datetime
+    updated_at: datetime

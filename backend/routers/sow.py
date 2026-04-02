@@ -63,6 +63,8 @@ from models import (
 )
 from services.ai import analyze_sow
 
+from routers.workflow import build_workflow_snapshot, get_default_template_id
+
 router = APIRouter(prefix="/api/sow", tags=["sow"])
 
 _VALID_STATUSES = {
@@ -240,6 +242,31 @@ async def _create_assignment_with_prior(
         prior["checklist_responses"] if prior else None,
         prior["comments"] if prior else None,
     )
+
+
+async def _get_workflow_transitions(conn, sow_id: int) -> dict[str, set[str]] | None:
+    """Load transitions from the SoW's workflow instance.
+
+    Returns a dict mapping stage_key -> set of allowed target stage_keys,
+    or None if no workflow instance exists (caller should fall back to
+    ``_VALID_TRANSITIONS``).
+    """
+    row = await conn.fetchrow("SELECT workflow_data FROM sow_workflow WHERE sow_id = $1", sow_id)
+    if not row or not row["workflow_data"]:
+        return None
+
+    data = (
+        row["workflow_data"]
+        if isinstance(row["workflow_data"], dict)
+        else json.loads(row["workflow_data"])
+    )
+    result: dict[str, set[str]] = {}
+    for t in data.get("transitions", []):
+        result.setdefault(t["from_stage"], set()).add(t["to_stage"])
+    # Ensure every stage key appears even if it has no outgoing transitions
+    for s in data.get("stages", []):
+        result.setdefault(s["stage_key"], set())
+    return result
 
 
 # ── History ──────────────────────────────────────────────────────────────────
@@ -434,6 +461,20 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
         await _insert_history(
             conn, sow_id=row["id"], user_id=current_user.id, change_type="created"
         )
+
+        # 6. Create workflow instance
+        _template_id = payload.workflow_template_id or await get_default_template_id(conn)
+        if _template_id is not None:
+            snapshot = await build_workflow_snapshot(conn, _template_id)
+            await conn.execute(
+                """
+                INSERT INTO sow_workflow (sow_id, template_id, current_stage, workflow_data)
+                VALUES ($1, $2, 'draft', $3::jsonb)
+                """,
+                row["id"],
+                _template_id,
+                json.dumps(snapshot),
+            )
 
     return _row_to_response(dict(row))
 
@@ -720,19 +761,14 @@ async def update_sow_status(
 ) -> SoWResponse:
     """Change the workflow status of a SoW.
 
-    Enforces valid transitions defined in ``_VALID_TRANSITIONS``.
+    Enforces valid transitions — reads from the SoW's workflow instance
+    if one exists, otherwise falls back to ``_VALID_TRANSITIONS``.
 
     Raises **400** for unrecognised statuses.
     Raises **409** for invalid transitions.
     Raises **404** if the SoW does not exist or the current user is not a
     collaborator on it.
     """
-    if payload.status not in _VALID_STATUSES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(_VALID_STATUSES)}",
-        )
-
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
@@ -740,7 +776,27 @@ async def update_sow_status(
         if old_status is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
-        allowed = _VALID_TRANSITIONS.get(old_status, set())
+        # Use workflow instance transitions if available, else legacy dicts
+        wf_transitions = await _get_workflow_transitions(conn, sow_id)
+        if wf_transitions is not None:
+            all_stages: set[str] = set()
+            for src, targets in wf_transitions.items():
+                all_stages.add(src)
+                all_stages.update(targets)
+            if payload.status not in all_stages:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(all_stages)}",
+                )
+            allowed = wf_transitions.get(old_status, set())
+        else:
+            if payload.status not in _VALID_STATUSES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(_VALID_STATUSES)}",
+                )
+            allowed = _VALID_TRANSITIONS.get(old_status, set())
+
         if payload.status not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -766,6 +822,12 @@ async def update_sow_status(
                 user_id=current_user.id,
                 change_type="status_change",
                 diff={"old_status": old_status, "new_status": payload.status},
+            )
+            # Keep sow_workflow.current_stage in sync
+            await conn.execute(
+                "UPDATE sow_workflow SET current_stage = $1, updated_at = NOW() WHERE sow_id = $2",
+                payload.status,
+                sow_id,
             )
 
     if not row:

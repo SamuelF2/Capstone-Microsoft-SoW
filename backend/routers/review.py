@@ -319,6 +319,45 @@ _DRM_REQUIRED: dict[str, list[str]] = {
     "type-3": ["cpl"],
 }
 
+
+async def _get_required_roles(conn, sow_id: int, stage_key: str, esap_level: str) -> list[str]:
+    """Load required reviewer roles from the SoW's workflow instance.
+
+    Falls back to ``_INTERNAL_REVIEW_REQUIRED`` / ``_DRM_REQUIRED`` dicts
+    if no workflow instance exists.
+
+    ``stage_key`` uses underscore format (e.g. "internal_review", "drm_review")
+    matching ``sow_documents.status``.
+    """
+    row = await conn.fetchrow("SELECT workflow_data FROM sow_workflow WHERE sow_id = $1", sow_id)
+    if row and row["workflow_data"]:
+        data = (
+            row["workflow_data"]
+            if isinstance(row["workflow_data"], dict)
+            else json.loads(row["workflow_data"])
+        )
+        for stage in data.get("stages", []):
+            if stage["stage_key"] == stage_key:
+                roles = []
+                for role in stage.get("roles", []):
+                    esap_list = role.get("esap_levels")
+                    if (
+                        esap_list is None
+                        or esap_level in esap_list
+                        and role.get("is_required", True)
+                    ):
+                        roles.append(role["role_key"])
+                return roles
+        return []
+
+    # Legacy fallback
+    if stage_key == "internal_review":
+        return _INTERNAL_REVIEW_REQUIRED.get(esap_level, ["solution-architect"])
+    if stage_key == "drm_review":
+        return _DRM_REQUIRED.get(esap_level, ["cpl"])
+    return []
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
@@ -717,6 +756,10 @@ async def submit_review(
                 sow_id,
             )
             await conn.execute(
+                "UPDATE sow_workflow SET current_stage = 'draft', updated_at = NOW() WHERE sow_id = $1",
+                sow_id,
+            )
+            await conn.execute(
                 """
                 UPDATE review_assignments
                 SET    status = 'canceled'
@@ -776,8 +819,16 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
             sow_id,
         )
 
-    esap = sow["esap_level"] or "type-3"
-    current_stage = sow["status"]
+        esap = sow["esap_level"] or "type-3"
+        current_stage = sow["status"]
+
+        # Determine which stage's gating rules to evaluate
+        if current_stage in ("internal_review", "drm_review"):
+            stage_key = "internal-review" if current_stage == "internal_review" else "drm-approval"
+            required_roles = await _get_required_roles(conn, sow_id, current_stage, esap)
+        else:
+            stage_key = ""
+            required_roles = []
 
     assignments = [
         ReviewAssignmentStatusSummary(
@@ -790,17 +841,6 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
         )
         for r in rows
     ]
-
-    # Determine which stage's gating rules to evaluate
-    if current_stage == "internal_review":
-        stage_key = "internal-review"
-        required_roles = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
-    elif current_stage == "drm_review":
-        stage_key = "drm-approval"
-        required_roles = _DRM_REQUIRED.get(esap, ["cpl"])
-    else:
-        stage_key = ""
-        required_roles = []
 
     if stage_key:
         completed_roles = {
@@ -852,7 +892,7 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
         # ── Branch: internal_review → drm_review ─────────────────────────────
         if sow["status"] == "internal_review":
-            required_roles = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
+            required_roles = await _get_required_roles(conn, sow_id, "internal_review", esap)
             # Only consider the latest assignment per (user, role) to avoid
             # counting stale approvals from prior reject/resubmit cycles.
             existing = await conn.fetch(
@@ -881,7 +921,7 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                 )
 
             # Assign DRM reviewers, carrying over any prior responses
-            drm_roles = _DRM_REQUIRED.get(esap, ["cpl"])
+            drm_roles = await _get_required_roles(conn, sow_id, "drm_review", esap)
             assigned: list[str] = []
             for role in drm_roles:
                 reviewer = await conn.fetchrow(
@@ -915,6 +955,10 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                 "UPDATE sow_documents SET status = 'drm_review', updated_at = NOW() WHERE id = $1",
                 sow_id,
             )
+            await conn.execute(
+                "UPDATE sow_workflow SET current_stage = 'drm_review', updated_at = NOW() WHERE sow_id = $1",
+                sow_id,
+            )
             await _insert_history(
                 conn,
                 sow_id,
@@ -931,7 +975,7 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
         # ── Branch: drm_review → approved ─────────────────────────────────────
         elif sow["status"] == "drm_review":
-            required_roles = _DRM_REQUIRED.get(esap, ["cpl"])
+            required_roles = await _get_required_roles(conn, sow_id, "drm_review", esap)
             existing = await conn.fetch(
                 """
                 SELECT DISTINCT ON (user_id, reviewer_role) *
@@ -959,6 +1003,10 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
             await conn.execute(
                 "UPDATE sow_documents SET status = 'approved', updated_at = NOW() WHERE id = $1",
+                sow_id,
+            )
+            await conn.execute(
+                "UPDATE sow_workflow SET current_stage = 'approved', updated_at = NOW() WHERE sow_id = $1",
                 sow_id,
             )
             await _insert_history(
@@ -1263,7 +1311,7 @@ async def send_back(
         # If sending back to internal_review, re-create SA/SQA assignments
         if payload.target_stage == "internal_review":
             esap = sow["esap_level"] or "type-3"
-            roles_needed = _INTERNAL_REVIEW_REQUIRED.get(esap, ["solution-architect"])
+            roles_needed = await _get_required_roles(conn, sow_id, "internal_review", esap)
             for ir_role in roles_needed:
                 reviewer = await conn.fetchrow(
                     "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
@@ -1291,6 +1339,11 @@ async def send_back(
         # Update SoW status
         await conn.execute(
             "UPDATE sow_documents SET status = $1, updated_at = NOW() WHERE id = $2",
+            payload.target_stage,
+            sow_id,
+        )
+        await conn.execute(
+            "UPDATE sow_workflow SET current_stage = $1, updated_at = NOW() WHERE sow_id = $2",
             payload.target_stage,
             sow_id,
         )

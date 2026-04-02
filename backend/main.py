@@ -44,6 +44,7 @@ from routers.finalize import router as finalize_router
 from routers.review import router as review_router
 from routers.rules import router as rules_router
 from routers.sow import router as sow_router
+from routers.workflow import router as workflow_router
 from status import router as status_router
 from validators import (
     build_health_status,
@@ -342,7 +343,158 @@ async def lifespan(app: FastAPI):
         """)
 
         # ------------------------------------------------------------------ #
-        # 11. INDEXES                                                         #
+        # 11. WORKFLOW TEMPLATES                                              #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_templates (
+                id              SERIAL PRIMARY KEY,
+                name            TEXT NOT NULL UNIQUE,
+                description     TEXT,
+                is_system       BOOLEAN DEFAULT FALSE,
+                created_by      INTEGER REFERENCES users(id),
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_template_stages (
+                id              SERIAL PRIMARY KEY,
+                template_id     INTEGER NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
+                stage_key       TEXT NOT NULL,
+                display_name    TEXT NOT NULL,
+                stage_order     INTEGER NOT NULL,
+                stage_type      TEXT NOT NULL DEFAULT 'review',
+                config          JSONB DEFAULT '{}',
+                UNIQUE(template_id, stage_key)
+            );
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_template_stage_roles (
+                id              SERIAL PRIMARY KEY,
+                stage_id        INTEGER NOT NULL REFERENCES workflow_template_stages(id) ON DELETE CASCADE,
+                role_key        TEXT NOT NULL,
+                is_required     BOOLEAN DEFAULT TRUE,
+                esap_levels     TEXT[]
+            );
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_template_transitions (
+                id              SERIAL PRIMARY KEY,
+                template_id     INTEGER NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
+                from_stage_key  TEXT NOT NULL,
+                to_stage_key    TEXT NOT NULL,
+                UNIQUE(template_id, from_stage_key, to_stage_key)
+            );
+        """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sow_workflow (
+                id              SERIAL PRIMARY KEY,
+                sow_id          INTEGER NOT NULL UNIQUE REFERENCES sow_documents(id) ON DELETE CASCADE,
+                template_id     INTEGER REFERENCES workflow_templates(id),
+                current_stage   TEXT NOT NULL DEFAULT 'draft',
+                workflow_data   JSONB NOT NULL,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 12. SEED DEFAULT WORKFLOW TEMPLATE                                  #
+        # ------------------------------------------------------------------ #
+        existing_template = await conn.fetchval(
+            "SELECT id FROM workflow_templates WHERE name = 'Default ESAP Workflow'"
+        )
+        if not existing_template:
+            template_id = await conn.fetchval("""
+                INSERT INTO workflow_templates (name, description, is_system)
+                VALUES ('Default ESAP Workflow',
+                        'Standard ESAP-driven workflow: Draft → AI Review → Internal Review → DRM Review → Approved → Finalized',
+                        TRUE)
+                RETURNING id
+            """)
+
+            # Stages
+            stage_defs = [
+                ("draft", "Draft", 1, "draft"),
+                ("ai_review", "AI Review", 2, "ai_analysis"),
+                ("internal_review", "Internal Review", 3, "review"),
+                ("drm_review", "DRM Review", 4, "approval"),
+                ("approved", "Approved", 5, "terminal"),
+                ("finalized", "Finalized", 6, "terminal"),
+                ("rejected", "Rejected", 0, "terminal"),
+            ]
+            stage_ids = {}
+            for key, name, order, stype in stage_defs:
+                sid = await conn.fetchval(
+                    """
+                    INSERT INTO workflow_template_stages
+                        (template_id, stage_key, display_name, stage_order, stage_type)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING id
+                """,
+                    template_id,
+                    key,
+                    name,
+                    order,
+                    stype,
+                )
+                stage_ids[key] = sid
+
+            # Stage roles (mirrors _INTERNAL_REVIEW_REQUIRED and _DRM_REQUIRED)
+            role_defs = [
+                # (stage_key, role_key, esap_levels)
+                ("internal_review", "solution-architect", ["type-1", "type-2", "type-3"]),
+                ("internal_review", "sqa-reviewer", ["type-1", "type-2"]),
+                ("drm_review", "cpl", ["type-1", "type-2", "type-3"]),
+                ("drm_review", "cdp", ["type-1", "type-2"]),
+                ("drm_review", "delivery-manager", ["type-1"]),
+            ]
+            for stage_key, role_key, esap_levels in role_defs:
+                await conn.execute(
+                    """
+                    INSERT INTO workflow_template_stage_roles
+                        (stage_id, role_key, is_required, esap_levels)
+                    VALUES ($1, $2, TRUE, $3)
+                """,
+                    stage_ids[stage_key],
+                    role_key,
+                    esap_levels,
+                )
+
+            # Transitions (mirrors _VALID_TRANSITIONS)
+            transitions = [
+                ("draft", "ai_review"),
+                ("ai_review", "internal_review"),
+                ("ai_review", "draft"),
+                ("internal_review", "drm_review"),
+                ("internal_review", "rejected"),
+                ("internal_review", "draft"),
+                ("drm_review", "approved"),
+                ("drm_review", "rejected"),
+                ("drm_review", "internal_review"),
+                ("approved", "finalized"),
+                ("rejected", "draft"),
+            ]
+            for from_key, to_key in transitions:
+                await conn.execute(
+                    """
+                    INSERT INTO workflow_template_transitions
+                        (template_id, from_stage_key, to_stage_key)
+                    VALUES ($1, $2, $3)
+                """,
+                    template_id,
+                    from_key,
+                    to_key,
+                )
+
+            print(f"Seeded default workflow template (id={template_id})")
+
+        # ------------------------------------------------------------------ #
+        # 13. INDEXES                                                         #
         # ------------------------------------------------------------------ #
         for idx_ddl in [
             "CREATE INDEX IF NOT EXISTS idx_sow_status      ON sow_documents(status);",
@@ -361,6 +513,12 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_review_assignments_status ON review_assignments(status);",
             # handoff_packages index
             "CREATE INDEX IF NOT EXISTS idx_handoff_sow ON handoff_packages(sow_id);",
+            # workflow indexes
+            "CREATE INDEX IF NOT EXISTS idx_wf_stages_template      ON workflow_template_stages(template_id);",
+            "CREATE INDEX IF NOT EXISTS idx_wf_roles_stage           ON workflow_template_stage_roles(stage_id);",
+            "CREATE INDEX IF NOT EXISTS idx_wf_transitions_template  ON workflow_template_transitions(template_id);",
+            "CREATE INDEX IF NOT EXISTS idx_sow_workflow_sow         ON sow_workflow(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_sow_workflow_template    ON sow_workflow(template_id);",
         ]:
             await conn.execute(idx_ddl)
 
@@ -408,6 +566,7 @@ app.include_router(sow_router)  # /api/sow/...
 app.include_router(review_router)  # /api/review/...
 app.include_router(finalize_router)  # /api/finalize/...
 app.include_router(rules_router)  # /api/rules/...
+app.include_router(workflow_router)  # /api/workflow/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
