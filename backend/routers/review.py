@@ -783,6 +783,31 @@ async def submit_review(
                 },
             )
 
+        # Auto-create COA rows for approved-with-conditions decisions.
+        # The existing JSONB in review_assignments.conditions is preserved for
+        # backward compatibility; COA rows give structured tracking.
+        if payload.decision == "approved-with-conditions" and payload.conditions:
+            for condition_item in payload.conditions:
+                if isinstance(condition_item, str):
+                    condition_text = condition_item
+                    category = "general"
+                else:
+                    condition_text = condition_item.get("text", "")
+                    category = condition_item.get("category", "general")
+                if condition_text:
+                    await conn.execute(
+                        """
+                        INSERT INTO conditions_of_approval
+                            (sow_id, review_assignment_id, condition_text, category, created_by)
+                        VALUES ($1, $2, $3, $4, $5)
+                        """,
+                        sow_id,
+                        assignment["id"],
+                        condition_text,
+                        category,
+                        current_user.id,
+                    )
+
     return {"decision": payload.decision, "sow_id": sow_id}
 
 

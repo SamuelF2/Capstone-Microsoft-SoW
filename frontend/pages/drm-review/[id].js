@@ -22,6 +22,8 @@ import ReviewChecklist from '../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../components/AISuggestionsPanel';
 import ReviewStatusTracker from '../../components/ReviewStatusTracker';
 import PersonaDashboard from '../../components/PersonaDashboard';
+import COATracker from '../../components/COATracker';
+import AttachmentManager from '../../components/AttachmentManager';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1291,6 +1293,44 @@ export default function DrmReview() {
 
           {/* DRM reviewer status footer */}
           <DrmReviewerStatus reviewStatus={reviewStatus} />
+
+          {/* Attachments */}
+          {sow && (
+            <div
+              style={{
+                padding: 'var(--spacing-xl)',
+                borderTop: '1px solid var(--color-border-default)',
+              }}
+            >
+              <AttachmentManager
+                sowId={sow.id}
+                stageKey="drm_review"
+                readOnly={false}
+                showRequirements={true}
+                authFetch={authFetch}
+              />
+            </div>
+          )}
+
+          {/* Conditions of Approval */}
+          {sow && (
+            <div
+              style={{
+                padding: 'var(--spacing-xl)',
+                borderTop: '1px solid var(--color-border-default)',
+              }}
+            >
+              <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 0 }}>
+                Conditions of Approval
+              </h3>
+              <COATracker
+                sowId={sow.id}
+                authFetch={authFetch}
+                readOnly={false}
+                onStatusChange={() => {}}
+              />
+            </div>
+          )}
         </div>
       </div>
     </>

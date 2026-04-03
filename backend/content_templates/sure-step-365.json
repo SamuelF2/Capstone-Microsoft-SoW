@@ -1,0 +1,308 @@
+{
+  "name": "Sure Step 365 — Standard",
+  "methodology": "Sure Step 365",
+  "description": "Pre-populated starter content for Dynamics 365 implementations following Microsoft's Sure Step methodology with phase-gate governance and structured data migration.",
+  "template_data": {
+    "executiveSummary": {
+      "content": "This engagement implements {{customer_name}}'s Microsoft Dynamics 365 solution using the structured Sure Step 365 methodology. Sure Step provides a phased delivery model — Analyse, Design, Develop, Deploy, and Operate — with defined phase-gate reviews to ensure quality, stakeholder alignment, and risk control throughout the implementation lifecycle.\n\n{{customer_name}} will benefit from a proven, repeatable implementation approach, robust data migration practices, and a comprehensive testing strategy that reduces go-live risk. The engagement covers the full end-to-end journey from solution design through hypercare, ensuring a successful transition to steady-state operations."
+    },
+    "projectScope": {
+      "inScope": [
+        { "id": "is-1", "text": "Requirements gathering and Fit-Gap analysis (Analyse phase)" },
+        {
+          "id": "is-2",
+          "text": "Solution design and configuration of Dynamics 365 modules as agreed"
+        },
+        {
+          "id": "is-3",
+          "text": "Custom development for identified gaps (within agreed man-day budget)"
+        },
+        {
+          "id": "is-4",
+          "text": "Data migration: extract, transform, load (ETL) for agreed entity list"
+        },
+        {
+          "id": "is-5",
+          "text": "System Integration Testing (SIT) and User Acceptance Testing (UAT) facilitation"
+        },
+        { "id": "is-6", "text": "End-user training (train-the-trainer model)" },
+        { "id": "is-7", "text": "Cutover planning and go-live support (Deploy phase)" },
+        { "id": "is-8", "text": "Post-go-live hypercare support (Operate phase, 4 weeks)" }
+      ],
+      "outOfScope": [
+        { "id": "oos-1", "text": "Microsoft Dynamics 365 licence procurement and provisioning" },
+        {
+          "id": "oos-2",
+          "text": "Integration with third-party systems not listed in the agreed integration register"
+        },
+        {
+          "id": "oos-3",
+          "text": "Data cleansing and de-duplication in source systems ({{customer_name}} responsibility)"
+        },
+        { "id": "oos-4", "text": "Ongoing managed support beyond the 4-week hypercare period" }
+      ]
+    },
+    "sureStepMethodology": {
+      "methodologyOverview": "The Sure Step 365 methodology structures this Dynamics 365 implementation into five sequential phases: Analyse, Design, Develop, Deploy, and Operate. Each phase concludes with a phase-gate review attended by Microsoft and {{customer_name}} project sponsors. Approval to proceed to the next phase requires documented sign-off on all gate criteria.",
+      "approachDetails": "Analyse: Conduct current-state workshops, document business requirements, perform Fit-Gap analysis against standard Dynamics 365 functionality, and produce a Solution Blueprint.\n\nDesign: Author functional and technical design documents covering configuration, customisation, integrations, and data migration strategy.\n\nDevelop: Configure the D365 environment, develop custom components, build ETL scripts, and conduct unit testing.\n\nDeploy: Execute SIT, facilitate UAT with {{customer_name}} super-users, complete data migration dry runs, train end-users, and execute production cutover.\n\nOperate: Deliver 4-week hypercare support, transition to {{customer_name}} support team, and conduct a Post-Implementation Review.",
+      "governanceModel": "A Project Steering Committee (Microsoft Engagement Lead + {{customer_name}} Executive Sponsor) meets bi-weekly. A joint Project Management Office (PMO) tracks milestones, risks, and issues via an agreed RAID log. Phase-gate sign-off requires approval from both parties.",
+      "qualityAssurance": "Quality is enforced through: (1) peer review of all design documents prior to {{customer_name}} review, (2) code review gates in Azure DevOps before any customisation is promoted, (3) structured SIT with defect tracking in ADO, (4) UAT executed by {{customer_name}} super-users against agreed test scripts with a minimum 95% pass rate before go-live approval."
+    },
+    "phasesDeliverables": [
+      {
+        "id": "ph-1",
+        "phase": "Analyse",
+        "deliverable": "Solution Blueprint & Fit-Gap Register",
+        "owner": "Microsoft",
+        "acceptanceCriteria": "Signed off by {{customer_name}} business sponsor"
+      },
+      {
+        "id": "ph-2",
+        "phase": "Design",
+        "deliverable": "Functional & Technical Design Documents",
+        "owner": "Microsoft",
+        "acceptanceCriteria": "Reviewed and approved at Design phase-gate"
+      },
+      {
+        "id": "ph-3",
+        "phase": "Develop",
+        "deliverable": "Configured D365 environment + custom components + ETL scripts",
+        "owner": "Microsoft",
+        "acceptanceCriteria": "Unit test results show <5% defect rate; code review approved"
+      },
+      {
+        "id": "ph-4",
+        "phase": "Deploy",
+        "deliverable": "SIT & UAT completion report; trained user base; production go-live",
+        "owner": "Joint",
+        "acceptanceCriteria": "UAT ≥95% pass rate; {{customer_name}} Go-Live approval"
+      },
+      {
+        "id": "ph-5",
+        "phase": "Operate",
+        "deliverable": "Post-Implementation Review report; support handover pack",
+        "owner": "Microsoft",
+        "acceptanceCriteria": "Signed off by {{customer_name}} project sponsor"
+      }
+    ],
+    "dataMigration": {
+      "approach": "Data migration follows a three-pass approach: (1) a full dry-run at the end of the Develop phase to validate ETL scripts and reconcile record counts; (2) a mock cutover during UAT to validate timing and rollback procedures; (3) the final production migration during the agreed cutover weekend. All migration activities are governed by a Data Migration Plan approved by {{customer_name}}.",
+      "entities": [
+        {
+          "id": "dm-1",
+          "entity": "Accounts / Customers",
+          "sourceSystem": "{{legacy_system}}",
+          "recordCount": "TBC",
+          "migrationApproach": "Full load via ETL"
+        },
+        {
+          "id": "dm-2",
+          "entity": "Contacts",
+          "sourceSystem": "{{legacy_system}}",
+          "recordCount": "TBC",
+          "migrationApproach": "Full load via ETL"
+        },
+        {
+          "id": "dm-3",
+          "entity": "Open Transactions / Orders",
+          "sourceSystem": "{{legacy_system}}",
+          "recordCount": "TBC",
+          "migrationApproach": "Selective load — open items only"
+        },
+        {
+          "id": "dm-4",
+          "entity": "Historical Transactions",
+          "sourceSystem": "{{legacy_system}}",
+          "recordCount": "TBC",
+          "migrationApproach": "Archive load post go-live (if required)"
+        }
+      ]
+    },
+    "testingStrategy": {
+      "overview": "Testing encompasses unit testing (Microsoft), System Integration Testing (Microsoft-led), and User Acceptance Testing ({{customer_name}}-led with Microsoft facilitation). A dedicated test environment mirrors production configuration. Defects are tracked in Azure DevOps with severity classifications (Critical/High/Medium/Low). No Critical or High defects may remain open at UAT sign-off.",
+      "phases": [
+        {
+          "id": "ts-1",
+          "phase": "Unit Testing",
+          "owner": "Microsoft",
+          "entry": "Development complete",
+          "exit": "All unit tests pass; no critical defects"
+        },
+        {
+          "id": "ts-2",
+          "phase": "System Integration Testing (SIT)",
+          "owner": "Microsoft",
+          "entry": "Unit testing complete",
+          "exit": "SIT pass rate ≥98%; all critical/high defects resolved"
+        },
+        {
+          "id": "ts-3",
+          "phase": "User Acceptance Testing (UAT)",
+          "owner": "{{customer_name}}",
+          "entry": "SIT sign-off",
+          "exit": "UAT pass rate ≥95%; {{customer_name}} sign-off obtained"
+        }
+      ]
+    },
+    "assumptionsRisks": {
+      "assumptions": [
+        {
+          "id": "a-1",
+          "text": "{{customer_name}} will provide dedicated super-users (min. 2 per functional area) to participate in UAT"
+        },
+        {
+          "id": "a-2",
+          "text": "Source system data will be available for extraction in agreed formats; {{customer_name}} owns data cleansing"
+        },
+        {
+          "id": "a-3",
+          "text": "Microsoft will have admin access to the {{customer_name}} Dynamics 365 tenant throughout the engagement"
+        },
+        {
+          "id": "a-4",
+          "text": "Phase-gate decisions will be made within 5 business days of deliverable submission"
+        }
+      ],
+      "customerResponsibilities": [
+        { "id": "cr-1", "text": "Provide super-users for UAT and end-user training attendance" },
+        {
+          "id": "cr-2",
+          "text": "Own data cleansing and quality in source systems prior to migration dry-run"
+        },
+        {
+          "id": "cr-3",
+          "text": "Provision Dynamics 365 tenant, licences, and required Azure infrastructure"
+        },
+        { "id": "cr-4", "text": "Approve phase-gate deliverables within agreed SLA" }
+      ],
+      "risks": [
+        {
+          "id": "r-1",
+          "text": "Poor source data quality delaying migration — mitigated by early data profiling in Analyse phase and {{customer_name}} data cleansing commitment"
+        },
+        {
+          "id": "r-2",
+          "text": "Scope creep from undiscovered requirements — mitigated by thorough Fit-Gap analysis and formal change control process"
+        },
+        {
+          "id": "r-3",
+          "text": "UAT resource unavailability — mitigated by scheduling super-user availability at project kickoff and 4-week advance notice of UAT window"
+        }
+      ]
+    },
+    "teamStructure": {
+      "members": [
+        {
+          "id": "t-1",
+          "role": "Engagement Lead",
+          "name": "",
+          "allocation": "20%",
+          "responsibilities": "Executive stakeholder management, phase-gate governance, commercial control"
+        },
+        {
+          "id": "t-2",
+          "role": "Project Manager",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Day-to-day delivery management, RAID log, status reporting"
+        },
+        {
+          "id": "t-3",
+          "role": "Functional Consultant (D365)",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Requirements, design, configuration, UAT support"
+        },
+        {
+          "id": "t-4",
+          "role": "Technical Consultant",
+          "name": "",
+          "allocation": "75%",
+          "responsibilities": "Custom development, integrations, data migration ETL"
+        },
+        {
+          "id": "t-5",
+          "role": "Change Management Lead",
+          "name": "",
+          "allocation": "50%",
+          "responsibilities": "Training design, train-the-trainer delivery, adoption planning"
+        }
+      ],
+      "supportTransitionPlan": "4-week hypercare period post go-live with dedicated functional consultant (50% allocation). Support requests triaged via agreed ticketing channel; P1 response within 2 business hours."
+    },
+    "supportHypercare": {
+      "duration": "4 weeks post go-live",
+      "supportHours": "Business hours (Mon–Fri, 08:00–18:00 local time)",
+      "priorityDefinitions": [
+        {
+          "id": "p1",
+          "priority": "P1 — Critical",
+          "description": "System unavailable or core business process blocked",
+          "responseTime": "2 business hours",
+          "resolutionTarget": "1 business day"
+        },
+        {
+          "id": "p2",
+          "priority": "P2 — High",
+          "description": "Major function impaired but workaround exists",
+          "responseTime": "4 business hours",
+          "resolutionTarget": "3 business days"
+        },
+        {
+          "id": "p3",
+          "priority": "P3 — Medium",
+          "description": "Minor issue or configuration question",
+          "responseTime": "1 business day",
+          "resolutionTarget": "5 business days"
+        }
+      ],
+      "transitionNotes": "At the end of hypercare, {{customer_name}} IT team assumes ownership. Microsoft will provide a final handover meeting, updated runbook, and contact details for Dynamics 365 product support."
+    },
+    "pricing": {
+      "totalValue": "",
+      "breakdown": [
+        {
+          "id": "p-1",
+          "item": "Analyse Phase",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        { "id": "p-2", "item": "Design Phase", "unit": "Fixed", "qty": 1, "rate": "", "total": "" },
+        {
+          "id": "p-3",
+          "item": "Develop Phase",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-4",
+          "item": "Deploy Phase (incl. UAT support & go-live)",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-5",
+          "item": "Operate / Hypercare (4 weeks)",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-6",
+          "item": "Travel & Expenses (estimate)",
+          "unit": "Lump sum",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        }
+      ]
+    }
+  }
+}

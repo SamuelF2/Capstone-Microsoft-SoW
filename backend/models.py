@@ -126,6 +126,10 @@ class SoWCreate(BaseModel):
         default=None,
         description="Workflow template ID; defaults to the system default template",
     )
+    content_template_id: int | None = Field(
+        default=None,
+        description="Content template ID for pre-populated section content",
+    )
 
 
 class SoWUpdate(BaseModel):
@@ -524,3 +528,125 @@ class SoWWorkflowResponse(BaseModel):
     workflow_data: WorkflowData
     created_at: datetime
     updated_at: datetime
+
+
+# ── Conditions of Approval ───────────────────────────────────────────────────
+
+
+class COACreate(BaseModel):
+    """Payload for creating a Condition of Approval."""
+
+    condition_text: str = Field(min_length=1)
+    category: str = "general"  # technical, commercial, legal, staffing, general
+    priority: str = "medium"  # low, medium, high, critical
+    assigned_to: int | None = None
+    due_date: str | None = None  # ISO date string (YYYY-MM-DD)
+
+
+class COAUpdate(BaseModel):
+    """Partial update payload for a COA."""
+
+    condition_text: str | None = None
+    category: str | None = None
+    priority: str | None = None
+    assigned_to: int | None = None
+    due_date: str | None = None
+    status: str | None = None
+    resolution_notes: str | None = None
+
+
+class COAResolvePayload(BaseModel):
+    """Payload for resolving a COA."""
+
+    resolution_notes: str = Field(min_length=1)
+
+
+class COAWaivePayload(BaseModel):
+    """Payload for waiving a COA."""
+
+    resolution_notes: str = Field(min_length=1)
+
+
+class COAResponse(BaseModel):
+    """Full COA representation."""
+
+    id: int
+    sow_id: int
+    review_assignment_id: int | None = None
+    condition_text: str
+    category: str
+    priority: str
+    assigned_to: int | None = None
+    due_date: str | None = None
+    status: str
+    resolution_notes: str | None = None
+    resolved_by: int | None = None
+    resolved_at: datetime | None = None
+    evidence: list[Any] = []
+    created_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class COASummary(BaseModel):
+    """Summary counts for all COAs on a SoW."""
+
+    sow_id: int
+    total: int
+    open: int
+    in_progress: int
+    resolved: int
+    waived: int
+    blocks_finalization: bool
+
+
+# ── Content Templates ────────────────────────────────────────────────────────
+
+
+class ContentTemplateResponse(BaseModel):
+    """A SoW content template with pre-populated bullet-point content."""
+
+    id: int
+    name: str
+    methodology: str
+    description: str | None = None
+    template_data: dict[str, Any]
+    is_system: bool
+    created_at: datetime
+
+
+# ── Attachments ──────────────────────────────────────────────────────────────
+
+
+class AttachmentResponse(BaseModel):
+    """Metadata for a file attached to a SoW."""
+
+    id: int
+    sow_id: int
+    filename: str
+    original_name: str
+    file_size: int | None = None
+    mime_type: str | None = None
+    document_type: str
+    stage_key: str | None = None
+    description: str | None = None
+    uploaded_by: int | None = None
+    uploaded_at: datetime
+
+
+class DocumentRequirement(BaseModel):
+    """A single document requirement for a workflow stage."""
+
+    document_type: str
+    is_required: bool
+    description: str | None = None
+    fulfilled: bool = False
+
+
+class StageRequirementsResponse(BaseModel):
+    """Document requirements + fulfillment status for a SoW stage."""
+
+    sow_id: int
+    stage_key: str
+    requirements: list[DocumentRequirement]
+    all_required_met: bool

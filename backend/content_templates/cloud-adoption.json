@@ -1,0 +1,322 @@
+{
+  "name": "Cloud Adoption — Standard",
+  "methodology": "Cloud Adoption",
+  "description": "Pre-populated starter content for Azure cloud adoption and migration engagements following the Microsoft Cloud Adoption Framework (CAF), with workload assessment, landing zone design, and migration waves.",
+  "template_data": {
+    "executiveSummary": {
+      "content": "This engagement guides {{customer_name}} through their Azure cloud adoption journey using Microsoft's Cloud Adoption Framework (CAF). Starting from a structured assessment of the existing on-premises environment, the team will design an Azure Landing Zone, define a migration wave strategy, and execute the migration of agreed workloads — delivering measurable outcomes in scalability, cost optimisation, and operational resilience.\n\nThe engagement is structured to de-risk the transition: a thorough Assess & Plan phase validates business cases and surfaces risks before any workload moves, while a pilot wave proves the migration runbook before full-scale execution. Security and compliance controls are embedded throughout, with governance baselines established in the Landing Zone before the first workload migrates."
+    },
+    "cloudAdoptionScope": {
+      "inScope": [
+        {
+          "id": "is-1",
+          "text": "Cloud Readiness Assessment: application portfolio discovery and Azure suitability scoring"
+        },
+        {
+          "id": "is-2",
+          "text": "Azure Landing Zone design and deployment (Management Groups, policies, networking, identity)"
+        },
+        { "id": "is-3", "text": "Migration of agreed workloads across defined migration waves" },
+        {
+          "id": "is-4",
+          "text": "Azure Cost Management baseline and tagging taxonomy implementation"
+        },
+        {
+          "id": "is-5",
+          "text": "Security baseline: Microsoft Defender for Cloud enablement, policy assignments, RBAC model"
+        },
+        {
+          "id": "is-6",
+          "text": "Azure Monitor and Log Analytics workspace configuration for migrated workloads"
+        },
+        { "id": "is-7", "text": "Operational runbook and Cloud Operations Handbook" },
+        {
+          "id": "is-8",
+          "text": "Knowledge transfer and Azure Operations training for {{customer_name}} IT team"
+        }
+      ],
+      "outOfScope": [
+        {
+          "id": "oos-1",
+          "text": "Application modernisation or refactoring (lift-and-shift only unless specified)"
+        },
+        { "id": "oos-2", "text": "Workloads not listed in the agreed migration register" },
+        {
+          "id": "oos-3",
+          "text": "Decommissioning of on-premises infrastructure ({{customer_name}} responsibility)"
+        },
+        {
+          "id": "oos-4",
+          "text": "Microsoft Azure consumption costs (billed directly to {{customer_name}}'s Azure subscription)"
+        }
+      ],
+      "cloudObjectives": "1. Migrate {{workload_count}} agreed workloads to Azure within the engagement timeline\n2. Achieve ≥20% reduction in infrastructure TCO within 12 months of migration\n3. Establish a fully governed Azure Landing Zone aligned to CAF best practices\n4. Enable {{customer_name}} IT team to self-manage Azure operations via documented runbooks and completed training\n5. Achieve Defender for Cloud Secure Score ≥70% on migrated workloads at project closure",
+      "targetEnvironment": "Microsoft Azure — {{customer_name}}'s existing Azure tenant (or new tenant provisioned per Landing Zone design). Primary region: {{azure_region}}. Secondary region for DR: {{azure_dr_region}}."
+    },
+    "migrationStrategy": {
+      "approach": "Migration follows Microsoft's CAF Migrate methodology in four stages:\n\n1. Assess: Discover and profile workloads using Azure Migrate; validate Azure suitability, sizing recommendations, and estimated Azure costs per workload.\n\n2. Plan: Define migration waves based on workload dependencies, business priority, and migration complexity. Wave 0 = non-production / pilot workloads.\n\n3. Migrate: Execute lift-and-shift using Azure Migrate (for VMs) and Azure Database Migration Service (for databases). Each wave concludes with a Business Validation checkpoint.\n\n4. Optimise: Post-migration cost review, right-sizing recommendations, and tagging compliance check.",
+      "waves": [
+        {
+          "id": "w-0",
+          "wave": "Wave 0 — Pilot",
+          "workloads": "2–3 non-production workloads selected for low risk and high learning value",
+          "approachType": "Rehost (lift-and-shift)",
+          "estimatedDuration": "3 weeks"
+        },
+        {
+          "id": "w-1",
+          "wave": "Wave 1 — Tier 2 Workloads",
+          "workloads": "Low-complexity production workloads with no external dependencies",
+          "approachType": "Rehost",
+          "estimatedDuration": "4 weeks"
+        },
+        {
+          "id": "w-2",
+          "wave": "Wave 2 — Tier 1 Workloads",
+          "workloads": "Business-critical systems; requires detailed cutover planning and rollback rehearsal",
+          "approachType": "Rehost with minimal reconfigure",
+          "estimatedDuration": "6 weeks"
+        }
+      ],
+      "rollbackStrategy": "Each wave has a documented rollback procedure. Azure Migrate replicated VMs are kept in warm standby for 72 hours post-cutover. Rollback decision authority rests with {{customer_name}} IT Director. Rollback exercises are conducted during pilot wave."
+    },
+    "workloadAssessment": {
+      "summary": "Initial discovery will be performed using Azure Migrate appliance deployed in {{customer_name}}'s on-premises environment. Discovery runs for a minimum of 2 weeks to capture performance data. Output is an Application Portfolio Report with Azure readiness rating (Ready / Ready with conditions / Not ready) and sizing recommendations.",
+      "workloads": [
+        {
+          "id": "wl-1",
+          "name": "{{workload_1_name}}",
+          "type": "Virtual Machine",
+          "currentHost": "On-premises",
+          "azureTarget": "Azure VM (IaaS)",
+          "migrationWave": "Wave 1",
+          "complexity": "Low"
+        },
+        {
+          "id": "wl-2",
+          "name": "{{workload_2_name}}",
+          "type": "SQL Database",
+          "currentHost": "On-premises SQL Server",
+          "azureTarget": "Azure SQL Managed Instance",
+          "migrationWave": "Wave 1",
+          "complexity": "Medium"
+        },
+        {
+          "id": "wl-3",
+          "name": "{{workload_3_name}}",
+          "type": "Web Application",
+          "currentHost": "On-premises IIS",
+          "azureTarget": "Azure App Service",
+          "migrationWave": "Wave 2",
+          "complexity": "Medium"
+        }
+      ]
+    },
+    "securityCompliance": {
+      "securityFramework": "Security controls are aligned to the Microsoft Cloud Security Benchmark (MCSB) and {{customer_name}}'s internal security policy. The Landing Zone establishes baseline Azure Policy assignments (CIS Azure Foundations Benchmark) before any workload migrates.",
+      "controls": [
+        {
+          "id": "sc-1",
+          "control": "Identity & Access",
+          "implementation": "Azure AD / Entra ID as identity provider; Privileged Identity Management (PIM) for elevated access; no standing admin access to production subscriptions"
+        },
+        {
+          "id": "sc-2",
+          "control": "Network Security",
+          "implementation": "Hub-and-Spoke topology with Azure Firewall; NSGs on all subnets; no public IPs on workload VMs without WAF"
+        },
+        {
+          "id": "sc-3",
+          "control": "Threat Detection",
+          "implementation": "Microsoft Defender for Cloud (Standard tier) enabled on all subscriptions; alerts routed to Log Analytics workspace"
+        },
+        {
+          "id": "sc-4",
+          "control": "Data Protection",
+          "implementation": "Azure Key Vault for secrets management; encryption at rest and in transit enforced via Azure Policy"
+        },
+        {
+          "id": "sc-5",
+          "control": "Compliance Monitoring",
+          "implementation": "Azure Policy compliance dashboard; monthly compliance report shared with {{customer_name}} CISO"
+        }
+      ],
+      "complianceRequirements": "{{customer_name}}'s applicable compliance frameworks (e.g. ISO 27001, GDPR, industry-specific) will be mapped to Azure Policy initiatives and reviewed at Landing Zone Design Gate."
+    },
+    "assumptionsRisks": {
+      "assumptions": [
+        {
+          "id": "a-1",
+          "text": "{{customer_name}} will grant Microsoft Contributor access to the target Azure subscription(s) for the duration of the engagement"
+        },
+        {
+          "id": "a-2",
+          "text": "Azure Migrate appliance can be deployed on-premises and has network visibility to target VMs/databases"
+        },
+        {
+          "id": "a-3",
+          "text": "Workload owners from {{customer_name}} will be available for validation checkpoints after each migration wave"
+        },
+        {
+          "id": "a-4",
+          "text": "{{customer_name}} will manage decommissioning of on-premises assets post-migration"
+        },
+        {
+          "id": "a-5",
+          "text": "Network connectivity between on-premises and Azure (ExpressRoute or Site-to-Site VPN) is in place or provisioned within the engagement timeline"
+        }
+      ],
+      "customerResponsibilities": [
+        {
+          "id": "cr-1",
+          "text": "Provision target Azure subscriptions and assign Microsoft team the required RBAC roles"
+        },
+        {
+          "id": "cr-2",
+          "text": "Deploy Azure Migrate appliance on-premises and ensure network access to discovery targets"
+        },
+        { "id": "cr-3", "text": "Assign workload owners to validate each wave post-migration" },
+        { "id": "cr-4", "text": "Manage on-premises decommissioning schedule" },
+        {
+          "id": "cr-5",
+          "text": "Ensure ExpressRoute or VPN connectivity is available before Wave 0 begins"
+        }
+      ],
+      "risks": [
+        {
+          "id": "r-1",
+          "text": "Network connectivity delays blocking migration execution — mitigated by early connectivity validation sprint"
+        },
+        {
+          "id": "r-2",
+          "text": "Undiscovered workload dependencies causing wave sequencing issues — mitigated by 2-week discovery period and dependency mapping workshop"
+        },
+        {
+          "id": "r-3",
+          "text": "Azure SQL compatibility issues for database migrations — mitigated by Database Migration Assessment in Assess phase with SQL Server Migration Assistant (SSMA)"
+        }
+      ]
+    },
+    "teamStructure": {
+      "members": [
+        {
+          "id": "t-1",
+          "role": "Engagement Lead",
+          "name": "",
+          "allocation": "20%",
+          "responsibilities": "Executive stakeholder, commercial governance, escalation"
+        },
+        {
+          "id": "t-2",
+          "role": "Cloud Project Manager",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Schedule, RAID, stakeholder coordination, wave sign-off"
+        },
+        {
+          "id": "t-3",
+          "role": "Cloud Architect",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Landing Zone design, architecture governance, security baseline"
+        },
+        {
+          "id": "t-4",
+          "role": "Migration Engineer",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Azure Migrate configuration, VM replication, cutover execution"
+        },
+        {
+          "id": "t-5",
+          "role": "Database Engineer",
+          "name": "",
+          "allocation": "75%",
+          "responsibilities": "Database migration assessment, DMS execution, validation"
+        },
+        {
+          "id": "t-6",
+          "role": "Security Engineer",
+          "name": "",
+          "allocation": "50%",
+          "responsibilities": "Defender for Cloud, Policy, identity and networking security controls"
+        }
+      ],
+      "supportTransitionPlan": "Post-migration: 2-week hypercare per wave (Microsoft on-call for P1/P2). At project closure: Cloud Operations Handbook delivered, Azure training completed with {{customer_name}} IT team, and Microsoft support contacts provided."
+    },
+    "supportOperations": {
+      "operationsModel": "{{customer_name}} IT team takes operational ownership of migrated workloads at project closure. Microsoft delivers a Cloud Operations Handbook covering: monitoring runbooks, cost management procedures, security patching cadence, backup verification, and incident escalation paths.",
+      "monitoringSetup": "Azure Monitor + Log Analytics workspace configured with: VM performance alerts (CPU >85%, Memory >90%), availability alerts, and cost anomaly alerts. Dashboards delivered in Azure Monitor Workbooks.",
+      "supportContacts": "Post-engagement support via Microsoft's standard support channels. Recommended: {{customer_name}} to hold a Microsoft Azure support plan (Developer or above) for ongoing cloud operations."
+    },
+    "pricing": {
+      "totalValue": "",
+      "breakdown": [
+        {
+          "id": "p-1",
+          "item": "Assess & Plan Phase",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-2",
+          "item": "Landing Zone Design & Deployment",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-3",
+          "item": "Wave 0 — Pilot Migration",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-4",
+          "item": "Wave 1 — Tier 2 Workloads",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-5",
+          "item": "Wave 2 — Tier 1 Workloads",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-6",
+          "item": "Security Baseline & Governance Setup",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-7",
+          "item": "Training & Knowledge Transfer",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-8",
+          "item": "Travel & Expenses (estimate)",
+          "unit": "Lump sum",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        }
+      ]
+    }
+  }
+}

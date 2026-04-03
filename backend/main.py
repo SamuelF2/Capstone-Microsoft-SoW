@@ -35,11 +35,13 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 import database
-from config import DATABASE_URL, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+from config import CONTENT_TEMPLATES_DIR, DATABASE_URL, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
+from routers.attachments import router as attachments_router
 from routers.auth import router as auth_router
+from routers.coa import router as coa_router
 from routers.finalize import router as finalize_router
 from routers.review import router as review_router
 from routers.rules import router as rules_router
@@ -343,7 +345,83 @@ async def lifespan(app: FastAPI):
         """)
 
         # ------------------------------------------------------------------ #
-        # 11. WORKFLOW TEMPLATES                                              #
+        # 11. CONDITIONS OF APPROVAL  (Phase 2: COA system)                  #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS conditions_of_approval (
+                id                   SERIAL PRIMARY KEY,
+                sow_id               INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
+                review_assignment_id INTEGER REFERENCES review_assignments(id) ON DELETE SET NULL,
+                condition_text       TEXT NOT NULL,
+                category             TEXT NOT NULL DEFAULT 'general',
+                priority             TEXT NOT NULL DEFAULT 'medium',
+                assigned_to          INTEGER REFERENCES users(id),
+                due_date             DATE,
+                status               TEXT NOT NULL DEFAULT 'open',
+                resolution_notes     TEXT,
+                resolved_by          INTEGER REFERENCES users(id),
+                resolved_at          TIMESTAMPTZ,
+                evidence             JSONB DEFAULT '[]',
+                created_by           INTEGER REFERENCES users(id),
+                created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 12. SOW CONTENT TEMPLATES  (Phase 3: pre-populated content)         #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sow_content_templates (
+                id              SERIAL PRIMARY KEY,
+                name            TEXT NOT NULL,
+                methodology     TEXT NOT NULL,
+                description     TEXT,
+                template_data   JSONB NOT NULL,
+                is_system       BOOLEAN DEFAULT FALSE,
+                created_by      INTEGER REFERENCES users(id),
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 12b. SOW ATTACHMENTS  (Phase 4: document attachments)              #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sow_attachments (
+                id              SERIAL PRIMARY KEY,
+                sow_id          INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
+                filename        TEXT NOT NULL,
+                original_name   TEXT NOT NULL,
+                file_path       TEXT NOT NULL,
+                file_size       INTEGER,
+                mime_type       TEXT,
+                document_type   TEXT NOT NULL DEFAULT 'other',
+                stage_key       TEXT,
+                description     TEXT,
+                uploaded_by     INTEGER REFERENCES users(id),
+                uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 12c. WORKFLOW STAGE DOCUMENT REQUIREMENTS  (Phase 4)               #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_stage_document_requirements (
+                id              SERIAL PRIMARY KEY,
+                template_id     INTEGER NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
+                stage_key       TEXT NOT NULL,
+                document_type   TEXT NOT NULL,
+                is_required     BOOLEAN DEFAULT FALSE,
+                description     TEXT,
+                UNIQUE(template_id, stage_key, document_type)
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 13. WORKFLOW TEMPLATES                                              #
         # ------------------------------------------------------------------ #
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS workflow_templates (
@@ -493,8 +571,69 @@ async def lifespan(app: FastAPI):
 
             print(f"Seeded default workflow template (id={template_id})")
 
+            # Seed default document requirements for the ESAP template
+            doc_req_defs = [
+                (
+                    "internal_review",
+                    "solution-architecture",
+                    True,
+                    "Solution architecture document covering technical design",
+                ),
+                (
+                    "internal_review",
+                    "staffing-plan",
+                    False,
+                    "Resource allocation and staffing plan",
+                ),
+                ("drm_review", "risk-register", False, "Risk register with mitigations"),
+                ("drm_review", "srm-presentation", False, "SRM presentation deck for deal review"),
+            ]
+            for stage_key, doc_type, is_req, desc in doc_req_defs:
+                await conn.execute(
+                    """
+                    INSERT INTO workflow_stage_document_requirements
+                        (template_id, stage_key, document_type, is_required, description)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (template_id, stage_key, document_type) DO NOTHING
+                    """,
+                    template_id,
+                    stage_key,
+                    doc_type,
+                    is_req,
+                    desc,
+                )
+            print("Seeded default document requirements")
+
+        # ── Seed content templates from JSON files ────────────────────────
+        import json as _json
+        from pathlib import Path as _Path
+
+        templates_dir = _Path(CONTENT_TEMPLATES_DIR)
+        if templates_dir.exists():
+            for tmpl_file in sorted(templates_dir.glob("*.json")):
+                with open(tmpl_file) as f:
+                    tmpl_data = _json.load(f)
+
+                existing = await conn.fetchval(
+                    "SELECT id FROM sow_content_templates WHERE name = $1",
+                    tmpl_data.get("name", tmpl_file.stem),
+                )
+                if not existing:
+                    await conn.execute(
+                        """
+                        INSERT INTO sow_content_templates
+                            (name, methodology, description, template_data, is_system)
+                        VALUES ($1, $2, $3, $4::jsonb, TRUE)
+                        """,
+                        tmpl_data.get("name", tmpl_file.stem),
+                        tmpl_data.get("methodology", ""),
+                        tmpl_data.get("description"),
+                        _json.dumps(tmpl_data.get("template_data", {})),
+                    )
+                    print(f"Seeded content template: {tmpl_data.get('name', tmpl_file.stem)}")
+
         # ------------------------------------------------------------------ #
-        # 13. INDEXES                                                         #
+        # 14. INDEXES                                                         #
         # ------------------------------------------------------------------ #
         for idx_ddl in [
             "CREATE INDEX IF NOT EXISTS idx_sow_status      ON sow_documents(status);",
@@ -513,6 +652,18 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_review_assignments_status ON review_assignments(status);",
             # handoff_packages index
             "CREATE INDEX IF NOT EXISTS idx_handoff_sow ON handoff_packages(sow_id);",
+            # conditions_of_approval indexes
+            "CREATE INDEX IF NOT EXISTS idx_coa_sow      ON conditions_of_approval(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_coa_status   ON conditions_of_approval(status);",
+            "CREATE INDEX IF NOT EXISTS idx_coa_assigned ON conditions_of_approval(assigned_to);",
+            # sow_content_templates index
+            "CREATE INDEX IF NOT EXISTS idx_content_templates_methodology ON sow_content_templates(methodology);",
+            # sow_attachments indexes
+            "CREATE INDEX IF NOT EXISTS idx_attachments_sow   ON sow_attachments(sow_id);",
+            "CREATE INDEX IF NOT EXISTS idx_attachments_type  ON sow_attachments(document_type);",
+            "CREATE INDEX IF NOT EXISTS idx_attachments_stage ON sow_attachments(stage_key);",
+            # workflow_stage_document_requirements index
+            "CREATE INDEX IF NOT EXISTS idx_wf_doc_reqs_template ON workflow_stage_document_requirements(template_id);",
             # workflow indexes
             "CREATE INDEX IF NOT EXISTS idx_wf_stages_template      ON workflow_template_stages(template_id);",
             "CREATE INDEX IF NOT EXISTS idx_wf_roles_stage           ON workflow_template_stage_roles(stage_id);",
@@ -567,6 +718,8 @@ app.include_router(review_router)  # /api/review/...
 app.include_router(finalize_router)  # /api/finalize/...
 app.include_router(rules_router)  # /api/rules/...
 app.include_router(workflow_router)  # /api/workflow/...
+app.include_router(coa_router)  # /api/coa/...
+app.include_router(attachments_router)  # /api/attachments/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

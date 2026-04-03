@@ -52,6 +52,7 @@ from config import MAX_UPLOAD_SIZE_MB, RULES_DIR, UPLOAD_DIR
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from models import (
     AIAnalysisResult,
+    ContentTemplateResponse,
     HistoryEntryResponse,
     ParseResult,
     SectionResult,
@@ -462,6 +463,30 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
             conn, sow_id=row["id"], user_id=current_user.id, change_type="created"
         )
 
+        # 5b. Apply content template (if requested and not already supplied via payload.content)
+        if payload.content_template_id is not None and not payload.content:
+            tmpl_row = await conn.fetchrow(
+                "SELECT template_data FROM sow_content_templates WHERE id = $1",
+                payload.content_template_id,
+            )
+            if tmpl_row:
+                tmpl_data = (
+                    tmpl_row["template_data"]
+                    if isinstance(tmpl_row["template_data"], dict)
+                    else json.loads(tmpl_row["template_data"])
+                )
+                subs = {
+                    "customer_name": payload.customer_name or "",
+                    "opportunity_id": payload.opportunity_id or "",
+                    "project_name": payload.title or "",
+                }
+                populated = _substitute_placeholders(tmpl_data, subs)
+                row = await conn.fetchrow(
+                    "UPDATE sow_documents SET content = $1::jsonb WHERE id = $2 RETURNING *",
+                    json.dumps(populated),
+                    row["id"],
+                )
+
         # 6. Create workflow instance
         _template_id = payload.workflow_template_id or await get_default_template_id(conn)
         if _template_id is not None:
@@ -594,6 +619,144 @@ async def upload_sow(
         )
 
     return _row_to_response(dict(row))
+
+
+# ── Content Template helpers ──────────────────────────────────────────────────
+
+
+def _substitute_placeholders(obj: Any, substitutions: dict[str, str]) -> Any:
+    """Recursively walk *obj* (dict / list / str) and replace ``{{key}}``
+    tokens with values from *substitutions*.  Non-string leaves are returned
+    unchanged.  Unknown tokens are left as-is so the author can fill them in
+    manually.
+    """
+    if isinstance(obj, str):
+        for key, value in substitutions.items():
+            if value:
+                obj = obj.replace(f"{{{{{key}}}}}", value)
+        return obj
+    if isinstance(obj, dict):
+        return {k: _substitute_placeholders(v, substitutions) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_substitute_placeholders(item, substitutions) for item in obj]
+    return obj
+
+
+# ── Content Templates ─────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/templates",
+    response_model=list[ContentTemplateResponse],
+    summary="List all SoW content templates",
+)
+async def list_content_templates(
+    current_user: CurrentUser,
+    methodology: str | None = Query(default=None),
+) -> list[ContentTemplateResponse]:
+    """Return all available content templates.
+
+    Optional ``methodology`` query param filters by methodology name.
+    Templates are returned ordered by name.
+    """
+    async with database.pg_pool.acquire() as conn:
+        if methodology:
+            rows = await conn.fetch(
+                """
+                SELECT id, name, methodology, description, template_data,
+                       is_system, created_at
+                FROM   sow_content_templates
+                WHERE  methodology = $1
+                ORDER BY name
+                """,
+                methodology,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, name, methodology, description, template_data,
+                       is_system, created_at
+                FROM   sow_content_templates
+                ORDER BY methodology, name
+                """,
+            )
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        if isinstance(d.get("template_data"), str):
+            d["template_data"] = json.loads(d["template_data"])
+        result.append(ContentTemplateResponse(**d))
+    return result
+
+
+@router.get(
+    "/templates/{template_id}",
+    response_model=ContentTemplateResponse,
+    summary="Get a single SoW content template by ID",
+)
+async def get_content_template(
+    template_id: int,
+    current_user: CurrentUser,
+) -> ContentTemplateResponse:
+    """Return a single content template including its full ``template_data``."""
+    async with database.pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, name, methodology, description, template_data,
+                   is_system, created_at
+            FROM   sow_content_templates
+            WHERE  id = $1
+            """,
+            template_id,
+        )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Content template {template_id} not found",
+        )
+    d = dict(row)
+    if isinstance(d.get("template_data"), str):
+        d["template_data"] = json.loads(d["template_data"])
+    return ContentTemplateResponse(**d)
+
+
+@router.get(
+    "/templates/{template_id}/preview",
+    summary="Preview a content template with placeholder substitution",
+)
+async def preview_content_template(
+    template_id: int,
+    current_user: CurrentUser,
+    customer_name: str | None = Query(default=None),
+    opportunity_id: str | None = Query(default=None),
+    project_name: str | None = Query(default=None),
+) -> dict:
+    """Return the template's ``template_data`` with ``{{placeholder}}`` tokens
+    substituted using the provided query-parameter values.  Useful for the
+    frontend to render a live preview before the user commits to a template.
+    """
+    async with database.pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT template_data FROM sow_content_templates WHERE id = $1",
+            template_id,
+        )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Content template {template_id} not found",
+        )
+    data = (
+        row["template_data"]
+        if isinstance(row["template_data"], dict)
+        else json.loads(row["template_data"])
+    )
+    subs = {
+        "customer_name": customer_name or "",
+        "opportunity_id": opportunity_id or "",
+        "project_name": project_name or "",
+    }
+    return _substitute_placeholders(data, subs)
 
 
 # ── Get by client ID  (declared before /{sow_id} to avoid route conflict) ────
@@ -803,6 +966,42 @@ async def update_sow_status(
                 detail=f"Cannot transition from '{old_status}' to '{payload.status}'. "
                 f"Allowed: {sorted(allowed)}",
             )
+
+        # ── Document requirement gating (Phase 4) ───────────────────────
+        wf_row = await conn.fetchrow(
+            "SELECT workflow_data FROM sow_workflow WHERE sow_id = $1", sow_id
+        )
+        if wf_row and wf_row["workflow_data"]:
+            wf_data = wf_row["workflow_data"]
+            if isinstance(wf_data, str):
+                wf_data = json.loads(wf_data)
+            for stage in wf_data.get("stages", []):
+                if stage["stage_key"] == old_status:
+                    doc_reqs = stage.get("config", {}).get("document_requirements", [])
+                    required_types = [r["document_type"] for r in doc_reqs if r.get("is_required")]
+                    if required_types:
+                        attached = await conn.fetch(
+                            """
+                            SELECT DISTINCT document_type FROM sow_attachments
+                            WHERE sow_id = $1
+                              AND (stage_key = $2 OR stage_key IS NULL)
+                              AND document_type = ANY($3)
+                            """,
+                            sow_id,
+                            old_status,
+                            required_types,
+                        )
+                        attached_types = {r["document_type"] for r in attached}
+                        missing = set(required_types) - attached_types
+                        if missing:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail={
+                                    "message": "Required documents missing for this stage",
+                                    "missing_documents": sorted(missing),
+                                },
+                            )
+                    break
 
         row = await conn.fetchrow(
             """

@@ -19,6 +19,8 @@ import Spinner from '../../components/Spinner';
 import ReviewChecklist from '../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../components/AISuggestionsPanel';
 import ReviewStatusTracker from '../../components/ReviewStatusTracker';
+import COATracker from '../../components/COATracker';
+import AttachmentManager from '../../components/AttachmentManager';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1116,6 +1118,39 @@ export default function InternalReview() {
                       Outstanding: {reviewStatus.outstanding_requirements.join(' · ')}
                     </div>
                   )}
+              </div>
+            )}
+
+            {/* Attachments */}
+            {sow && (
+              <div style={{ marginTop: 'var(--spacing-xl)', padding: '0 var(--spacing-xl)' }}>
+                <AttachmentManager
+                  sowId={sow.id}
+                  stageKey="internal_review"
+                  readOnly={false}
+                  showRequirements={true}
+                  authFetch={authFetch}
+                />
+              </div>
+            )}
+
+            {/* Conditions of Approval */}
+            {sow && (
+              <div
+                style={{
+                  marginTop: 'var(--spacing-xl)',
+                  padding: '0 var(--spacing-xl) var(--spacing-xl)',
+                }}
+              >
+                <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 0 }}>
+                  Conditions of Approval
+                </h3>
+                <COATracker
+                  sowId={sow.id}
+                  authFetch={authFetch}
+                  readOnly={false}
+                  onStatusChange={() => {}}
+                />
               </div>
             )}
           </div>

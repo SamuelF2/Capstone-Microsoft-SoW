@@ -73,6 +73,27 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
         ]
 
         stage_config = s["config"] if isinstance(s["config"], dict) else {}
+
+        # Fetch document requirements for this stage (Phase 4)
+        doc_req_rows = await conn.fetch(
+            """
+            SELECT document_type, is_required, description
+            FROM   workflow_stage_document_requirements
+            WHERE  template_id = $1 AND stage_key = $2
+            """,
+            template_id,
+            s["stage_key"],
+        )
+        if doc_req_rows:
+            stage_config["document_requirements"] = [
+                {
+                    "document_type": dr["document_type"],
+                    "is_required": dr["is_required"],
+                    "description": dr["description"],
+                }
+                for dr in doc_req_rows
+            ]
+
         stages.append(
             {
                 "stage_key": s["stage_key"],

@@ -553,6 +553,30 @@ async def create_handoff(
         "notes": payload.notes,
     }
 
+    # ── Attachment manifest (Phase 4) ────────────────────────────────────
+    async with database.pg_pool.acquire() as conn:
+        attachment_rows = await conn.fetch(
+            """
+            SELECT id, original_name, document_type, stage_key, file_size, uploaded_at
+            FROM sow_attachments
+            WHERE sow_id = $1
+            ORDER BY uploaded_at
+            """,
+            sow_id,
+        )
+    package_data["attachments"] = [
+        {
+            "id": a["id"],
+            "original_name": a["original_name"],
+            "document_type": a["document_type"],
+            "stage_key": a["stage_key"],
+            "file_size": a["file_size"],
+            "uploaded_at": a["uploaded_at"].isoformat() if a["uploaded_at"] else None,
+            "download_url": f"/api/attachments/{a['id']}/download",
+        }
+        for a in attachment_rows
+    ]
+
     # ── Check for existing document path ──────────────────────────────────────
     async with database.pg_pool.acquire() as conn:
         existing_doc_path = await conn.fetchval(
@@ -666,6 +690,33 @@ async def lock_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     detail="A document must be generated before locking",
                 )
 
+    # Gate: block finalization if any COAs are outstanding
+    async with database.pg_pool.acquire() as conn:
+        outstanding_count = await conn.fetchval(
+            """
+            SELECT count(*) FROM conditions_of_approval
+            WHERE sow_id = $1 AND status NOT IN ('resolved', 'waived')
+            """,
+            sow_id,
+        )
+        if outstanding_count and outstanding_count > 0:
+            outstanding_rows = await conn.fetch(
+                """
+                SELECT id, condition_text, status, category, priority
+                FROM conditions_of_approval
+                WHERE sow_id = $1 AND status NOT IN ('resolved', 'waived')
+                ORDER BY priority DESC
+                """,
+                sow_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": f"{outstanding_count} condition(s) of approval still outstanding",
+                    "outstanding_conditions": [dict(r) for r in outstanding_rows],
+                },
+            )
+
     async with database.pg_pool.acquire() as conn, conn.transaction():
         now = datetime.now(UTC)
         await conn.execute(
@@ -679,6 +730,10 @@ async def lock_sow(sow_id: int, current_user: CurrentUser) -> dict:
             """,
             now,
             current_user.id,
+            sow_id,
+        )
+        await conn.execute(
+            "UPDATE sow_workflow SET current_stage = 'finalized', updated_at = NOW() WHERE sow_id = $1",
             sow_id,
         )
         await _insert_history(

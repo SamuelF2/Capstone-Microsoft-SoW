@@ -32,3 +32,8 @@ MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "25"))
 RULES_DIR: str = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Data", "rules"
 )
+
+# ── SoW Content Templates ─────────────────────────────────────────────────────
+CONTENT_TEMPLATES_DIR: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "content_templates"
+)

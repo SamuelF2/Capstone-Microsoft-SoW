@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
+import AttachmentManager from '../../components/AttachmentManager';
 
 // Shared components
 import ExecutiveSummary from '../../components/sow/ExecutiveSummary';
@@ -849,6 +850,23 @@ export default function DraftPage() {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Attachments Panel */}
+        <div
+          style={{
+            maxWidth: 'var(--container-xl)',
+            margin: '0 auto',
+            padding: '0 var(--spacing-xl) var(--spacing-lg)',
+          }}
+        >
+          <AttachmentManager
+            sowId={sow?.id}
+            stageKey="draft"
+            readOnly={false}
+            showRequirements={true}
+            authFetch={authFetch}
+          />
         </div>
 
         {/* Submit Panel — Readiness checklist */}
