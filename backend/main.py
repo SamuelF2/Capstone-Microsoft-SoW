@@ -633,6 +633,38 @@ async def lifespan(app: FastAPI):
                     print(f"Seeded content template: {tmpl_data.get('name', tmpl_file.stem)}")
 
         # ------------------------------------------------------------------ #
+        # 13b. PHASE 5 MIGRATION — Backfill sow_workflow for legacy SoWs    #
+        # Idempotent: ON CONFLICT DO NOTHING skips SoWs already migrated.   #
+        # ------------------------------------------------------------------ #
+        from routers.workflow import build_workflow_snapshot, get_default_template_id
+
+        existing_sows = await conn.fetch("""
+            SELECT sd.id, sd.status FROM sow_documents sd
+            LEFT JOIN sow_workflow sw ON sw.sow_id = sd.id
+            WHERE sw.id IS NULL
+        """)
+        if existing_sows:
+            default_tmpl_id = await get_default_template_id(conn)
+            if default_tmpl_id:
+                import json as _json2
+
+                default_snapshot = await build_workflow_snapshot(conn, default_tmpl_id)
+                snapshot_str = _json2.dumps(default_snapshot)
+                for sow in existing_sows:
+                    await conn.execute(
+                        """
+                        INSERT INTO sow_workflow (sow_id, template_id, current_stage, workflow_data)
+                        VALUES ($1, $2, $3, $4::jsonb)
+                        ON CONFLICT (sow_id) DO NOTHING
+                        """,
+                        sow["id"],
+                        default_tmpl_id,
+                        sow["status"],
+                        snapshot_str,
+                    )
+                print(f"Backfilled sow_workflow for {len(existing_sows)} existing SoWs")
+
+        # ------------------------------------------------------------------ #
         # 14. INDEXES                                                         #
         # ------------------------------------------------------------------ #
         for idx_ddl in [

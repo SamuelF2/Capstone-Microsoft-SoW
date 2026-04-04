@@ -3,10 +3,286 @@ import Head from 'next/head';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
 
+// ── Workflow Templates Tab ───────────────────────────────────────────────────
+
+function WorkflowTab({ authFetch }) {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templateDetail, setTemplateDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    authFetch('/api/workflow/templates')
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load templates (${r.status})`);
+        return r.json();
+      })
+      .then(setTemplates)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [authFetch]);
+
+  const handleSelect = async (tmpl) => {
+    if (selectedTemplate?.id === tmpl.id) {
+      setSelectedTemplate(null);
+      setTemplateDetail(null);
+      return;
+    }
+    setSelectedTemplate(tmpl);
+    setTemplateDetail(null);
+    setDetailLoading(true);
+    try {
+      const res = await authFetch(`/api/workflow/templates/${tmpl.id}`);
+      if (res.ok) setTemplateDetail(await res.json());
+    } catch {
+      // detail is optional
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  if (loading) return <Spinner />;
+  if (error)
+    return (
+      <p className="text-sm" style={{ color: 'var(--color-error)' }}>
+        {error}
+      </p>
+    );
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold mb-md">Workflow Templates</h3>
+      <p className="text-sm text-secondary mb-lg">
+        All available review workflow templates. Click a template to see its full stage and
+        transition details.
+      </p>
+
+      {/* Template table */}
+      <div style={{ overflowX: 'auto', marginBottom: 'var(--spacing-xl)' }}>
+        <table
+          style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-sm)' }}
+        >
+          <thead>
+            <tr
+              style={{ borderBottom: '1px solid var(--color-border-default)', textAlign: 'left' }}
+            >
+              {['Name', 'Description', 'Stages', 'Type'].map((h) => (
+                <th
+                  key={h}
+                  style={{
+                    padding: 'var(--spacing-sm) var(--spacing-md)',
+                    color: 'var(--color-text-secondary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {templates.map((tmpl, i) => {
+              const isActive = selectedTemplate?.id === tmpl.id;
+              return (
+                <tr
+                  key={tmpl.id}
+                  onClick={() => handleSelect(tmpl)}
+                  style={{
+                    borderBottom: '1px solid var(--color-border-subtle)',
+                    backgroundColor: isActive
+                      ? 'rgba(124,58,237,0.05)'
+                      : i % 2 === 0
+                        ? 'transparent'
+                        : 'var(--color-bg-tertiary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)', fontWeight: 500 }}>
+                    {tmpl.name}
+                    {isActive && (
+                      <span
+                        style={{
+                          marginLeft: '8px',
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-accent-purple, #7c3aed)',
+                        }}
+                      >
+                        ▾
+                      </span>
+                    )}
+                  </td>
+                  <td
+                    style={{
+                      padding: 'var(--spacing-sm) var(--spacing-md)',
+                      color: 'var(--color-text-secondary)',
+                      maxWidth: '320px',
+                    }}
+                  >
+                    {tmpl.description || '—'}
+                  </td>
+                  <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)' }}>
+                    {tmpl.stage_count ?? '—'}
+                  </td>
+                  <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)' }}>
+                    {tmpl.is_system ? (
+                      <span
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 'var(--radius-full)',
+                          fontSize: 'var(--font-size-xs)',
+                          backgroundColor: 'rgba(0,120,212,0.1)',
+                          color: 'var(--color-accent-blue)',
+                          border: '1px solid rgba(0,120,212,0.2)',
+                          fontWeight: 500,
+                        }}
+                      >
+                        System
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          color: 'var(--color-text-tertiary)',
+                          fontSize: 'var(--font-size-xs)',
+                        }}
+                      >
+                        Custom
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Detail view */}
+      {selectedTemplate && (
+        <div
+          style={{
+            padding: 'var(--spacing-lg)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--color-border-default)',
+            backgroundColor: 'var(--color-bg-tertiary)',
+          }}
+        >
+          <h4 className="font-semibold mb-md" style={{ fontSize: 'var(--font-size-base)' }}>
+            {selectedTemplate.name} — Stage Details
+          </h4>
+
+          {detailLoading && <p className="text-sm text-secondary">Loading…</p>}
+
+          {templateDetail && (
+            <>
+              {/* Stage flow */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 'var(--spacing-sm)',
+                  alignItems: 'center',
+                  marginBottom: 'var(--spacing-lg)',
+                }}
+              >
+                {(templateDetail.workflow_data?.stages || [])
+                  .filter((s) => s.stage_key !== 'rejected')
+                  .sort((a, b) => a.stage_order - b.stage_order)
+                  .map((s, idx, arr) => (
+                    <span
+                      key={s.stage_key}
+                      style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+                    >
+                      <span
+                        style={{
+                          padding: '4px 12px',
+                          borderRadius: 'var(--radius-full)',
+                          fontSize: 'var(--font-size-xs)',
+                          fontWeight: 500,
+                          backgroundColor: 'var(--color-bg-secondary)',
+                          border: '1px solid var(--color-border-default)',
+                        }}
+                      >
+                        {s.display_name}
+                      </span>
+                      {idx < arr.length - 1 && (
+                        <span style={{ color: 'var(--color-text-tertiary)' }}>→</span>
+                      )}
+                    </span>
+                  ))}
+              </div>
+
+              {/* Stage cards */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                {(templateDetail.workflow_data?.stages || [])
+                  .sort((a, b) => a.stage_order - b.stage_order)
+                  .map((s) => (
+                    <div
+                      key={s.stage_key}
+                      style={{
+                        padding: 'var(--spacing-sm) var(--spacing-md)',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: 'var(--color-bg-secondary)',
+                        border: '1px solid var(--color-border-subtle)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--spacing-md)',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span
+                        className="font-semibold"
+                        style={{ fontSize: 'var(--font-size-sm)', minWidth: '140px' }}
+                      >
+                        {s.display_name}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-text-tertiary)',
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {s.stage_type.replace(/_/g, ' ')}
+                      </span>
+                      {s.roles && s.roles.length > 0 && (
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          {s.roles
+                            .filter((r) => r.is_required)
+                            .map((r, k) => (
+                              <span
+                                key={k}
+                                style={{
+                                  padding: '1px 7px',
+                                  borderRadius: 'var(--radius-full)',
+                                  fontSize: '10px',
+                                  backgroundColor: 'rgba(0,120,212,0.08)',
+                                  color: 'var(--color-accent-blue)',
+                                  border: '1px solid rgba(0,120,212,0.15)',
+                                }}
+                              >
+                                {r.role_key.replace(/-/g, ' ')}
+                              </span>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TABS = [
   { key: 'quality', label: 'Quality Rules' },
   { key: 'esap', label: 'ESAP Workflow' },
   { key: 'risk', label: 'Risk Classification' },
+  { key: 'workflow', label: 'Workflow Templates' },
 ];
 
 const SEVERITY_STYLES = {
@@ -696,11 +972,17 @@ export default function BusinessLogic() {
             </div>
           )}
 
-          {!loading && !error && rules && (
+          {!loading && !error && rules && activeTab !== 'workflow' && (
             <div className="card">
               {activeTab === 'quality' && <QualityTab rules={rules} />}
               {activeTab === 'esap' && <EsapTab rules={rules} />}
               {activeTab === 'risk' && <RiskTab />}
+            </div>
+          )}
+
+          {activeTab === 'workflow' && (
+            <div className="card">
+              <WorkflowTab authFetch={authFetch} />
             </div>
           )}
         </div>

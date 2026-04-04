@@ -68,25 +68,6 @@ from routers.workflow import build_workflow_snapshot, get_default_template_id
 
 router = APIRouter(prefix="/api/sow", tags=["sow"])
 
-_VALID_STATUSES = {
-    "draft",
-    "ai_review",
-    "internal_review",
-    "drm_review",
-    "approved",
-    "finalized",
-    "rejected",
-}
-
-_VALID_TRANSITIONS: dict[str, set[str]] = {
-    "draft": {"ai_review"},
-    "ai_review": {"internal_review", "draft"},
-    "internal_review": {"drm_review", "rejected", "draft"},
-    "drm_review": {"approved", "rejected", "internal_review"},
-    "approved": {"finalized"},
-    "rejected": {"draft"},
-    "finalized": set(),
-}
 
 _VALID_METHODOLOGIES = {"Agile Sprint Delivery", "Sure Step 365", "Waterfall", "Cloud Adoption"}
 _VALID_EXTENSIONS = {".pdf", ".docx"}
@@ -355,9 +336,16 @@ async def list_sows(
         SELECT  s.id, s.title, s.status, s.cycle, s.methodology,
                 s.customer_name, s.opportunity_id, s.deal_value,
                 s.esap_level, s.estimated_margin,
-                s.client_id, s.updated_at
+                s.client_id, s.updated_at,
+                (
+                    SELECT elem->>'display_name'
+                    FROM   jsonb_array_elements(sw.workflow_data->'stages') elem
+                    WHERE  elem->>'stage_key' = sw.current_stage
+                    LIMIT  1
+                ) AS stage_display_name
         FROM    sow_documents s
         JOIN    collaboration c ON c.sow_id = s.id
+        LEFT JOIN sow_workflow sw ON sw.sow_id = s.id
         {where}
         ORDER BY s.updated_at DESC
         LIMIT ${len(params) - 1} OFFSET ${len(params)}
@@ -939,26 +927,23 @@ async def update_sow_status(
         if old_status is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
-        # Use workflow instance transitions if available, else legacy dicts
+        # Use workflow instance transitions (all SoWs must have a workflow instance after migration)
         wf_transitions = await _get_workflow_transitions(conn, sow_id)
-        if wf_transitions is not None:
-            all_stages: set[str] = set()
-            for src, targets in wf_transitions.items():
-                all_stages.add(src)
-                all_stages.update(targets)
-            if payload.status not in all_stages:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(all_stages)}",
-                )
-            allowed = wf_transitions.get(old_status, set())
-        else:
-            if payload.status not in _VALID_STATUSES:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(_VALID_STATUSES)}",
-                )
-            allowed = _VALID_TRANSITIONS.get(old_status, set())
+        if wf_transitions is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="SoW has no workflow instance. Contact an administrator.",
+            )
+        all_stages: set[str] = set()
+        for src, targets in wf_transitions.items():
+            all_stages.add(src)
+            all_stages.update(targets)
+        if payload.status not in all_stages:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status '{payload.status}'. Must be one of: {sorted(all_stages)}",
+            )
+        allowed = wf_transitions.get(old_status, set())
 
         if payload.status not in allowed:
             raise HTTPException(

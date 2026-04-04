@@ -15,7 +15,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
-import ReviewStatusTracker from '../../components/ReviewStatusTracker';
+import WorkflowProgress from '../../components/WorkflowProgress';
 import HandoffPackageBuilder from '../../components/HandoffPackageBuilder';
 import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
@@ -647,8 +647,9 @@ export default function FinalizePage() {
               )}
             </div>
 
-            <ReviewStatusTracker
-              currentStatus={sow?.status}
+            <WorkflowProgress
+              sowId={sow?.id}
+              currentStage={sow?.status}
               reviewAssignments={reviewStatus?.assignments || []}
             />
           </div>

@@ -20,7 +20,7 @@ import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import ReviewChecklist from '../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../components/AISuggestionsPanel';
-import ReviewStatusTracker from '../../components/ReviewStatusTracker';
+import WorkflowProgress from '../../components/WorkflowProgress';
 import PersonaDashboard from '../../components/PersonaDashboard';
 import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
@@ -1041,8 +1041,9 @@ export default function DrmReview() {
 
             {/* Status tracker */}
             <div style={{ marginTop: 'var(--spacing-lg)' }}>
-              <ReviewStatusTracker
-                currentStatus={sow?.status}
+              <WorkflowProgress
+                sowId={sow?.id}
+                currentStage={sow?.status}
                 reviewAssignments={reviewStatus?.assignments || []}
               />
             </div>

@@ -192,6 +192,7 @@ class SoWSummary(BaseModel):
     estimated_margin: float | None = None
     client_id: str | None = None
     updated_at: datetime
+    stage_display_name: str | None = None
 
 
 # ── History / Collaboration  (PDF §2.4, §2.5) ────────────────────────────────

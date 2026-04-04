@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import AttachmentManager from '../../components/AttachmentManager';
+import WorkflowProgress from '../../components/WorkflowProgress';
 
 // Shared components
 import ExecutiveSummary from '../../components/sow/ExecutiveSummary';
@@ -703,6 +704,23 @@ export default function DraftPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Workflow progress */}
+        <div
+          style={{
+            backgroundColor: 'var(--color-bg-secondary)',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            padding: 'var(--spacing-md) var(--spacing-xl)',
+          }}
+        >
+          <div style={{ maxWidth: 'var(--container-xl)', margin: '0 auto' }}>
+            <WorkflowProgress
+              sowId={id}
+              currentStage={sowData.status || 'draft'}
+              reviewAssignments={[]}
+            />
           </div>
         </div>
 

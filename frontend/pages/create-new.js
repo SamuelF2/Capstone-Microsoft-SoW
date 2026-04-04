@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+import WorkflowTemplateSelector from '../components/WorkflowTemplateSelector';
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -45,6 +46,9 @@ export default function CreateNew() {
   const [previewTemplate, setPreviewTemplate] = useState(null); // template being previewed
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Workflow template selection
+  const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState(null);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -125,6 +129,7 @@ export default function CreateNew() {
           deal_value: form.dealValue ? parseFloat(form.dealValue) : null,
           estimated_margin: form.estimatedMargin ? parseFloat(form.estimatedMargin) : null,
           content_template_id: selectedTemplateId || null,
+          workflow_template_id: selectedWorkflowTemplateId || null,
           metadata: {
             workOrderNumber: form.workOrderNumber,
             customerLegalName: form.customerLegalName,
@@ -626,6 +631,28 @@ export default function CreateNew() {
                 )}
               </div>
             )}
+
+            {/* Workflow template selection — always shown */}
+            <div className="card" style={{ marginTop: 'var(--spacing-lg)' }}>
+              <h2
+                className="text-xl font-semibold mb-xl"
+                style={{
+                  paddingBottom: 'var(--spacing-md)',
+                  borderBottom: '1px solid var(--color-border-default)',
+                }}
+              >
+                Review Workflow
+              </h2>
+              <p className="text-sm text-secondary" style={{ marginBottom: 'var(--spacing-md)' }}>
+                Choose the review workflow for this SoW. The default ESAP workflow is recommended
+                for most deals.
+              </p>
+              <WorkflowTemplateSelector
+                selectedTemplateId={selectedWorkflowTemplateId}
+                onSelect={setSelectedWorkflowTemplateId}
+                authFetch={authFetch}
+              />
+            </div>
 
             {/* Actions */}
             <div

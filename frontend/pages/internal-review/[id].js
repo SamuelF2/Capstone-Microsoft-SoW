@@ -18,7 +18,7 @@ import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import ReviewChecklist from '../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../components/AISuggestionsPanel';
-import ReviewStatusTracker from '../../components/ReviewStatusTracker';
+import WorkflowProgress from '../../components/WorkflowProgress';
 import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
 
@@ -786,8 +786,9 @@ export default function InternalReview() {
               padding: 'var(--spacing-md) var(--spacing-xl)',
             }}
           >
-            <ReviewStatusTracker
-              currentStatus={sow?.status || 'internal_review'}
+            <WorkflowProgress
+              sowId={sow?.id}
+              currentStage={sow?.status || 'internal_review'}
               reviewAssignments={reviewStatus?.assignments || []}
             />
           </div>

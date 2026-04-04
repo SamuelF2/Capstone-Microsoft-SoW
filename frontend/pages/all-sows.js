@@ -114,9 +114,9 @@ function SoWActions({ sow, router }) {
 
     default:
       return (
-        <span style={{ color: 'var(--color-accent-blue)', fontSize: 'var(--font-size-sm)' }}>
-          View →
-        </span>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {btn('View →', `/draft/${id}`, 'secondary')}
+        </div>
       );
   }
 }
@@ -184,6 +184,7 @@ export default function AllSoWs() {
         router.push(`/finalize/${sow.id}`);
         break;
       default:
+        // Unknown stage key — route to draft as fallback
         router.push(`/draft/${sow.id}`);
     }
   };
@@ -437,7 +438,7 @@ export default function AllSoWs() {
                             fontSize: 'var(--font-size-sm)',
                           }}
                         >
-                          ● {sow.status ?? '—'}
+                          ● {sow.stage_display_name ?? sow.status ?? '—'}
                         </span>
                       </td>
 

@@ -304,57 +304,29 @@ _DEFAULT_CHECKLISTS: dict[str, dict] = {
     },
 }
 
-# ── ESAP gating rules ─────────────────────────────────────────────────────────
-# Mirrors esap-workflow.json logic for required approvers per stage and level.
-
-_INTERNAL_REVIEW_REQUIRED: dict[str, list[str]] = {
-    "type-1": ["solution-architect", "sqa-reviewer"],
-    "type-2": ["solution-architect", "sqa-reviewer"],
-    "type-3": ["solution-architect"],
-}
-
-_DRM_REQUIRED: dict[str, list[str]] = {
-    "type-1": ["cpl", "cdp", "delivery-manager"],
-    "type-2": ["cpl", "cdp"],
-    "type-3": ["cpl"],
-}
-
 
 async def _get_required_roles(conn, sow_id: int, stage_key: str, esap_level: str) -> list[str]:
     """Load required reviewer roles from the SoW's workflow instance.
-
-    Falls back to ``_INTERNAL_REVIEW_REQUIRED`` / ``_DRM_REQUIRED`` dicts
-    if no workflow instance exists.
 
     ``stage_key`` uses underscore format (e.g. "internal_review", "drm_review")
     matching ``sow_documents.status``.
     """
     row = await conn.fetchrow("SELECT workflow_data FROM sow_workflow WHERE sow_id = $1", sow_id)
-    if row and row["workflow_data"]:
-        data = (
-            row["workflow_data"]
-            if isinstance(row["workflow_data"], dict)
-            else json.loads(row["workflow_data"])
-        )
-        for stage in data.get("stages", []):
-            if stage["stage_key"] == stage_key:
-                roles = []
-                for role in stage.get("roles", []):
-                    esap_list = role.get("esap_levels")
-                    if (
-                        esap_list is None
-                        or esap_level in esap_list
-                        and role.get("is_required", True)
-                    ):
-                        roles.append(role["role_key"])
-                return roles
+    if not row or not row["workflow_data"]:
         return []
-
-    # Legacy fallback
-    if stage_key == "internal_review":
-        return _INTERNAL_REVIEW_REQUIRED.get(esap_level, ["solution-architect"])
-    if stage_key == "drm_review":
-        return _DRM_REQUIRED.get(esap_level, ["cpl"])
+    data = (
+        row["workflow_data"]
+        if isinstance(row["workflow_data"], dict)
+        else json.loads(row["workflow_data"])
+    )
+    for stage in data.get("stages", []):
+        if stage["stage_key"] == stage_key:
+            roles = []
+            for role in stage.get("roles", []):
+                esap_list = role.get("esap_levels")
+                if esap_list is None or esap_level in esap_list and role.get("is_required", True):
+                    roles.append(role["role_key"])
+            return roles
     return []
 
 
