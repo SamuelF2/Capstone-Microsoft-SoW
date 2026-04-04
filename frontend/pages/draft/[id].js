@@ -891,7 +891,7 @@ export default function DraftPage() {
           }}
         >
           <AttachmentManager
-            sowId={sow?.id}
+            sowId={id}
             stageKey="draft"
             readOnly={false}
             showRequirements={true}

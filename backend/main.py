@@ -408,21 +408,6 @@ async def lifespan(app: FastAPI):
         """)
 
         # ------------------------------------------------------------------ #
-        # 12c. WORKFLOW STAGE DOCUMENT REQUIREMENTS  (Phase 4)               #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS workflow_stage_document_requirements (
-                id              SERIAL PRIMARY KEY,
-                template_id     INTEGER NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
-                stage_key       TEXT NOT NULL,
-                document_type   TEXT NOT NULL,
-                is_required     BOOLEAN DEFAULT FALSE,
-                description     TEXT,
-                UNIQUE(template_id, stage_key, document_type)
-            );
-        """)
-
-        # ------------------------------------------------------------------ #
         # 13. WORKFLOW TEMPLATES                                              #
         # ------------------------------------------------------------------ #
         await conn.execute("""
@@ -483,7 +468,23 @@ async def lifespan(app: FastAPI):
         """)
 
         # ------------------------------------------------------------------ #
-        # 12. SEED DEFAULT WORKFLOW TEMPLATE                                  #
+        # 13b. WORKFLOW STAGE DOCUMENT REQUIREMENTS  (Phase 4)               #
+        # Must be after workflow_templates to satisfy FK constraint.          #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS workflow_stage_document_requirements (
+                id              SERIAL PRIMARY KEY,
+                template_id     INTEGER NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
+                stage_key       TEXT NOT NULL,
+                document_type   TEXT NOT NULL,
+                is_required     BOOLEAN DEFAULT FALSE,
+                description     TEXT,
+                UNIQUE(template_id, stage_key, document_type)
+            );
+        """)
+
+        # ------------------------------------------------------------------ #
+        # 14. SEED DEFAULT WORKFLOW TEMPLATE                                  #
         # ------------------------------------------------------------------ #
         existing_template = await conn.fetchval(
             "SELECT id FROM workflow_templates WHERE name = 'Default ESAP Workflow'"
@@ -744,24 +745,18 @@ async def lifespan(app: FastAPI):
                 EXECUTE FUNCTION sow_search_vector_update();
         """)
 
-        # Backfill existing rows that have no search_vector (or rebuild all)
+        # Backfill existing rows that have no search_vector.
+        # Uses only columns on sow_documents itself; the trigger keeps it
+        # updated going forward on title/customer_name/opportunity_id/methodology.
         await conn.execute("""
-            UPDATE sow_documents sd SET search_vector =
+            UPDATE sow_documents SET search_vector =
                 to_tsvector('english',
-                    coalesce(sd.title, '') || ' ' ||
-                    coalesce(sd.customer_name, '') || ' ' ||
-                    coalesce(sd.opportunity_id, '') || ' ' ||
-                    coalesce(sd.methodology, '') || ' ' ||
-                    coalesce(c.executive_summary, '') || ' ' ||
-                    coalesce(sc.in_scope::text, '') || ' ' ||
-                    coalesce(sc.out_scope::text, '') || ' ' ||
-                    coalesce(a.items::text, '')
+                    coalesce(title, '') || ' ' ||
+                    coalesce(customer_name, '') || ' ' ||
+                    coalesce(opportunity_id, '') || ' ' ||
+                    coalesce(methodology, '')
                 )
-            FROM content c
-            LEFT JOIN scope sc ON sc.content_id = c.id
-            LEFT JOIN assumptions a ON a.content_id = c.id
-            WHERE sd.content_id = c.id
-            AND sd.search_vector IS NULL
+            WHERE search_vector IS NULL
         """)
 
     print("PostgreSQL schema ready")
