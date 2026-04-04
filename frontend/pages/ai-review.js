@@ -874,12 +874,15 @@ export default function AIReview() {
   const [recommendations, setRecommendations] = useState(null);
   const [currentSowId, setCurrentSowId] = useState(null);
   const [isProceeding, setIsProceeding] = useState(false);
+  const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [similarSows, setSimilarSows] = useState([]);
 
   // If arriving from draft submit-for-review (Path A), auto-trigger AI analysis
   useEffect(() => {
     if (!sowId || !authFetch) return;
     setCurrentSowId(sowId);
     setIsAnalyzing(true);
+    setAiUnavailable(false);
     setError(null);
 
     authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST' })
@@ -914,14 +917,20 @@ export default function AIReview() {
             suggested: s.suggested_text || '',
             reason: s.rationale || '',
           })),
-          similarSows: MOCK_RECOMMENDATIONS.similarSows,
           sections: [],
           missingKeywords: [],
         });
         setIsAnalyzing(false);
         setShowResults(true);
+
+        // Fetch similar SoWs from the AI proxy (non-blocking)
+        authFetch(`/api/ai/sow/${sowId}/similar`)
+          .then((r) => (r.ok ? r.json() : []))
+          .then((data) => setSimilarSows(data))
+          .catch(() => {});
       })
       .catch((err) => {
+        setAiUnavailable(true);
         setError(err.message);
         setIsAnalyzing(false);
       });
@@ -1063,13 +1072,19 @@ export default function AIReview() {
           suggested: s.suggested_text || '',
           reason: s.rationale || '',
         })),
-        similarSows: MOCK_RECOMMENDATIONS.similarSows,
       };
 
       setRecommendations(data);
       setIsAnalyzing(false);
       setShowResults(true);
+
+      // Fetch similar SoWs from the AI proxy (non-blocking)
+      authFetch(`/api/ai/sow/${sow.id}/similar`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((similar) => setSimilarSows(similar))
+        .catch(() => {});
     } catch (err) {
+      setAiUnavailable(true);
       setError(err.message);
       setIsUploading(false);
       setIsAnalyzing(false);
@@ -1103,8 +1118,25 @@ export default function AIReview() {
             </p>
           </div>
 
+          {/* AI unavailable banner */}
+          {aiUnavailable && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(251,191,36,0.08)',
+                border: '1px solid rgba(251,191,36,0.3)',
+                color: 'var(--color-warning)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
+              AI analysis is temporarily unavailable. You can continue with manual review.
+            </div>
+          )}
+
           {/* Error banner */}
-          {error && (
+          {error && !aiUnavailable && (
             <div
               style={{
                 marginBottom: 'var(--spacing-lg)',
@@ -1349,9 +1381,7 @@ export default function AIReview() {
               <SuggestionsSection suggestions={recommendations.suggestions} />
               <RisksSection risks={recommendations.risks} />
               <ChecklistSection checklist={recommendations.checklist} />
-              {recommendations.similarSows && recommendations.similarSows.length > 0 && (
-                <SimilarSowsSection similarSows={recommendations.similarSows} />
-              )}
+              {similarSows.length > 0 && <SimilarSowsSection similarSows={similarSows} />}
 
               {/* Action Bar — Proceed to Internal Review */}
               {currentSowId && (

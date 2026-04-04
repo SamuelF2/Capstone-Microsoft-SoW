@@ -651,3 +651,93 @@ class StageRequirementsResponse(BaseModel):
     stage_key: str
     requirements: list[DocumentRequirement]
     all_required_met: bool
+
+
+# ── AI / GraphRAG ────────────────────────────────────────────────────────────
+
+
+class AIContextRequest(BaseModel):
+    query: str
+    sow_id: str | None = None
+    top_k: int = 5
+    hop_depth: int = 2
+
+
+class AIAssistRequest(BaseModel):
+    query: str
+    sow_id: str | None = None
+    history: list[dict] | None = None
+    top_k: int = 5
+    hop_depth: int = 2
+
+
+class AIAssistResponse(BaseModel):
+    answer: str
+    context: dict
+    retrieved: dict
+
+
+class AIContextResponse(BaseModel):
+    query: str
+    sow_id: str | None = None
+    methodology: str | None = None
+    deal_value: float | None = None
+    sections: list[dict]
+    rules: list[dict]
+    banned_phrases: list[dict]
+    risks: list[dict]
+    deliverables: list[dict]
+    similar_sections: list[dict]
+    empty: bool
+
+
+class AIValidationResponse(BaseModel):
+    sow_id: str
+    overall_score: int
+    summary: str
+    violations: list[dict]
+    checklist: list[dict]
+    approval: dict
+    suggestions: list[dict]
+
+
+class AIRisksResponse(BaseModel):
+    risks: list[dict]
+    triggered: list[dict]
+
+
+class AISimilarSoW(BaseModel):
+    sow_id: str
+    title: str
+    similarity: float
+    methodology: str | None = None
+    overlap_areas: list[str] = []
+
+
+# ── Search ───────────────────────────────────────────────────────────────────
+
+
+class SearchResult(BaseModel):
+    id: int
+    title: str
+    customer_name: str | None = None
+    methodology: str | None = None
+    status: str
+    stage_display_name: str | None = None
+    snippet: str | None = None  # highlighted matching text
+    rank: float  # ts_rank score
+    updated_at: datetime
+
+
+# ── Audit ────────────────────────────────────────────────────────────────────
+
+
+class AuditEntry(BaseModel):
+    id: int
+    sow_id: int
+    event_type: str  # status_change, review_submit, coa_update, attachment_upload, etc.
+    actor_name: str | None = None
+    actor_email: str | None = None
+    description: str
+    metadata: dict | None = None
+    timestamp: datetime

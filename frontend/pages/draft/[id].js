@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import AttachmentManager from '../../components/AttachmentManager';
 import WorkflowProgress from '../../components/WorkflowProgress';
+import ActivityLog from '../../components/ActivityLog';
 
 // Shared components
 import ExecutiveSummary from '../../components/sow/ExecutiveSummary';
@@ -441,6 +442,17 @@ export default function DraftPage() {
   };
 
   const [showConfirm, setShowConfirm] = useState(false);
+  const [similarSows, setSimilarSows] = useState([]);
+  const [showActivity, setShowActivity] = useState(false);
+
+  // Fetch similar SoWs from AI proxy (non-blocking, silent fail)
+  useEffect(() => {
+    if (!id || !authFetch) return;
+    authFetch(`/api/ai/sow/${id}/similar`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setSimilarSows(data))
+      .catch(() => {});
+  }, [id, authFetch]);
 
   // ── Methodology-aware readiness checks ────────────────────────────────────
   const methodology = sowData?.deliveryMethodology;
@@ -931,6 +943,122 @@ export default function DraftPage() {
                 {hasDeliverables ? '✓' : '✗'} {deliverablesLabel}
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Similar SoWs Panel */}
+        {similarSows.length > 0 && (
+          <div
+            style={{
+              maxWidth: 'var(--container-xl)',
+              margin: '0 auto',
+              padding: '0 var(--spacing-xl) var(--spacing-lg)',
+            }}
+          >
+            <div className="card">
+              <h3
+                className="text-base font-semibold"
+                style={{
+                  marginBottom: 'var(--spacing-md)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--spacing-sm)',
+                }}
+              >
+                <span style={{ color: 'var(--color-accent-purple-light)' }}>&#128279;</span>
+                Similar SoWs
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                {similarSows.map((s, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: 'var(--spacing-sm) var(--spacing-md)',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: 'var(--color-bg-tertiary)',
+                    }}
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{s.title}</p>
+                      {s.methodology && <p className="text-xs text-tertiary">{s.methodology}</p>}
+                      {s.overlap_areas?.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: 'var(--spacing-xs)',
+                            marginTop: 2,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {s.overlap_areas.map((a) => (
+                            <span
+                              key={a}
+                              style={{
+                                fontSize: 'var(--font-size-xs)',
+                                padding: '1px 6px',
+                                borderRadius: 'var(--radius-full)',
+                                backgroundColor: 'rgba(139,92,246,0.1)',
+                                color: 'var(--color-accent-purple-light)',
+                              }}
+                            >
+                              {a}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 'var(--font-size-sm)',
+                        fontWeight: 600,
+                        color: 'var(--color-accent-purple-light)',
+                        whiteSpace: 'nowrap',
+                        marginLeft: 'var(--spacing-md)',
+                      }}
+                    >
+                      {Math.round(s.similarity * 100)}% match
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Activity Log Panel */}
+        <div
+          style={{
+            maxWidth: 'var(--container-xl)',
+            margin: '0 auto',
+            padding: '0 var(--spacing-xl) var(--spacing-2xl)',
+          }}
+        >
+          <div className="card">
+            <button
+              onClick={() => setShowActivity((v) => !v)}
+              style={{
+                width: '100%',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: 0,
+                color: 'var(--color-text-primary)',
+              }}
+            >
+              <h3 className="text-base font-semibold">Activity Log</h3>
+              <span className="text-sm text-tertiary">{showActivity ? '▲ Hide' : '▼ Show'}</span>
+            </button>
+            {showActivity && (
+              <div style={{ marginTop: 'var(--spacing-lg)' }}>
+                <ActivityLog sowId={id} />
+              </div>
+            )}
           </div>
         </div>
 

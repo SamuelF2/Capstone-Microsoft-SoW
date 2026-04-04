@@ -39,7 +39,9 @@ from config import CONTENT_TEMPLATES_DIR, DATABASE_URL, NEO4J_PASSWORD, NEO4J_UR
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
+from routers.ai import router as ai_router
 from routers.attachments import router as attachments_router
+from routers.audit import router as audit_router
 from routers.auth import router as auth_router
 from routers.coa import router as coa_router
 from routers.finalize import router as finalize_router
@@ -705,6 +707,63 @@ async def lifespan(app: FastAPI):
         ]:
             await conn.execute(idx_ddl)
 
+        # ------------------------------------------------------------------ #
+        # 15. FULL-TEXT SEARCH  (Phase 6)                                    #
+        # tsvector column on sow_documents, GIN index, and trigger to keep   #
+        # it updated on title/customer_name/opportunity_id/methodology edits. #
+        # ------------------------------------------------------------------ #
+        await conn.execute(
+            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS search_vector tsvector;"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sow_search ON sow_documents USING GIN(search_vector);"
+        )
+
+        # Trigger function — fires BEFORE INSERT OR UPDATE on key columns
+        await conn.execute("""
+            CREATE OR REPLACE FUNCTION sow_search_vector_update() RETURNS trigger AS $$
+            BEGIN
+                NEW.search_vector := to_tsvector('english',
+                    coalesce(NEW.title, '') || ' ' ||
+                    coalesce(NEW.customer_name, '') || ' ' ||
+                    coalesce(NEW.opportunity_id, '') || ' ' ||
+                    coalesce(NEW.methodology, '')
+                );
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+
+        # Drop and recreate trigger so it is idempotent
+        await conn.execute("DROP TRIGGER IF EXISTS trg_sow_search_vector ON sow_documents;")
+        await conn.execute("""
+            CREATE TRIGGER trg_sow_search_vector
+                BEFORE INSERT OR UPDATE OF title, customer_name, opportunity_id, methodology
+                ON sow_documents
+                FOR EACH ROW
+                EXECUTE FUNCTION sow_search_vector_update();
+        """)
+
+        # Backfill existing rows that have no search_vector (or rebuild all)
+        await conn.execute("""
+            UPDATE sow_documents sd SET search_vector =
+                to_tsvector('english',
+                    coalesce(sd.title, '') || ' ' ||
+                    coalesce(sd.customer_name, '') || ' ' ||
+                    coalesce(sd.opportunity_id, '') || ' ' ||
+                    coalesce(sd.methodology, '') || ' ' ||
+                    coalesce(c.executive_summary, '') || ' ' ||
+                    coalesce(sc.in_scope::text, '') || ' ' ||
+                    coalesce(sc.out_scope::text, '') || ' ' ||
+                    coalesce(a.items::text, '')
+                )
+            FROM content c
+            LEFT JOIN scope sc ON sc.content_id = c.id
+            LEFT JOIN assumptions a ON a.content_id = c.id
+            WHERE sd.content_id = c.id
+            AND sd.search_vector IS NULL
+        """)
+
     print("PostgreSQL schema ready")
 
     # ── Upload directory ──────────────────────────────────────────────────────
@@ -752,6 +811,8 @@ app.include_router(rules_router)  # /api/rules/...
 app.include_router(workflow_router)  # /api/workflow/...
 app.include_router(coa_router)  # /api/coa/...
 app.include_router(attachments_router)  # /api/attachments/...
+app.include_router(ai_router)  # /api/ai/...
+app.include_router(audit_router)  # /api/audit/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

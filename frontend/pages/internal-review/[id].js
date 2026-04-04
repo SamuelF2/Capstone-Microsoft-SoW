@@ -21,6 +21,7 @@ import AISuggestionsPanel from '../../components/AISuggestionsPanel';
 import WorkflowProgress from '../../components/WorkflowProgress';
 import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
+import ActivityLog from '../../components/ActivityLog';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1152,6 +1153,29 @@ export default function InternalReview() {
                   readOnly={false}
                   onStatusChange={() => {}}
                 />
+              </div>
+            )}
+
+            {/* Activity Log */}
+            {sow && (
+              <div
+                style={{
+                  marginTop: 'var(--spacing-xl)',
+                  padding: '0 var(--spacing-xl) var(--spacing-xl)',
+                }}
+              >
+                <div className="card">
+                  <h3
+                    style={{
+                      fontSize: 'var(--font-size-base)',
+                      fontWeight: 600,
+                      marginBottom: 'var(--spacing-md)',
+                    }}
+                  >
+                    Activity Log
+                  </h3>
+                  <ActivityLog sowId={sow.id} />
+                </div>
               </div>
             )}
           </div>

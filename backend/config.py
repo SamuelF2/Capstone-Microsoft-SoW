@@ -37,3 +37,7 @@ RULES_DIR: str = os.path.join(
 CONTENT_TEMPLATES_DIR: str = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "content_templates"
 )
+
+# ── GraphRAG / ML Service ─────────────────────────────────────────────────────
+# Empty string = use stubs. Set to the ML service base URL to proxy requests.
+GRAPHRAG_API_URL: str = os.getenv("GRAPHRAG_API_URL", "")

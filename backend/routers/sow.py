@@ -1458,6 +1458,69 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
     return _row_to_response(dict(updated))
 
 
+# ── Full-text search ──────────────────────────────────────────────────────────
+
+
+@router.get("/search")
+async def search_sows(
+    q: str = Query(..., min_length=1),
+    methodology: str | None = None,
+    status: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = None,
+):
+    """
+    Full-text search across SoW titles, customer names, opportunity IDs,
+    and deep content (executive summary, scope, assumptions).
+
+    Returns results ranked by relevance with highlighted snippets.
+    """
+    pool = database.pg_pool
+
+    # Build a safe tsquery: split on whitespace and join with AND operators
+    terms = [t for t in q.strip().split() if t]
+    if not terms:
+        return []
+    ts_query_str = " & ".join(terms)
+
+    filters = ["sd.search_vector @@ to_tsquery('english', $1)"]
+    params: list[Any] = [ts_query_str]
+    idx = 2
+
+    if methodology:
+        filters.append(f"sd.methodology = ${idx}")
+        params.append(methodology)
+        idx += 1
+    if status:
+        filters.append(f"sd.status = ${idx}")
+        params.append(status)
+        idx += 1
+
+    where = " AND ".join(filters)
+    rows = await pool.fetch(
+        f"""
+        SELECT sd.id, sd.title, sd.customer_name, sd.methodology, sd.status,
+               sd.updated_at,
+               ts_rank(sd.search_vector, to_tsquery('english', $1)) AS rank,
+               ts_headline(
+                   'english',
+                   coalesce(sd.title, '') || ' ' || coalesce(sd.customer_name, ''),
+                   to_tsquery('english', $1),
+                   'MaxWords=30, MinWords=10'
+               ) AS snippet
+        FROM sow_documents sd
+        WHERE {where}
+        ORDER BY rank DESC
+        LIMIT ${idx} OFFSET ${idx + 1}
+        """,
+        *params,
+        limit,
+        offset,
+    )
+    return [dict(r) for r in rows]
+
+
 # ── AI Analysis ──────────────────────────────────────────────────────────────
 
 

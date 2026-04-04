@@ -9,7 +9,7 @@
  * the fetch if no token is present, and the app-level auth redirects them).
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
@@ -132,6 +132,8 @@ export default function AllSoWs() {
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [searchResults, setSearchResults] = useState(null); // null = not searching
+  const debounceTimer = useRef(null);
 
   useEffect(() => {
     if (!user) return;
@@ -151,16 +153,47 @@ export default function AllSoWs() {
       });
   }, [user, authFetch]);
 
-  const filtered = sows.filter((s) => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      (s.title ?? '').toLowerCase().includes(q) ||
-      (s.customer_name ?? '').toLowerCase().includes(q) ||
-      (s.opportunity_id ?? '').toLowerCase().includes(q);
-    const matchMethod = filterMethod === 'All' || s.methodology === filterMethod;
-    const matchStatus = filterStatus === 'All' || s.status === filterStatus;
-    return matchSearch && matchMethod && matchStatus;
-  });
+  // Debounced server-side full-text search
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (!user || search.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: search });
+        if (filterMethod !== 'All') params.set('methodology', filterMethod);
+        if (filterStatus !== 'All') params.set('status', filterStatus);
+        const res = await authFetch(`/api/sow/search?${params}`);
+        if (res.ok) setSearchResults(await res.json());
+      } catch {
+        // Fall back to client-side filter on error
+        setSearchResults(null);
+      }
+    }, 300);
+    return () => clearTimeout(debounceTimer.current);
+  }, [search, filterMethod, filterStatus, user, authFetch]);
+
+  // Client-side filter used when search is short or server search is unavailable
+  const filtered = useMemo(
+    () =>
+      sows.filter((s) => {
+        const q = search.toLowerCase();
+        const matchSearch =
+          !q ||
+          (s.title ?? '').toLowerCase().includes(q) ||
+          (s.customer_name ?? '').toLowerCase().includes(q) ||
+          (s.opportunity_id ?? '').toLowerCase().includes(q);
+        const matchMethod = filterMethod === 'All' || s.methodology === filterMethod;
+        const matchStatus = filterStatus === 'All' || s.status === filterStatus;
+        return matchSearch && matchMethod && matchStatus;
+      }),
+    [sows, search, filterMethod, filterStatus]
+  );
+
+  // What to display: server search results (if active) or client-side filtered list
+  const displayedSows = searchResults !== null ? searchResults : filtered;
 
   const handleRowClick = (sow) => {
     switch (sow.status) {
@@ -313,7 +346,9 @@ export default function AllSoWs() {
           </div>
 
           <p className="text-sm text-tertiary mb-md">
-            {filtered.length} SoW{filtered.length !== 1 ? 's' : ''} found
+            {searchResults !== null
+              ? `${searchResults.length} search result${searchResults.length !== 1 ? 's' : ''}`
+              : `${filtered.length} SoW${filtered.length !== 1 ? 's' : ''} found`}
           </p>
 
           {/* Empty state */}
@@ -331,7 +366,7 @@ export default function AllSoWs() {
           )}
 
           {/* Table */}
-          {sows.length > 0 && (
+          {(sows.length > 0 || searchResults !== null) && (
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -369,7 +404,7 @@ export default function AllSoWs() {
                 </thead>
 
                 <tbody>
-                  {filtered.map((sow, i) => (
+                  {displayedSows.map((sow, i) => (
                     <motion.tr
                       key={sow.id}
                       initial={{ opacity: 0, y: 6 }}
@@ -378,7 +413,7 @@ export default function AllSoWs() {
                       onClick={() => handleRowClick(sow)}
                       style={{
                         borderBottom:
-                          i < filtered.length - 1
+                          i < displayedSows.length - 1
                             ? '1px solid var(--color-border-default)'
                             : 'none',
                         cursor: 'pointer',
@@ -397,6 +432,13 @@ export default function AllSoWs() {
                         <p className="font-medium" style={{ marginBottom: '2px' }}>
                           {sow.title}
                         </p>
+                        {sow.snippet && (
+                          <p
+                            className="text-xs text-tertiary"
+                            style={{ marginTop: '2px' }}
+                            dangerouslySetInnerHTML={{ __html: sow.snippet }}
+                          />
+                        )}
                         {sow.opportunity_id && (
                           <p className="text-xs text-tertiary">{sow.opportunity_id}</p>
                         )}
@@ -460,9 +502,13 @@ export default function AllSoWs() {
                 </tbody>
               </table>
 
-              {filtered.length === 0 && sows.length > 0 && (
+              {displayedSows.length === 0 && (sows.length > 0 || searchResults !== null) && (
                 <div style={{ padding: 'var(--spacing-3xl)', textAlign: 'center' }}>
-                  <p className="text-secondary">No SoWs match your filters.</p>
+                  <p className="text-secondary">
+                    {searchResults !== null
+                      ? 'No SoWs match your search.'
+                      : 'No SoWs match your filters.'}
+                  </p>
                 </div>
               )}
             </div>
