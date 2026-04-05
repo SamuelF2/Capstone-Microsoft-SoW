@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import AttachmentManager from '../../components/AttachmentManager';
 import WorkflowProgress from '../../components/WorkflowProgress';
-import SoWWorkflowCustomizer from '../../components/SoWWorkflowCustomizer';
+import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
 import ActivityLog from '../../components/ActivityLog';
 
 // Shared components
@@ -413,8 +413,6 @@ export default function DraftPage() {
   const [notFound, setNotFound] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
-  const [showWorkflowCustomizer, setShowWorkflowCustomizer] = useState(false);
-  const [workflowRefreshKey, setWorkflowRefreshKey] = useState(0);
 
   // Load SoW from localStorage
   useEffect(() => {
@@ -731,37 +729,14 @@ export default function DraftPage() {
           }}
         >
           <div style={{ maxWidth: 'var(--container-xl)', margin: '0 auto' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--spacing-md)' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <WorkflowProgress
-                  sowId={id}
-                  currentStage={sowData.status || 'draft'}
-                  reviewAssignments={[]}
-                  refreshKey={workflowRefreshKey}
-                />
-              </div>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => setShowWorkflowCustomizer((v) => !v)}
-                style={{ fontSize: 'var(--font-size-xs)', whiteSpace: 'nowrap' }}
-                title="Customize this SoW's workflow"
-              >
-                {showWorkflowCustomizer ? 'Hide' : 'Customize'} workflow
-              </button>
+            <WorkflowProgress
+              sowId={id}
+              currentStage={sowData.status || 'draft'}
+              reviewAssignments={[]}
+            />
+            <div style={{ marginTop: 'var(--spacing-sm)' }}>
+              <WorkflowReadOnlySummary sowId={id} />
             </div>
-            {showWorkflowCustomizer && (
-              <div style={{ marginTop: 'var(--spacing-md)' }}>
-                <SoWWorkflowCustomizer
-                  sowId={id}
-                  onSaved={() => {
-                    setWorkflowRefreshKey((k) => k + 1);
-                    setShowWorkflowCustomizer(false);
-                  }}
-                  onClose={() => setShowWorkflowCustomizer(false)}
-                />
-              </div>
-            )}
           </div>
         </div>
 

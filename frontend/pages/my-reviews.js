@@ -11,6 +11,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
 import { formatDate, formatDeal, esapBadgeStyle } from '../lib/format';
+import { assignmentStageLabel } from '../lib/workflowStages';
 
 const ASSIGNMENT_STATUS_STYLES = {
   pending: {
@@ -44,11 +45,6 @@ const ROLE_DISPLAY = {
   'delivery-manager': 'Delivery Manager',
 };
 
-const STAGE_DISPLAY = {
-  'internal-review': 'Internal Review',
-  'drm-approval': 'DRM Approval',
-};
-
 // ── ReviewCard ────────────────────────────────────────────────────────────────
 
 function ReviewCard({ assignment }) {
@@ -56,10 +52,10 @@ function ReviewCard({ assignment }) {
   const style = ASSIGNMENT_STATUS_STYLES[assignment.status] || ASSIGNMENT_STATUS_STYLES.pending;
   const esapStyle = esapBadgeStyle(assignment.esap_level);
   const deal = formatDeal(assignment.deal_value, null);
-  const reviewPath =
-    assignment.stage === 'drm-approval'
-      ? `/drm-review/${assignment.sow_id}`
-      : `/internal-review/${assignment.sow_id}`;
+  // All review stages — internal, DRM, and any custom workflow phases — flow
+  // through the unified /review/[id] page, which resolves the active stage from
+  // the SoW's workflow snapshot and renders a role-aware UI.
+  const reviewPath = `/review/${assignment.sow_id}`;
 
   return (
     <div
@@ -158,7 +154,7 @@ function ReviewCard({ assignment }) {
           </span>
           <span className="text-sm text-secondary">
             <strong style={{ color: 'var(--color-text-primary)' }}>Stage:</strong>{' '}
-            {STAGE_DISPLAY[assignment.stage] || assignment.stage}
+            {assignment.stage_display_name || assignmentStageLabel(assignment.stage)}
           </span>
           {deal && (
             <span className="text-sm text-secondary">

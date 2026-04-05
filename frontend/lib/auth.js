@@ -13,11 +13,44 @@ import { getMsalInstance, loginRequest } from './msalConfig';
 
 const AuthContext = createContext(null);
 
+// localStorage key used to persist the testing-only role override.
+// Cleared on logout or via the "Clear override" button in Account settings.
+const ROLE_OVERRIDE_KEY = 'role-override';
+
+function readStoredRoleOverride() {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(ROLE_OVERRIDE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredRoleOverride(role) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (role) window.localStorage.setItem(ROLE_OVERRIDE_KEY, role);
+    else window.localStorage.removeItem(ROLE_OVERRIDE_KEY);
+  } catch {
+    // Ignore storage errors (private mode, quota, etc.)
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Kept as a ref so it's preserved across re-renders and applied to every
+  // user load (even after relogin).
+  const roleOverrideRef = useRef(null);
   const msalRef = useRef(getMsalInstance());
   const tokenRef = useRef(null);
+
+  // Apply the stored role override to a freshly loaded user object.
+  const applyRoleOverride = useCallback((rawUser) => {
+    if (!rawUser) return rawUser;
+    const override = roleOverrideRef.current;
+    return override ? { ...rawUser, role: override, _baseRole: rawUser.role } : rawUser;
+  }, []);
 
   // ── Token acquisition (silent with interactive fallback) ──────────────────
   // Uses the ID token (not a custom API access token) for backend auth.
@@ -53,6 +86,10 @@ export function AuthProvider({ children }) {
 
   // ── Initialize MSAL and rehydrate session ─────────────────────────────────
   useEffect(() => {
+    // Rehydrate the stored role override before we load the user so it's
+    // applied to the very first render.
+    roleOverrideRef.current = readStoredRoleOverride();
+
     const init = async () => {
       const msal = msalRef.current;
       if (!msal) {
@@ -74,7 +111,7 @@ export function AuthProvider({ children }) {
             const res = await fetch('/api/auth/me', {
               headers: { Authorization: `Bearer ${token}` },
             });
-            if (res.ok) setUser(await res.json());
+            if (res.ok) setUser(applyRoleOverride(await res.json()));
           }
         }
       } catch (err) {
@@ -84,7 +121,7 @@ export function AuthProvider({ children }) {
       }
     };
     init();
-  }, []);
+  }, [applyRoleOverride]);
 
   /** Get a token for API calls. */
   const getAccessToken = useCallback(async () => {
@@ -108,14 +145,14 @@ export function AuthProvider({ children }) {
       headers: { Authorization: `Bearer ${response.idToken}` },
     });
     if (meRes.ok) {
-      setUser(await meRes.json());
+      setUser(applyRoleOverride(await meRes.json()));
     } else {
       const body = await meRes.json().catch(() => ({}));
       throw new Error(body.detail || `Authentication failed (${meRes.status})`);
     }
-  }, []);
+  }, [applyRoleOverride]);
 
-  /** Sign out via Microsoft popup. */
+  /** Sign out via Microsoft popup. Also clears the role override. */
   const logout = useCallback(async () => {
     const msal = msalRef.current;
     if (msal) {
@@ -126,6 +163,8 @@ export function AuthProvider({ children }) {
       }
     }
     tokenRef.current = null;
+    roleOverrideRef.current = null;
+    writeStoredRoleOverride(null);
     setUser(null);
   }, []);
 
@@ -147,14 +186,44 @@ export function AuthProvider({ children }) {
     [getAccessToken]
   );
 
-  /** Override the user's role locally for testing purposes. */
+  /**
+   * Override the user's role locally for testing purposes. Persists to
+   * localStorage so the override survives reloads. The original role is kept
+   * as `user._baseRole` so the UI can show both if needed.
+   */
   const overrideRole = useCallback((role) => {
-    setUser((prev) => (prev ? { ...prev, role } : prev));
+    roleOverrideRef.current = role || null;
+    writeStoredRoleOverride(role || null);
+    setUser((prev) => {
+      if (!prev) return prev;
+      if (!role) {
+        // Clearing: revert to the original role if we stashed one.
+        const base = prev._baseRole ?? prev.role;
+        const { _baseRole, ...rest } = prev;
+        return { ...rest, role: base };
+      }
+      const base = prev._baseRole ?? prev.role;
+      return { ...prev, role, _baseRole: base };
+    });
   }, []);
+
+  /** Clear any active role override and revert to the user's real role. */
+  const clearRoleOverride = useCallback(() => {
+    overrideRole(null);
+  }, [overrideRole]);
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, logout, authFetch, getAccessToken, overrideRole }}
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        authFetch,
+        getAccessToken,
+        overrideRole,
+        clearRoleOverride,
+      }}
     >
       {children}
     </AuthContext.Provider>

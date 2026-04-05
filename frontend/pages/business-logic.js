@@ -1,524 +1,24 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
 
-// ── Workflow Templates Tab ───────────────────────────────────────────────────
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Workflow Templates Tab ──────────────────────────────────────────────────
+// This tab is now a lightweight list + detail view. All authoring happens on
+// the dedicated React Flow editor at /workflows/[id]/edit.
 
-function _wfId() {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
-
-function toStageKey(name) {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s_]/g, '')
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
-}
-
-function emptyStage() {
-  return { id: _wfId(), displayName: '', stageType: 'review', roles: [] };
-}
-
-function emptyRole() {
-  return { id: _wfId(), roleKey: '', isRequired: true, esapLevels: [] };
-}
-
-const NON_TERMINAL_TYPE_OPTIONS = [
-  { value: 'review', label: 'Review' },
-  { value: 'approval', label: 'Approval' },
-  { value: 'ai_analysis', label: 'AI Analysis' },
-];
-
-const KNOWN_ROLES = ['solution-architect', 'cpl', 'cdp', 'delivery-manager', 'sqa-reviewer'];
-
-const ESAP_LEVEL_KEYS = ['type-1', 'type-2', 'type-3'];
-const ESAP_LEVEL_COLORS = { 'type-1': '#ef4444', 'type-2': '#fbbf24', 'type-3': '#4ade80' };
-const RESERVED_STAGE_KEYS = new Set(['draft', 'approved', 'finalized', 'rejected']);
-
-const STAGE_TYPE_ACCENT = {
-  review: 'var(--color-accent-blue)',
-  approval: 'var(--color-accent-purple, #7c3aed)',
-  ai_analysis: '#4ade80',
-};
-
-// ── RoleRow ───────────────────────────────────────────────────────────────────
-
-function RoleRow({ role, onUpdate, onRemove }) {
-  const [showCustom, setShowCustom] = useState(
-    !KNOWN_ROLES.includes(role.roleKey) && role.roleKey !== ''
-  );
-
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(160px,1fr) auto auto auto',
-        gap: 'var(--spacing-xs)',
-        alignItems: 'center',
-        padding: 'var(--spacing-xs) var(--spacing-sm)',
-        borderRadius: 'var(--radius-sm)',
-        backgroundColor: 'var(--color-bg-primary)',
-        border: '1px solid var(--color-border-subtle)',
-      }}
-    >
-      {/* Role selector */}
-      <div style={{ display: 'flex', gap: 'var(--spacing-xs)', alignItems: 'center' }}>
-        {!showCustom ? (
-          <select
-            value={role.roleKey || ''}
-            onChange={(e) => {
-              if (e.target.value === '__custom__') {
-                setShowCustom(true);
-                onUpdate('roleKey', '');
-              } else {
-                onUpdate('roleKey', e.target.value);
-              }
-            }}
-            style={{
-              flex: 1,
-              fontSize: 'var(--font-size-xs)',
-              padding: '3px 6px',
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--color-border-default)',
-              backgroundColor: 'var(--color-bg-secondary)',
-              color: 'var(--color-text-primary)',
-            }}
-          >
-            <option value="">Select role…</option>
-            {KNOWN_ROLES.map((k) => (
-              <option key={k} value={k}>
-                {k.replace(/-/g, ' ')}
-              </option>
-            ))}
-            <option value="__custom__">Custom role…</option>
-          </select>
-        ) : (
-          <div style={{ display: 'flex', gap: '4px', flex: 1 }}>
-            <input
-              type="text"
-              placeholder="role-key (e.g. dba)"
-              value={role.roleKey}
-              onChange={(e) =>
-                onUpdate('roleKey', e.target.value.toLowerCase().replace(/\s+/g, '-'))
-              }
-              style={{
-                flex: 1,
-                fontSize: 'var(--font-size-xs)',
-                padding: '3px 6px',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border-default)',
-                backgroundColor: 'var(--color-bg-secondary)',
-                color: 'var(--color-text-primary)',
-              }}
-            />
-            <button
-              onClick={() => {
-                setShowCustom(false);
-                onUpdate('roleKey', '');
-              }}
-              title="Back to presets"
-              style={{
-                fontSize: '10px',
-                padding: '2px 6px',
-                background: 'none',
-                border: '1px solid var(--color-border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                color: 'var(--color-text-tertiary)',
-                cursor: 'pointer',
-              }}
-            >
-              ↩
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Required toggle */}
-      <label
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px',
-          cursor: 'pointer',
-          fontSize: 'var(--font-size-xs)',
-          color: 'var(--color-text-secondary)',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={role.isRequired}
-          onChange={(e) => onUpdate('isRequired', e.target.checked)}
-        />
-        Required
-      </label>
-
-      {/* ESAP level pills */}
-      <div
-        style={{ display: 'flex', gap: '3px', alignItems: 'center' }}
-        title={role.esapLevels.length === 0 ? 'Applies to all ESAP levels' : undefined}
-      >
-        {ESAP_LEVEL_KEYS.map((lvl) => {
-          const active = role.esapLevels.includes(lvl);
-          const c = ESAP_LEVEL_COLORS[lvl];
-          return (
-            <button
-              key={lvl}
-              title={active ? `Remove ${lvl}` : `Restrict to ${lvl}`}
-              onClick={() =>
-                onUpdate(
-                  'esapLevels',
-                  active ? role.esapLevels.filter((l) => l !== lvl) : [...role.esapLevels, lvl]
-                )
-              }
-              style={{
-                padding: '1px 6px',
-                borderRadius: 'var(--radius-full)',
-                border: `1px solid ${active ? c : 'var(--color-border-subtle)'}`,
-                backgroundColor: active ? `${c}22` : 'transparent',
-                color: active ? c : 'var(--color-text-tertiary)',
-                fontSize: '9px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                lineHeight: '1.4',
-              }}
-            >
-              {lvl.replace('type-', 'T')}
-            </button>
-          );
-        })}
-        {role.esapLevels.length === 0 && (
-          <span style={{ fontSize: '9px', color: 'var(--color-text-tertiary)', marginLeft: 2 }}>
-            all
-          </span>
-        )}
-      </div>
-
-      {/* Remove */}
-      <button
-        onClick={onRemove}
-        title="Remove role"
-        style={{
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: 'var(--font-size-sm)',
-          padding: '2px 6px',
-          borderRadius: 'var(--radius-sm)',
-          lineHeight: 1,
-        }}
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
-// ── StageCard (editable) ──────────────────────────────────────────────────────
-
-function StageCard({
-  stage,
-  index,
-  total,
-  onUpdate,
-  onRemove,
-  onMoveUp,
-  onMoveDown,
-  onAddRole,
-  onUpdateRole,
-  onRemoveRole,
-}) {
-  const accent = STAGE_TYPE_ACCENT[stage.stageType] || 'var(--color-accent-blue)';
-
-  return (
-    <div
-      style={{
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--color-border-default)',
-        backgroundColor: 'var(--color-bg-secondary)',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--spacing-sm)',
-          padding: 'var(--spacing-sm) var(--spacing-md)',
-          backgroundColor: `${accent}0f`,
-          borderBottom: '1px solid var(--color-border-subtle)',
-        }}
-      >
-        {/* Order badge */}
-        <span
-          style={{
-            fontSize: 'var(--font-size-xs)',
-            color: 'var(--color-text-tertiary)',
-            fontWeight: 600,
-            minWidth: 20,
-            textAlign: 'center',
-          }}
-        >
-          {index + 2}
-        </span>
-
-        {/* Display name */}
-        <input
-          type="text"
-          placeholder="Stage display name (e.g. Technical Review)"
-          value={stage.displayName}
-          onChange={(e) => onUpdate('displayName', e.target.value)}
-          style={{
-            flex: 1,
-            fontSize: 'var(--font-size-sm)',
-            fontWeight: 500,
-            padding: '4px 8px',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--color-border-default)',
-            backgroundColor: 'var(--color-bg-primary)',
-            color: 'var(--color-text-primary)',
-          }}
-        />
-
-        {/* Stage type */}
-        <select
-          value={stage.stageType}
-          onChange={(e) => onUpdate('stageType', e.target.value)}
-          style={{
-            fontSize: 'var(--font-size-xs)',
-            padding: '4px 8px',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--color-border-default)',
-            backgroundColor: 'var(--color-bg-primary)',
-            color: accent,
-            fontWeight: 500,
-          }}
-        >
-          {NON_TERMINAL_TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-
-        {/* Up / Down */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-          <button
-            onClick={onMoveUp}
-            disabled={index === 0}
-            title="Move up"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: index === 0 ? 'default' : 'pointer',
-              color: index === 0 ? 'var(--color-border-default)' : 'var(--color-text-secondary)',
-              fontSize: '10px',
-              padding: '0 4px',
-              lineHeight: 1.2,
-            }}
-          >
-            ▲
-          </button>
-          <button
-            onClick={onMoveDown}
-            disabled={index === total - 1}
-            title="Move down"
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: index === total - 1 ? 'default' : 'pointer',
-              color:
-                index === total - 1 ? 'var(--color-border-default)' : 'var(--color-text-secondary)',
-              fontSize: '10px',
-              padding: '0 4px',
-              lineHeight: 1.2,
-            }}
-          >
-            ▼
-          </button>
-        </div>
-
-        {/* Remove stage */}
-        <button
-          onClick={onRemove}
-          title="Remove stage"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            fontSize: 'var(--font-size-base)',
-            padding: '2px 6px',
-            borderRadius: 'var(--radius-sm)',
-            lineHeight: 1,
-          }}
-        >
-          ×
-        </button>
-      </div>
-
-      {/* Stage key preview */}
-      {stage.displayName && (
-        <div
-          style={{
-            padding: '2px var(--spacing-md)',
-            backgroundColor: 'var(--color-bg-tertiary)',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            fontSize: '10px',
-            color: 'var(--color-text-tertiary)',
-            fontFamily: 'monospace',
-          }}
-        >
-          key:{' '}
-          <span style={{ color: 'var(--color-text-secondary)' }}>
-            {toStageKey(stage.displayName) || '…'}
-          </span>
-        </div>
-      )}
-
-      {/* Roles */}
-      <div style={{ padding: 'var(--spacing-sm) var(--spacing-md)' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 'var(--spacing-xs)',
-          }}
-        >
-          <span
-            style={{
-              fontSize: '10px',
-              color: 'var(--color-text-tertiary)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontWeight: 600,
-            }}
-          >
-            Reviewer Roles
-          </span>
-          <button
-            onClick={onAddRole}
-            style={{
-              fontSize: 'var(--font-size-xs)',
-              padding: '2px 10px',
-              borderRadius: 'var(--radius-full)',
-              border: '1px dashed var(--color-border-default)',
-              backgroundColor: 'transparent',
-              color: 'var(--color-text-secondary)',
-              cursor: 'pointer',
-            }}
-          >
-            + Add Role
-          </button>
-        </div>
-
-        {stage.roles.length === 0 ? (
-          <p
-            style={{
-              fontSize: 'var(--font-size-xs)',
-              color: 'var(--color-text-tertiary)',
-              fontStyle: 'italic',
-              margin: 0,
-            }}
-          >
-            No roles required — any user can progress this stage.
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
-            {stage.roles.map((role) => (
-              <RoleRow
-                key={role.id}
-                role={role}
-                onUpdate={(field, value) => onUpdateRole(role.id, field, value)}
-                onRemove={() => onRemoveRole(role.id)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── FlowPreview ───────────────────────────────────────────────────────────────
-
-function FlowPreview({ stages }) {
-  const pills = [
-    { label: 'Draft', isSystem: true },
-    ...stages.map((s) => ({
-      label: s.displayName || '…',
-      isSystem: false,
-      accent: STAGE_TYPE_ACCENT[s.stageType] || 'var(--color-accent-blue)',
-    })),
-    { label: 'Approved', isSystem: true },
-    { label: 'Finalized', isSystem: true },
-  ];
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 'var(--spacing-xs)',
-        alignItems: 'center',
-        padding: 'var(--spacing-sm) var(--spacing-md)',
-        borderRadius: 'var(--radius-md)',
-        backgroundColor: 'var(--color-bg-tertiary)',
-        border: '1px solid var(--color-border-subtle)',
-      }}
-    >
-      {pills.map((p, i) => (
-        <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)' }}>
-          <span
-            style={{
-              padding: '3px 10px',
-              borderRadius: 'var(--radius-full)',
-              fontSize: 'var(--font-size-xs)',
-              fontWeight: 500,
-              color: p.isSystem ? 'var(--color-text-tertiary)' : p.accent,
-              backgroundColor: p.isSystem ? 'var(--color-bg-secondary)' : `${p.accent}18`,
-              border: `1px solid ${p.isSystem ? 'var(--color-border-subtle)' : `${p.accent}44`}`,
-              fontStyle: p.isSystem ? 'italic' : 'normal',
-            }}
-          >
-            {p.label}
-          </span>
-          {i < pills.length - 1 && (
-            <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-xs)' }}>
-              →
-            </span>
-          )}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-// ── WorkflowTab ───────────────────────────────────────────────────────────────
-
-function WorkflowTab({ authFetch }) {
+function WorkflowTab({ authFetch, user }) {
+  const router = useRouter();
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateDetail, setTemplateDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [editingTemplateId, setEditingTemplateId] = useState(null); // null => create mode
-  const [form, setForm] = useState({ name: '', description: '', stages: [emptyStage()] });
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState(null);
+  const [filter, setFilter] = useState('all'); // all | mine | shared | system
   const [deleting, setDeleting] = useState(false);
 
-  // Load template list on mount
   useEffect(() => {
     authFetch('/api/workflow/templates')
       .then((r) => {
@@ -530,7 +30,27 @@ function WorkflowTab({ authFetch }) {
       .finally(() => setLoading(false));
   }, [authFetch]);
 
-  // ── Table selection ─────────────────────────────────────────────────────────
+  // Ownership bucket: system templates, the user's own, or the shared library
+  // (anything not system and not theirs). Templates with a null created_by are
+  // legacy rows before ownership was tracked — we show them in the shared
+  // library so they don't vanish from view.
+  const categorize = (t) => {
+    if (t.is_system) return 'system';
+    if (user && t.created_by != null && t.created_by === user.id) return 'mine';
+    return 'shared';
+  };
+
+  const filteredTemplates = templates.filter((t) => {
+    if (filter === 'all') return true;
+    return categorize(t) === filter;
+  });
+
+  const counts = {
+    all: templates.length,
+    mine: templates.filter((t) => categorize(t) === 'mine').length,
+    shared: templates.filter((t) => categorize(t) === 'shared').length,
+    system: templates.filter((t) => categorize(t) === 'system').length,
+  };
 
   const handleSelect = async (tmpl) => {
     if (selectedTemplate?.id === tmpl.id) {
@@ -550,261 +70,6 @@ function WorkflowTab({ authFetch }) {
       setDetailLoading(false);
     }
   };
-
-  // ── Create form helpers ─────────────────────────────────────────────────────
-
-  const openCreateForm = () => {
-    setShowCreateForm(true);
-    setEditingTemplateId(null);
-    setSelectedTemplate(null);
-    setTemplateDetail(null);
-    setCreateError(null);
-    setForm({ name: '', description: '', stages: [emptyStage()] });
-  };
-
-  // Populate the form from an existing template for editing. Filters out the
-  // auto-managed draft/approved/finalized/rejected stages so the user only
-  // sees and edits the custom stages that sit between them.
-  const openEditForm = async (tmpl) => {
-    if (tmpl.is_system) return;
-    setCreateError(null);
-    let detail = templateDetail;
-    if (!detail || detail.id !== tmpl.id) {
-      try {
-        const res = await authFetch(`/api/workflow/templates/${tmpl.id}`);
-        if (!res.ok) throw new Error(`Failed to load template (${res.status})`);
-        detail = await res.json();
-      } catch (e) {
-        setCreateError(e.message);
-        return;
-      }
-    }
-
-    const userStages = (detail.workflow_data?.stages || [])
-      .filter((s) => !RESERVED_STAGE_KEYS.has(s.stage_key))
-      .sort((a, b) => a.stage_order - b.stage_order)
-      .map((s) => ({
-        id: _wfId(),
-        displayName: s.display_name || '',
-        stageType: s.stage_type || 'review',
-        roles: (s.roles || []).map((r) => ({
-          id: _wfId(),
-          roleKey: r.role_key || '',
-          isRequired: r.is_required !== false,
-          esapLevels: Array.isArray(r.esap_levels) ? r.esap_levels : [],
-        })),
-      }));
-
-    setEditingTemplateId(tmpl.id);
-    setSelectedTemplate(tmpl);
-    setTemplateDetail(detail);
-    setForm({
-      name: detail.name || tmpl.name || '',
-      description: detail.description || tmpl.description || '',
-      stages: userStages.length > 0 ? userStages : [emptyStage()],
-    });
-    setShowCreateForm(true);
-  };
-
-  const updateStage = (stageId, field, value) =>
-    setForm((f) => ({
-      ...f,
-      stages: f.stages.map((s) => (s.id === stageId ? { ...s, [field]: value } : s)),
-    }));
-
-  const removeStage = (stageId) =>
-    setForm((f) => ({ ...f, stages: f.stages.filter((s) => s.id !== stageId) }));
-
-  const moveStage = (index, dir) =>
-    setForm((f) => {
-      const arr = [...f.stages];
-      const target = index + dir;
-      if (target < 0 || target >= arr.length) return f;
-      [arr[index], arr[target]] = [arr[target], arr[index]];
-      return { ...f, stages: arr };
-    });
-
-  const addRole = (stageId) =>
-    setForm((f) => ({
-      ...f,
-      stages: f.stages.map((s) =>
-        s.id === stageId ? { ...s, roles: [...s.roles, emptyRole()] } : s
-      ),
-    }));
-
-  const updateRole = (stageId, roleId, field, value) =>
-    setForm((f) => ({
-      ...f,
-      stages: f.stages.map((s) =>
-        s.id === stageId
-          ? { ...s, roles: s.roles.map((r) => (r.id === roleId ? { ...r, [field]: value } : r)) }
-          : s
-      ),
-    }));
-
-  const removeRole = (stageId, roleId) =>
-    setForm((f) => ({
-      ...f,
-      stages: f.stages.map((s) =>
-        s.id === stageId ? { ...s, roles: s.roles.filter((r) => r.id !== roleId) } : s
-      ),
-    }));
-
-  // ── Validate + submit ───────────────────────────────────────────────────────
-
-  const handleCreate = async () => {
-    setCreateError(null);
-
-    if (!form.name.trim()) {
-      setCreateError('Template name is required.');
-      return;
-    }
-    if (form.stages.length === 0) {
-      setCreateError('Add at least one stage.');
-      return;
-    }
-    if (form.stages.some((s) => !s.displayName.trim())) {
-      setCreateError('All stages must have a display name.');
-      return;
-    }
-
-    const stageKeys = form.stages.map((s) => toStageKey(s.displayName));
-    if (new Set(stageKeys).size !== stageKeys.length) {
-      setCreateError('Stage names must produce unique keys — rename duplicates.');
-      return;
-    }
-    for (const k of stageKeys) {
-      if (RESERVED_STAGE_KEYS.has(k)) {
-        setCreateError(`"${k}" is a reserved stage key. Please rename that stage.`);
-        return;
-      }
-    }
-    for (const stage of form.stages) {
-      for (const role of stage.roles) {
-        if (!role.roleKey.trim()) {
-          setCreateError(
-            `Stage "${stage.displayName}" has a role with no key. Select a role or remove it.`
-          );
-          return;
-        }
-      }
-    }
-
-    // Build user stages with auto-assigned order (1 = Draft, so user stages start at 2)
-    const userStages = form.stages.map((s, i) => ({
-      stage_key: toStageKey(s.displayName),
-      display_name: s.displayName.trim(),
-      stage_order: i + 2,
-      stage_type: s.stageType,
-      roles: s.roles.map((r) => ({
-        role_key: r.roleKey.trim(),
-        is_required: r.isRequired,
-        esap_levels: r.esapLevels.length > 0 ? r.esapLevels : null,
-      })),
-      config: {},
-    }));
-
-    const terminalBase = userStages.length + 2;
-    const allStages = [
-      {
-        stage_key: 'draft',
-        display_name: 'Draft',
-        stage_order: 1,
-        stage_type: 'draft',
-        roles: [],
-        config: {},
-      },
-      ...userStages,
-      {
-        stage_key: 'approved',
-        display_name: 'Approved',
-        stage_order: terminalBase,
-        stage_type: 'terminal',
-        roles: [],
-        config: {},
-      },
-      {
-        stage_key: 'finalized',
-        display_name: 'Finalized',
-        stage_order: terminalBase + 1,
-        stage_type: 'terminal',
-        roles: [],
-        config: {},
-      },
-      {
-        stage_key: 'rejected',
-        display_name: 'Rejected',
-        stage_order: 0,
-        stage_type: 'terminal',
-        roles: [],
-        config: {},
-      },
-    ];
-
-    // Linear forward chain: draft → s1 → … → approved → finalized
-    const chain = ['draft', ...userStages.map((s) => s.stage_key), 'approved'];
-    const transitions = chain
-      .slice(0, -1)
-      .map((from, i) => ({ from_stage: from, to_stage: chain[i + 1] }));
-    transitions.push({ from_stage: 'approved', to_stage: 'finalized' });
-
-    // Review / approval stages can reject
-    userStages
-      .filter((s) => ['review', 'approval'].includes(s.stage_type))
-      .forEach((s) => transitions.push({ from_stage: s.stage_key, to_stage: 'rejected' }));
-
-    // Rejection sends back to draft for rework
-    transitions.push({ from_stage: 'rejected', to_stage: 'draft' });
-
-    const payload = {
-      name: form.name.trim(),
-      description: form.description.trim() || null,
-      workflow_data: { stages: allStages, transitions },
-    };
-
-    setCreating(true);
-    try {
-      const isEdit = editingTemplateId != null;
-      const url = isEdit
-        ? `/api/workflow/templates/${editingTemplateId}`
-        : '/api/workflow/templates';
-      const res = await authFetch(url, {
-        method: isEdit ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || `Server error ${res.status}`);
-      }
-      const saved = await res.json();
-      const summary = {
-        id: saved.id,
-        name: saved.name,
-        description: saved.description,
-        is_system: saved.is_system ?? false,
-        stage_count: saved.workflow_data.stages.length,
-        created_at: saved.created_at,
-      };
-      setTemplates((prev) =>
-        isEdit ? prev.map((t) => (t.id === saved.id ? summary : t)) : [...prev, summary]
-      );
-      if (isEdit) {
-        // Refresh the detail panel with the freshly-saved template
-        setSelectedTemplate(summary);
-        setTemplateDetail(saved);
-      }
-      setShowCreateForm(false);
-      setEditingTemplateId(null);
-      setForm({ name: '', description: '', stages: [emptyStage()] });
-    } catch (e) {
-      setCreateError(e.message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  // ── Delete ──────────────────────────────────────────────────────────────────
 
   const handleDelete = async () => {
     if (!selectedTemplate || selectedTemplate.is_system) return;
@@ -830,7 +95,7 @@ function WorkflowTab({ authFetch }) {
     }
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  const openEditor = (id) => router.push(`/workflows/${id}/edit`);
 
   if (loading) return <Spinner />;
   if (error)
@@ -839,6 +104,9 @@ function WorkflowTab({ authFetch }) {
         {error}
       </p>
     );
+
+  const selectedCat = selectedTemplate ? categorize(selectedTemplate) : null;
+  const canEdit = selectedCat === 'mine';
 
   return (
     <div>
@@ -855,28 +123,73 @@ function WorkflowTab({ authFetch }) {
         <div>
           <h3 className="text-lg font-semibold mb-xs">Workflow Templates</h3>
           <p className="text-sm text-secondary">
-            All available review workflow templates. Click a row to inspect stages and transitions.
+            Review workflows you can assign to new SoWs. Click a row to preview, or open the visual
+            editor to build a graph of stages and transitions. System and shared templates are
+            read-only — use <em>Save as copy</em> in the editor to clone them.
           </p>
         </div>
-        {!showCreateForm && (
-          <button
-            onClick={openCreateForm}
-            style={{
-              padding: 'var(--spacing-sm) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              border: 'none',
-              backgroundColor: 'var(--color-accent-purple, #7c3aed)',
-              color: '#fff',
-              fontSize: 'var(--font-size-sm)',
-              fontWeight: 600,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-            }}
-          >
-            + New Template
-          </button>
-        )}
+        <button
+          onClick={() => router.push('/workflows/new/edit')}
+          style={{
+            padding: 'var(--spacing-sm) var(--spacing-lg)',
+            borderRadius: 'var(--radius-md)',
+            border: 'none',
+            backgroundColor: 'var(--color-accent-purple, #7c3aed)',
+            color: '#fff',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          + New Workflow
+        </button>
+      </div>
+
+      {/* Ownership filter */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--spacing-xs)',
+          marginBottom: 'var(--spacing-md)',
+          flexWrap: 'wrap',
+        }}
+      >
+        {[
+          { key: 'all', label: 'All' },
+          { key: 'mine', label: 'Mine' },
+          { key: 'shared', label: 'Shared library' },
+          { key: 'system', label: 'System' },
+        ].map((f) => {
+          const active = filter === f.key;
+          return (
+            <button
+              key={f.key}
+              onClick={() => {
+                setFilter(f.key);
+                setSelectedTemplate(null);
+                setTemplateDetail(null);
+              }}
+              style={{
+                padding: '4px 14px',
+                borderRadius: 'var(--radius-full)',
+                border: `1px solid ${
+                  active ? 'var(--color-accent-purple, #7c3aed)' : 'var(--color-border-default)'
+                }`,
+                backgroundColor: active ? 'rgba(124,58,237,0.08)' : 'transparent',
+                color: active
+                  ? 'var(--color-accent-purple, #7c3aed)'
+                  : 'var(--color-text-secondary)',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              {f.label} <span style={{ opacity: 0.6, marginLeft: 2 }}>({counts[f.key]})</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Template table */}
@@ -888,7 +201,7 @@ function WorkflowTab({ authFetch }) {
             <tr
               style={{ borderBottom: '1px solid var(--color-border-default)', textAlign: 'left' }}
             >
-              {['Name', 'Description', 'Stages', 'Type'].map((h) => (
+              {['Name', 'Description', 'Stages', 'Ownership'].map((h) => (
                 <th
                   key={h}
                   style={{
@@ -903,15 +216,14 @@ function WorkflowTab({ authFetch }) {
             </tr>
           </thead>
           <tbody>
-            {templates.map((tmpl, i) => {
+            {filteredTemplates.map((tmpl, i) => {
               const isActive = selectedTemplate?.id === tmpl.id;
+              const cat = categorize(tmpl);
               return (
                 <tr
                   key={tmpl.id}
-                  onClick={() => {
-                    setShowCreateForm(false);
-                    handleSelect(tmpl);
-                  }}
+                  onClick={() => handleSelect(tmpl)}
+                  onDoubleClick={() => openEditor(tmpl.id)}
                   style={{
                     borderBottom: '1px solid var(--color-border-subtle)',
                     backgroundColor: isActive
@@ -949,40 +261,12 @@ function WorkflowTab({ authFetch }) {
                     {tmpl.stage_count ?? '—'}
                   </td>
                   <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)' }}>
-                    {tmpl.is_system ? (
-                      <span
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 'var(--radius-full)',
-                          fontSize: 'var(--font-size-xs)',
-                          backgroundColor: 'rgba(0,120,212,0.1)',
-                          color: 'var(--color-accent-blue)',
-                          border: '1px solid rgba(0,120,212,0.2)',
-                          fontWeight: 500,
-                        }}
-                      >
-                        System
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          padding: '2px 8px',
-                          borderRadius: 'var(--radius-full)',
-                          fontSize: 'var(--font-size-xs)',
-                          backgroundColor: 'rgba(124,58,237,0.1)',
-                          color: 'var(--color-accent-purple, #7c3aed)',
-                          border: '1px solid rgba(124,58,237,0.2)',
-                          fontWeight: 500,
-                        }}
-                      >
-                        Custom
-                      </span>
-                    )}
+                    <OwnershipBadge category={cat} />
                   </td>
                 </tr>
               );
             })}
-            {templates.length === 0 && (
+            {filteredTemplates.length === 0 && (
               <tr>
                 <td
                   colSpan={4}
@@ -993,7 +277,9 @@ function WorkflowTab({ authFetch }) {
                     fontSize: 'var(--font-size-sm)',
                   }}
                 >
-                  No templates found.
+                  {templates.length === 0
+                    ? 'No workflow templates yet — click "+ New Workflow" to create one.'
+                    : 'No templates in this view.'}
                 </td>
               </tr>
             )}
@@ -1001,215 +287,7 @@ function WorkflowTab({ authFetch }) {
         </table>
       </div>
 
-      {/* ── Create Form ──────────────────────────────────────────────────────── */}
-      {showCreateForm && (
-        <div
-          style={{
-            padding: 'var(--spacing-lg)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--color-border-default)',
-            backgroundColor: 'var(--color-bg-tertiary)',
-            marginBottom: 'var(--spacing-xl)',
-          }}
-        >
-          <h4 className="font-semibold mb-lg" style={{ fontSize: 'var(--font-size-base)' }}>
-            {editingTemplateId != null ? 'Edit Workflow Template' : 'New Workflow Template'}
-          </h4>
-
-          {/* Name + description */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 2fr',
-              gap: 'var(--spacing-md)',
-              marginBottom: 'var(--spacing-lg)',
-            }}
-          >
-            {[
-              {
-                label: 'Template Name *',
-                key: 'name',
-                placeholder: 'e.g. Fast-Track Review',
-              },
-              {
-                label: 'Description',
-                key: 'description',
-                placeholder: 'Optional — describe when to use this template',
-              },
-            ].map(({ label, key, placeholder }) => (
-              <div key={key}>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-text-secondary)',
-                    fontWeight: 600,
-                    marginBottom: 'var(--spacing-xs)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {label}
-                </label>
-                <input
-                  type="text"
-                  placeholder={placeholder}
-                  value={form[key]}
-                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    fontSize: 'var(--font-size-sm)',
-                    padding: 'var(--spacing-sm) var(--spacing-md)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-default)',
-                    backgroundColor: 'var(--color-bg-primary)',
-                    color: 'var(--color-text-primary)',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Stage builder */}
-          <div style={{ marginBottom: 'var(--spacing-md)' }}>
-            <div style={{ marginBottom: 'var(--spacing-sm)' }}>
-              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
-                Custom Stages
-              </span>
-              <span
-                style={{
-                  fontSize: 'var(--font-size-xs)',
-                  color: 'var(--color-text-tertiary)',
-                  marginLeft: 'var(--spacing-sm)',
-                }}
-              >
-                These sit between the auto-added <em>Draft</em> (start) and{' '}
-                <em>Approved → Finalized</em> (end) stages.
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-              {form.stages.map((stage, idx) => (
-                <StageCard
-                  key={stage.id}
-                  stage={stage}
-                  index={idx}
-                  total={form.stages.length}
-                  onUpdate={(field, value) => updateStage(stage.id, field, value)}
-                  onRemove={() => removeStage(stage.id)}
-                  onMoveUp={() => moveStage(idx, -1)}
-                  onMoveDown={() => moveStage(idx, 1)}
-                  onAddRole={() => addRole(stage.id)}
-                  onUpdateRole={(roleId, field, value) =>
-                    updateRole(stage.id, roleId, field, value)
-                  }
-                  onRemoveRole={(roleId) => removeRole(stage.id, roleId)}
-                />
-              ))}
-
-              <button
-                onClick={() => setForm((f) => ({ ...f, stages: [...f.stages, emptyStage()] }))}
-                style={{
-                  padding: 'var(--spacing-sm)',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px dashed var(--color-border-default)',
-                  backgroundColor: 'transparent',
-                  color: 'var(--color-text-secondary)',
-                  fontSize: 'var(--font-size-sm)',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                }}
-              >
-                + Add Stage
-              </button>
-            </div>
-          </div>
-
-          {/* Flow preview */}
-          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
-            <p
-              style={{
-                fontSize: 'var(--font-size-xs)',
-                color: 'var(--color-text-tertiary)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontWeight: 600,
-                marginBottom: 'var(--spacing-xs)',
-              }}
-            >
-              Workflow Preview
-            </p>
-            <FlowPreview stages={form.stages} />
-          </div>
-
-          {/* Error */}
-          {createError && (
-            <div
-              style={{
-                padding: 'var(--spacing-sm) var(--spacing-md)',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'rgba(220,38,38,0.08)',
-                border: '1px solid rgba(220,38,38,0.3)',
-                color: 'var(--color-error)',
-                fontSize: 'var(--font-size-sm)',
-                marginBottom: 'var(--spacing-md)',
-              }}
-            >
-              {createError}
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
-            <button
-              onClick={() => {
-                setShowCreateForm(false);
-                setEditingTemplateId(null);
-                setCreateError(null);
-              }}
-              disabled={creating}
-              style={{
-                padding: 'var(--spacing-sm) var(--spacing-lg)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border-default)',
-                backgroundColor: 'var(--color-bg-secondary)',
-                color: 'var(--color-text-secondary)',
-                fontSize: 'var(--font-size-sm)',
-                cursor: creating ? 'not-allowed' : 'pointer',
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCreate}
-              disabled={creating}
-              style={{
-                padding: 'var(--spacing-sm) var(--spacing-lg)',
-                borderRadius: 'var(--radius-md)',
-                border: 'none',
-                backgroundColor: creating
-                  ? 'var(--color-border-default)'
-                  : 'var(--color-accent-purple, #7c3aed)',
-                color: '#fff',
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: 600,
-                cursor: creating ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {creating
-                ? editingTemplateId != null
-                  ? 'Saving…'
-                  : 'Creating…'
-                : editingTemplateId != null
-                  ? 'Save Changes'
-                  : 'Create Template'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Detail View ──────────────────────────────────────────────────────── */}
+      {/* ── Detail View ──────────────────────────────────────────────────── */}
       {selectedTemplate && (
         <div
           style={{
@@ -1227,46 +305,33 @@ function WorkflowTab({ authFetch }) {
               justifyContent: 'space-between',
               marginBottom: 'var(--spacing-md)',
               gap: 'var(--spacing-md)',
+              flexWrap: 'wrap',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
               <h4 className="font-semibold" style={{ fontSize: 'var(--font-size-base)' }}>
                 {selectedTemplate.name}
               </h4>
-              {selectedTemplate.is_system && (
-                <span
-                  style={{
-                    fontSize: 'var(--font-size-xs)',
-                    padding: '2px 8px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: 'rgba(0,120,212,0.1)',
-                    color: 'var(--color-accent-blue)',
-                    border: '1px solid rgba(0,120,212,0.2)',
-                    fontWeight: 500,
-                  }}
-                >
-                  System
-                </span>
-              )}
+              <OwnershipBadge category={selectedCat} />
             </div>
-            {!selectedTemplate.is_system && (
-              <div style={{ display: 'flex', gap: 'var(--spacing-sm)', flexShrink: 0 }}>
-                <button
-                  onClick={() => openEditForm(selectedTemplate)}
-                  disabled={deleting || detailLoading}
-                  style={{
-                    padding: 'var(--spacing-xs) var(--spacing-md)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid rgba(124,58,237,0.4)',
-                    backgroundColor: 'rgba(124,58,237,0.06)',
-                    color: 'var(--color-accent-purple, #7c3aed)',
-                    fontSize: 'var(--font-size-sm)',
-                    cursor: deleting || detailLoading ? 'not-allowed' : 'pointer',
-                    fontWeight: 500,
-                  }}
-                >
-                  Edit Template
-                </button>
+            <div style={{ display: 'flex', gap: 'var(--spacing-sm)', flexShrink: 0 }}>
+              <button
+                onClick={() => openEditor(selectedTemplate.id)}
+                disabled={detailLoading}
+                style={{
+                  padding: 'var(--spacing-xs) var(--spacing-md)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid rgba(124,58,237,0.4)',
+                  backgroundColor: 'rgba(124,58,237,0.06)',
+                  color: 'var(--color-accent-purple, #7c3aed)',
+                  fontSize: 'var(--font-size-sm)',
+                  cursor: detailLoading ? 'not-allowed' : 'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                {canEdit ? 'Edit in flow editor' : 'Open in viewer'}
+              </button>
+              {canEdit && (
                 <button
                   onClick={handleDelete}
                   disabled={deleting}
@@ -1281,11 +346,20 @@ function WorkflowTab({ authFetch }) {
                     fontWeight: 500,
                   }}
                 >
-                  {deleting ? 'Deleting…' : 'Delete Template'}
+                  {deleting ? 'Deleting…' : 'Delete'}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+
+          {selectedTemplate.description && (
+            <p
+              className="text-sm text-secondary"
+              style={{ marginBottom: 'var(--spacing-md)', lineHeight: 1.5 }}
+            >
+              {selectedTemplate.description}
+            </p>
+          )}
 
           {detailLoading && <p className="text-sm text-secondary">Loading…</p>}
 
@@ -1328,7 +402,7 @@ function WorkflowTab({ authFetch }) {
                   ))}
               </div>
 
-              {/* Stage cards (read-only) */}
+              {/* Stage cards (read-only preview) */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
                 {(templateDetail.workflow_data?.stages || [])
                   .sort((a, b) => a.stage_order - b.stage_order)
@@ -1390,6 +464,46 @@ function WorkflowTab({ authFetch }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Small pill used in the list and detail header.
+function OwnershipBadge({ category }) {
+  const palette = {
+    system: {
+      label: 'System',
+      bg: 'rgba(0,120,212,0.1)',
+      color: 'var(--color-accent-blue)',
+      border: 'rgba(0,120,212,0.25)',
+    },
+    mine: {
+      label: 'Mine',
+      bg: 'rgba(124,58,237,0.1)',
+      color: 'var(--color-accent-purple, #7c3aed)',
+      border: 'rgba(124,58,237,0.25)',
+    },
+    shared: {
+      label: 'Shared',
+      bg: 'var(--color-bg-tertiary)',
+      color: 'var(--color-text-secondary)',
+      border: 'var(--color-border-default)',
+    },
+  };
+  const p = palette[category] || palette.shared;
+  return (
+    <span
+      style={{
+        padding: '2px 10px',
+        borderRadius: 'var(--radius-full)',
+        fontSize: 'var(--font-size-xs)',
+        fontWeight: 500,
+        backgroundColor: p.bg,
+        color: p.color,
+        border: `1px solid ${p.border}`,
+      }}
+    >
+      {p.label}
+    </span>
   );
 }
 
@@ -2097,7 +1211,7 @@ export default function BusinessLogic() {
 
           {activeTab === 'workflow' && (
             <div className="card">
-              <WorkflowTab authFetch={authFetch} />
+              <WorkflowTab authFetch={authFetch} user={user} />
             </div>
           )}
         </div>

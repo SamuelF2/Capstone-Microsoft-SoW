@@ -9,10 +9,11 @@ const AVAILABLE_ROLES = [
   { value: 'cpl', label: 'CPL (Customer Practice Lead)' },
   { value: 'cdp', label: 'CDP (Customer Delivery Partner)' },
   { value: 'delivery-manager', label: 'Delivery Manager / ADL' },
+  { value: 'system-admin', label: 'System Admin (elevated — all privileges)' },
 ];
 
 export default function Account() {
-  const { user, overrideRole } = useAuth();
+  const { user, overrideRole, clearRoleOverride } = useAuth();
   const [activeSection, setActiveSection] = useState('profile');
 
   const userData = {
@@ -204,8 +205,10 @@ export default function Account() {
                 </span>
               </h3>
               <p className="text-sm text-secondary mb-md">
-                Simulate a different role to test the SoW pipeline. This overrides your role in the
-                current session only and does not persist.
+                Simulate a different role to test the SoW pipeline. The override is saved locally
+                and persists across reloads until you clear it or sign out.{' '}
+                <strong>System Admin</strong> elevates your privileges so every review stage and
+                action is visible, regardless of assignments.
               </p>
               <div className="form-group" style={{ maxWidth: '320px' }}>
                 <label className="form-label">Active Role</label>
@@ -224,9 +227,26 @@ export default function Account() {
                   ))}
                 </select>
               </div>
-              <p className="text-xs text-tertiary" style={{ marginTop: 'var(--spacing-sm)' }}>
-                Current role: <strong>{user?.role || '—'}</strong>
-              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--spacing-md)',
+                  marginTop: 'var(--spacing-sm)',
+                }}
+              >
+                <p className="text-xs text-tertiary" style={{ margin: 0 }}>
+                  Current role: <strong>{user?.role || '—'}</strong>
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => clearRoleOverride()}
+                  style={{ fontSize: 'var(--font-size-xs)' }}
+                >
+                  Clear override
+                </button>
+              </div>
             </div>
 
             <button className="btn btn-primary">Save Settings</button>

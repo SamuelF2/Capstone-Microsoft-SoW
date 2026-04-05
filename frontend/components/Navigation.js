@@ -11,6 +11,9 @@ export default function Navigation() {
 
   const isActive = (path) => router.pathname === path;
 
+  // System Admin elevates privileges — treat it as matching any role-gated link.
+  const isSystemAdmin = user?.role === 'system-admin';
+
   const navLinks = [
     { href: '/all-sows', label: 'All SoWs' },
     { href: '/create-new', label: 'Create New' },
@@ -20,6 +23,19 @@ export default function Navigation() {
     { href: '/review-history', label: 'Review History' },
     { href: '/business-logic', label: 'Business Logic' },
   ];
+
+  // Human-readable label for the current (possibly-overridden) role.
+  const ROLE_LABELS = {
+    consultant: 'Consultant',
+    'solution-architect': 'Solution Architect',
+    'sqa-reviewer': 'SQA Reviewer',
+    cpl: 'CPL',
+    cdp: 'CDP',
+    'delivery-manager': 'Delivery Manager',
+    'system-admin': 'System Admin',
+  };
+  const roleLabel = user?.role ? ROLE_LABELS[user.role] || user.role : null;
+  const roleIsOverridden = !!user?._baseRole && user._baseRole !== user.role;
 
   const navLinkStyle = (path) => ({
     fontSize: 'var(--font-size-sm)',
@@ -103,7 +119,7 @@ export default function Navigation() {
         {/* Nav Links */}
         <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'center' }}>
           {navLinks
-            .filter((link) => !link.roles || link.roles.includes(user?.role))
+            .filter((link) => !link.roles || isSystemAdmin || link.roles.includes(user?.role))
             .map(({ href, label }) => (
               <Link key={href} href={href} style={navLinkStyle(href)}>
                 {label}
@@ -128,6 +144,59 @@ export default function Navigation() {
 
         {/* User section */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
+          {/* Active role badge — reminds the user which role gates the UI.
+              Click to jump to Account → Settings where the override lives. */}
+          {roleLabel && (
+            <Link
+              href="/account"
+              title={
+                roleIsOverridden
+                  ? `Role override active (real role: ${user._baseRole}). Click to manage.`
+                  : 'Your current role. Click to change in Account → Settings.'
+              }
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '3px 10px',
+                borderRadius: 'var(--radius-full)',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-semibold)',
+                textDecoration: 'none',
+                border: '1px solid',
+                borderColor: roleIsOverridden
+                  ? 'rgba(245,158,11,0.4)'
+                  : isSystemAdmin
+                    ? 'rgba(124,58,237,0.4)'
+                    : 'var(--color-border-default)',
+                backgroundColor: roleIsOverridden
+                  ? 'rgba(245,158,11,0.1)'
+                  : isSystemAdmin
+                    ? 'rgba(124,58,237,0.1)'
+                    : 'var(--color-bg-secondary)',
+                color: roleIsOverridden
+                  ? 'var(--color-warning)'
+                  : isSystemAdmin
+                    ? 'var(--color-accent-purple, #7c3aed)'
+                    : 'var(--color-text-secondary)',
+              }}
+            >
+              {isSystemAdmin && <span>★</span>}
+              {roleLabel}
+              {roleIsOverridden && !isSystemAdmin && (
+                <span
+                  style={{
+                    fontSize: '9px',
+                    fontWeight: 'var(--font-weight-normal)',
+                    opacity: 0.8,
+                  }}
+                >
+                  (override)
+                </span>
+              )}
+            </Link>
+          )}
+
           {/* Avatar + name */}
           <Link
             href="/account"

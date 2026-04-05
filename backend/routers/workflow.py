@@ -137,7 +137,7 @@ async def get_default_template_id(conn) -> int | None:
 async def list_templates(current_user: CurrentUser) -> list[WorkflowTemplateSummary]:
     async with database.pg_pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT wt.id, wt.name, wt.description, wt.is_system, wt.created_at,
+            SELECT wt.id, wt.name, wt.description, wt.is_system, wt.created_by, wt.created_at,
                    (SELECT count(*) FROM workflow_template_stages
                     WHERE template_id = wt.id) AS stage_count
             FROM   workflow_templates wt
@@ -149,6 +149,7 @@ async def list_templates(current_user: CurrentUser) -> list[WorkflowTemplateSumm
             name=r["name"],
             description=r["description"],
             is_system=r["is_system"],
+            created_by=r["created_by"],
             stage_count=r["stage_count"],
             created_at=r["created_at"],
         )
@@ -243,6 +244,7 @@ async def create_template(
         name=row["name"],
         description=row["description"],
         is_system=row["is_system"],
+        created_by=row["created_by"],
         workflow_data=WorkflowData(**snapshot),
         created_at=row["created_at"],
     )
@@ -265,6 +267,7 @@ async def get_template(template_id: int, current_user: CurrentUser) -> WorkflowT
         name=row["name"],
         description=row["description"],
         is_system=row["is_system"],
+        created_by=row["created_by"],
         workflow_data=WorkflowData(**snapshot),
         created_at=row["created_at"],
     )
@@ -373,6 +376,7 @@ async def update_template(
         name=row["name"],
         description=row["description"],
         is_system=row["is_system"],
+        created_by=row["created_by"],
         workflow_data=WorkflowData(**snapshot),
         created_at=row["created_at"],
     )

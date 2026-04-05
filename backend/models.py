@@ -504,6 +504,7 @@ class WorkflowTemplateResponse(BaseModel):
     name: str
     description: str | None = None
     is_system: bool
+    created_by: int | None = None
     workflow_data: WorkflowData
     created_at: datetime
 
@@ -515,6 +516,7 @@ class WorkflowTemplateSummary(BaseModel):
     name: str
     description: str | None = None
     is_system: bool
+    created_by: int | None = None
     stage_count: int = 0
     created_at: datetime
 

@@ -162,7 +162,8 @@ export default function WorkflowProgress({
           display: 'flex',
           alignItems: 'flex-start',
           gap: '0',
-          overflowX: 'auto',
+          flexWrap: 'wrap',
+          rowGap: 'var(--spacing-xl)',
           paddingBottom: '4px',
         }}
         ref={tooltipRef}
@@ -195,7 +196,15 @@ export default function WorkflowProgress({
           return (
             <div
               key={stage.stage_key}
-              style={{ display: 'flex', alignItems: 'flex-start', flex: 1, minWidth: 0 }}
+              // flex-basis sets the preferred per-stage width; when the row can't
+              // fit everyone at that size, flex-wrap pushes the overflow to a new
+              // row instead of producing a horizontal scrollbar.
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                flex: '1 1 140px',
+                minWidth: '120px',
+              }}
             >
               <div
                 style={{
