@@ -1,3 +1,6 @@
+import SectionHeader from './ui/SectionHeader';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function SecurityCompliance({ data, onChange }) {
   const securityFramework = data?.securityFramework ?? '';
   const complianceRequirements = data?.complianceRequirements ?? '';
@@ -10,22 +13,12 @@ export default function SecurityCompliance({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Security & Compliance</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the security architecture, compliance requirements, and controls that will be
-          implemented as part of the cloud adoption.
-        </p>
-      </div>
+      <SectionHeader
+        title="Security & Compliance"
+        description="Define the security architecture, compliance requirements, and controls that will be implemented as part of the cloud adoption."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Security Framework</h3>
           <p className="text-sm text-secondary mb-md">
@@ -53,16 +46,9 @@ export default function SecurityCompliance({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Identity & Access Management</h3>
           <textarea
@@ -84,15 +70,9 @@ export default function SecurityCompliance({ data, onChange }) {
             rows={5}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Data Protection</h3>
           <textarea
@@ -114,7 +94,7 @@ export default function SecurityCompliance({ data, onChange }) {
             rows={5}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

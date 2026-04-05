@@ -11,6 +11,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { formatDate, formatDeal } from '../lib/format';
 
 const ESAP_STYLES = {
   'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)', label: 'TYPE-1' },
@@ -45,32 +46,13 @@ const ROLE_DISPLAY = {
   'delivery-manager': 'Delivery Manager',
 };
 
-function formatDeal(v) {
-  if (v == null) return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : '$' + n.toLocaleString('en-US');
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
 // ── DRM SoW Card ──────────────────────────────────────────────────────────────
 
 function DrmCard({ assignment }) {
   const router = useRouter();
   const esapStyle = ESAP_STYLES[assignment.esap_level] || {};
   const statusStyle = STATUS_STYLES[assignment.status] || STATUS_STYLES.pending;
-  const deal = formatDeal(assignment.deal_value);
+  const deal = formatDeal(assignment.deal_value, null);
 
   return (
     <div

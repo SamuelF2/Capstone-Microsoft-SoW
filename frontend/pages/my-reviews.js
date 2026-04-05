@@ -10,6 +10,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { formatDate, formatDeal, esapBadgeStyle } from '../lib/format';
 
 const ASSIGNMENT_STATUS_STYLES = {
   pending: {
@@ -35,12 +36,6 @@ const ASSIGNMENT_STATUS_STYLES = {
   },
 };
 
-const ESAP_STYLES = {
-  'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-  'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-  'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-};
-
 const ROLE_DISPLAY = {
   'solution-architect': 'Solution Architect',
   'sqa-reviewer': 'SQA Reviewer',
@@ -54,32 +49,13 @@ const STAGE_DISPLAY = {
   'drm-approval': 'DRM Approval',
 };
 
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatDeal(v) {
-  if (v == null) return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : '$' + n.toLocaleString('en-US');
-}
-
 // ── ReviewCard ────────────────────────────────────────────────────────────────
 
 function ReviewCard({ assignment }) {
   const router = useRouter();
   const style = ASSIGNMENT_STATUS_STYLES[assignment.status] || ASSIGNMENT_STATUS_STYLES.pending;
-  const esapStyle = ESAP_STYLES[assignment.esap_level] || {};
-  const deal = formatDeal(assignment.deal_value);
+  const esapStyle = esapBadgeStyle(assignment.esap_level);
+  const deal = formatDeal(assignment.deal_value, null);
   const reviewPath =
     assignment.stage === 'drm-approval'
       ? `/drm-review/${assignment.sow_id}`

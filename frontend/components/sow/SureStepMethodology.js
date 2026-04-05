@@ -1,3 +1,7 @@
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function SureStepMethodology({ data, onChange }) {
   const methodologyOverview = data?.methodologyOverview ?? '';
   const approachDetails = data?.approachDetails ?? '';
@@ -8,39 +12,16 @@ export default function SureStepMethodology({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Sure Step Methodology</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the Sure Step methodology approach for this Dynamics 365 implementation, including
-          governance, quality assurance, and risk management practices.
-        </p>
-      </div>
+      <SectionHeader
+        title="Sure Step Methodology"
+        description="Define the Sure Step methodology approach for this Dynamics 365 implementation, including governance, quality assurance, and risk management practices."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Delivery Approach & Methodology
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Ensure your approach aligns with the Sure Step methodology and includes how you'll
-            manage risks and quality throughout the implementation.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
+        <FormCard
+          title="Delivery Approach & Methodology"
+          description="Ensure your approach aligns with the Sure Step methodology and includes how you'll manage risks and quality throughout the implementation."
+        >
           <textarea
             className="form-textarea"
             value={methodologyOverview}
@@ -48,25 +29,12 @@ export default function SureStepMethodology({ data, onChange }) {
             placeholder="Describe how Sure Step phases will be applied — Analyse, Design, Develop, Deploy, and Operate. Include how you'll conduct fit-gap analysis, solution design, and configuration..."
             rows={8}
           />
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Support Transition Plan
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Describe how the solution will be transitioned to the customer's operations team after
-            go-live.
-          </p>
+        <FormCard
+          title="Support Transition Plan"
+          description="Describe how the solution will be transitioned to the customer's operations team after go-live."
+        >
           <textarea
             className="form-textarea"
             value={approachDetails}
@@ -74,16 +42,10 @@ export default function SureStepMethodology({ data, onChange }) {
             placeholder="Outline the go-live support window, knowledge transfer to the customer's team, hypercare period, and transition to BAU support..."
             rows={8}
           />
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <div className="card">
           <h3 className="text-lg font-semibold mb-md">Governance Model</h3>
           <textarea
@@ -105,7 +67,7 @@ export default function SureStepMethodology({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

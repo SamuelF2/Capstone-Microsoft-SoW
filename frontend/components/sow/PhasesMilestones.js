@@ -1,6 +1,6 @@
-function genId() {
-  return `phase-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const PHASE_STATUSES = ['Not Started', 'In Progress', 'Complete'];
 const STATUS_COLORS = {
@@ -10,7 +10,7 @@ const STATUS_COLORS = {
 };
 
 const emptyPhase = () => ({
-  id: genId(),
+  id: genId('phase'),
   name: '',
   startDate: '',
   endDate: '',
@@ -22,28 +22,10 @@ const emptyPhase = () => ({
 
 function PhaseCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '320px',
-        maxWidth: '320px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          display: 'flex',
-          gap: 'var(--spacing-xs)',
-          alignItems: 'center',
-        }}
-      >
+    <ListCard
+      width="320px"
+      onRemove={onRemove}
+      headerExtras={
         <span
           style={{
             fontSize: 'var(--font-size-xs)',
@@ -53,22 +35,8 @@ function PhaseCard({ item, onChange, onRemove }) {
         >
           ● {item.status}
         </span>
-        <button
-          onClick={onRemove}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--color-text-tertiary)',
-            cursor: 'pointer',
-            fontSize: '18px',
-            lineHeight: 1,
-            padding: '2px',
-          }}
-        >
-          ×
-        </button>
-      </div>
-
+      }
+    >
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Phase Name
@@ -169,7 +137,7 @@ function PhaseCard({ item, onChange, onRemove }) {
           ))}
         </select>
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -178,22 +146,12 @@ export default function PhasesMilestones({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Phases & Milestones</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the project phases, key milestones, and deliverables for each stage of the
-          Waterfall delivery.
-        </p>
-      </div>
+      <SectionHeader
+        title="Phases & Milestones"
+        description="Define the project phases, key milestones, and deliverables for each stage of the Waterfall delivery."
+      />
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {phases.map((phase) => (
           <PhaseCard
             key={phase.id}
@@ -202,37 +160,8 @@ export default function PhasesMilestones({ data, onChange }) {
             onRemove={() => onChange(phases.filter((p) => p.id !== phase.id))}
           />
         ))}
-        <div
-          style={{
-            minWidth: '180px',
-            maxWidth: '180px',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            transition: 'border-color var(--transition-base), color var(--transition-base)',
-            minHeight: '200px',
-          }}
-          onClick={() => onChange([...phases, emptyPhase()])}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-            e.currentTarget.style.color = 'var(--color-accent-blue)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-border-default)';
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
-          }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-            <div className="text-sm">Add Phase</div>
-          </div>
-        </div>
-      </div>
+        <AddCardButton label="Add Phase" onClick={() => onChange([...phases, emptyPhase()])} />
+      </HorizontalCardList>
     </div>
   );
 }

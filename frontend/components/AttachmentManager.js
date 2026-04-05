@@ -15,6 +15,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { formatBytes } from '../lib/format';
 
 const DOCUMENT_TYPE_LABELS = {
   'solution-architecture': 'Solution Architecture',
@@ -58,13 +59,6 @@ function Badge({ label, color }) {
       {label}
     </span>
   );
-}
-
-function formatBytes(bytes) {
-  if (!bytes) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fileIcon(originalName) {

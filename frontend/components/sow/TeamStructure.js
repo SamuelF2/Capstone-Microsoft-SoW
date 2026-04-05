@@ -1,9 +1,9 @@
-function genId() {
-  return `mem-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const emptyMember = () => ({
-  id: genId(),
+  id: genId('mem'),
   role: '',
   onshore: '',
   offshore: '',
@@ -12,36 +12,7 @@ const emptyMember = () => ({
 
 function MemberCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '280px',
-        maxWidth: '280px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <button
-        onClick={onRemove}
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: '18px',
-          lineHeight: 1,
-          padding: '2px',
-        }}
-      >
-        ×
-      </button>
-
+    <ListCard width="280px" onRemove={onRemove}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Role
@@ -102,7 +73,7 @@ function MemberCard({ item, onChange, onRemove }) {
           />
         </div>
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -124,24 +95,14 @@ export default function TeamStructure({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Team Structure & Resources</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the project team, effort allocation, and support transition plan.
-        </p>
-      </div>
+      <SectionHeader
+        title="Team Structure & Resources"
+        description="Define the project team, effort allocation, and support transition plan."
+      />
 
       {/* Team Members */}
       <h3 className="text-lg font-semibold mb-md">Team Members</h3>
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-          marginBottom: 'var(--spacing-lg)',
-        }}
-      >
+      <HorizontalCardList style={{ marginBottom: 'var(--spacing-lg)' }}>
         {members.map((member) => (
           <MemberCard
             key={member.id}
@@ -150,37 +111,8 @@ export default function TeamStructure({ data, onChange }) {
             onRemove={() => removeMember(member.id)}
           />
         ))}
-        <div
-          style={{
-            minWidth: '180px',
-            maxWidth: '180px',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            transition: 'border-color var(--transition-base), color var(--transition-base)',
-            minHeight: '200px',
-          }}
-          onClick={addMember}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-            e.currentTarget.style.color = 'var(--color-accent-blue)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-border-default)';
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
-          }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-            <div className="text-sm">Add Member</div>
-          </div>
-        </div>
-      </div>
+        <AddCardButton label="Add Member" onClick={addMember} />
+      </HorizontalCardList>
 
       {/* Totals */}
       <div

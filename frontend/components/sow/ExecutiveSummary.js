@@ -1,17 +1,14 @@
-import { useState } from 'react';
+import SectionHeader from './ui/SectionHeader';
 
 export default function ExecutiveSummary({ data, onChange }) {
   const content = data?.content ?? '';
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Executive Summary</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Provide a concise, compelling overview of this engagement — its purpose, key objectives,
-          and the value it delivers to the customer.
-        </p>
-      </div>
+      <SectionHeader
+        title="Executive Summary"
+        description="Provide a concise, compelling overview of this engagement — its purpose, key objectives, and the value it delivers to the customer."
+      />
 
       <div className="card">
         <div className="form-group" style={{ marginBottom: 0 }}>

@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
-
-function genId() {
-  return `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import TwoColumnGrid from './ui/TwoColumnGrid';
 
 function ScopeList({
   title,
@@ -158,7 +157,7 @@ export default function ProjectScope({ data, onChange }) {
   };
 
   const handleAdd = (listKey) => {
-    const newItem = { id: genId(), text: '' };
+    const newItem = { id: genId('item'), text: '' };
     if (listKey === 'inScope') {
       update([...inScope, newItem], outOfScope);
     } else {
@@ -233,21 +232,12 @@ export default function ProjectScope({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Project Scope</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define what is included and excluded from this engagement. Drag items between lists to
-          reclassify them.
-        </p>
-      </div>
+      <SectionHeader
+        title="Project Scope"
+        description="Define what is included and excluded from this engagement. Drag items between lists to reclassify them."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <ScopeList
           title="In Scope"
           items={inScope}
@@ -270,7 +260,7 @@ export default function ProjectScope({ data, onChange }) {
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         />
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

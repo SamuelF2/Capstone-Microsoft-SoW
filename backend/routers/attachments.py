@@ -29,6 +29,7 @@ from config import MAX_UPLOAD_SIZE_MB, UPLOAD_DIR
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from models import AttachmentResponse, DocumentRequirement, StageRequirementsResponse
+from utils.db_helpers import require_collaborator
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
@@ -68,17 +69,6 @@ _MIME_MAP: dict[str, str] = {
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-async def _require_collaborator(conn, *, sow_id: int, user_id: int) -> None:
-    """Raise 404 if the user is not a collaborator on this SoW."""
-    found = await conn.fetchval(
-        "SELECT 1 FROM collaboration WHERE sow_id = $1 AND user_id = $2",
-        sow_id,
-        user_id,
-    )
-    if not found:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
 
 def _attachments_dir(sow_id: int) -> Path:
@@ -131,7 +121,7 @@ async def upload_attachment(
         )
 
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         # Verify SoW exists
         sow = await conn.fetchrow("SELECT id FROM sow_documents WHERE id = $1", sow_id)
@@ -210,7 +200,7 @@ async def list_attachments(
 ) -> list[AttachmentResponse]:
     """Return all attachments for a SoW, optionally filtered."""
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         filters = ["sow_id = $1"]
         params: list[Any] = [sow_id]
@@ -265,7 +255,7 @@ async def get_attachment(attachment_id: int, current_user: CurrentUser) -> Attac
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
             )
-        await _require_collaborator(conn, sow_id=row["sow_id"], user_id=current_user.id)
+        await require_collaborator(conn, sow_id=row["sow_id"], user_id=current_user.id)
 
     return AttachmentResponse(
         id=row["id"],
@@ -297,7 +287,7 @@ async def download_attachment(attachment_id: int, current_user: CurrentUser):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
             )
-        await _require_collaborator(conn, sow_id=row["sow_id"], user_id=current_user.id)
+        await require_collaborator(conn, sow_id=row["sow_id"], user_id=current_user.id)
 
     full_path = Path(UPLOAD_DIR) / row["file_path"]
     if not full_path.exists():
@@ -326,7 +316,7 @@ async def delete_attachment(attachment_id: int, current_user: CurrentUser):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
             )
-        await _require_collaborator(conn, sow_id=row["sow_id"], user_id=current_user.id)
+        await require_collaborator(conn, sow_id=row["sow_id"], user_id=current_user.id)
 
         # Only the uploader or an author can delete
         if row["uploaded_by"] != current_user.id:
@@ -364,7 +354,7 @@ async def get_stage_requirements(
     """Return document requirements for the SoW's current stage with
     fulfillment status (whether matching attachments exist)."""
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         # Get the SoW's current workflow
         wf_row = await conn.fetchrow(

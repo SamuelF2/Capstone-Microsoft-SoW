@@ -63,6 +63,13 @@ from models import (
     SoWUpdate,
 )
 from services.ai import analyze_sow
+from utils.db_helpers import (
+    create_assignment_with_prior,
+    insert_history,
+    require_collaborator,
+    seed_collaboration,
+)
+from utils.esap import compute_esap_level
 
 from routers.workflow import build_workflow_snapshot, get_default_template_id
 
@@ -91,139 +98,6 @@ def _row_to_response(row: dict) -> SoWResponse:
 
 def _row_to_summary(row: dict) -> SoWSummary:
     return SoWSummary(**dict(row))
-
-
-async def _require_collaborator(conn, sow_id: int, user_id: int) -> None:
-    """Raise 404 if the user is not a collaborator on this SoW.
-
-    Uses 404 rather than 403 so outsiders cannot confirm whether a SoW with
-    a given ID exists at all.  Must be called with an already-acquired
-    connection so it can share a transaction with the caller's query.
-    """
-    row = await conn.fetchrow(
-        """
-        SELECT 1
-        FROM   collaboration
-        WHERE  sow_id  = $1
-        AND    user_id = $2
-        LIMIT  1
-        """,
-        sow_id,
-        user_id,
-    )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
-
-
-async def _seed_collaboration(conn, sow_id: int, user_id: int, role: str = "author") -> None:
-    """Insert the creating user as a collaborator on the new SoW.
-
-    Called inside the same transaction as the SoW insert so the row is
-    always present — a SoW can never exist without at least one collaborator.
-
-    Uses INSERT ... ON CONFLICT DO NOTHING so re-entrant calls are safe
-    (e.g. if the endpoint is retried after a partial failure).
-    """
-    await conn.execute(
-        """
-        INSERT INTO collaboration (sow_id, user_id, role)
-        VALUES ($1, $2, $3)
-        ON CONFLICT DO NOTHING
-        """,
-        sow_id,
-        user_id,
-        role,
-    )
-
-
-async def _insert_history(
-    conn, sow_id: int, user_id: int, change_type: str, diff: dict | None = None
-) -> None:
-    """Record an audit-trail entry in the ``history`` table.
-
-    Called inside the same transaction as the mutation so the history row
-    is always consistent with the change it describes.
-    """
-    await conn.execute(
-        """
-        INSERT INTO history (sow_id, changed_by, change_type, diff)
-        VALUES ($1, $2, $3, $4::jsonb)
-        """,
-        sow_id,
-        user_id,
-        change_type,
-        json.dumps(diff) if diff else None,
-    )
-
-
-def _compute_esap_level(deal_value: float | None, margin: float | None) -> str:
-    """Determine ESAP type from deal value and estimated margin.
-
-    Rules from Data/rules/workflow/esap-workflow.json:
-      type-1: dealValue > $5M  OR  margin < 10%
-      type-2: $1M < dealValue <= $5M  OR  10% <= margin < 15%
-      type-3: dealValue <= $1M  AND  margin >= 15%
-    """
-    dv = deal_value or 0
-    mg = margin if margin is not None else 0
-
-    if dv > 5_000_000 or mg < 10:
-        return "type-1"
-    if dv > 1_000_000 or mg < 15:
-        return "type-2"
-    return "type-3"
-
-
-async def _create_assignment_with_prior(
-    conn, *, sow_id: int, user_id: int, reviewer_role: str, stage: str
-) -> None:
-    """Create a review assignment, carrying over checklist_responses and comments
-    from the most recent prior assignment for the same sow/role/stage (if any).
-
-    This lets reviewers see and edit their previous responses when a SoW is
-    resubmitted after rejection.  Skips creation if the user already has a
-    pending/in-progress assignment for this sow + role + stage.
-    """
-    existing = await conn.fetchval(
-        """
-        SELECT 1 FROM review_assignments
-        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3
-          AND stage = $4 AND status IN ('pending', 'in_progress')
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-    )
-    if existing:
-        return  # already has an active assignment for this role
-
-    prior = await conn.fetchrow(
-        """
-        SELECT checklist_responses, comments FROM review_assignments
-        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3 AND stage = $4
-          AND status IN ('completed', 'canceled')
-        ORDER BY COALESCE(completed_at, assigned_at) DESC
-        LIMIT 1
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-    )
-    await conn.execute(
-        """
-        INSERT INTO review_assignments
-            (sow_id, user_id, reviewer_role, stage, checklist_responses, comments)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-        prior["checklist_responses"] if prior else None,
-        prior["comments"] if prior else None,
-    )
 
 
 async def _get_workflow_transitions(conn, sow_id: int) -> dict[str, set[str]] | None:
@@ -444,12 +318,10 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
         )
 
         # 4. Seed collaboration so the creator can access this SoW via /api/my-sows
-        await _seed_collaboration(conn, sow_id=row["id"], user_id=current_user.id)
+        await seed_collaboration(conn, sow_id=row["id"], user_id=current_user.id)
 
         # 5. Audit trail
-        await _insert_history(
-            conn, sow_id=row["id"], user_id=current_user.id, change_type="created"
-        )
+        await insert_history(conn, sow_id=row["id"], user_id=current_user.id, change_type="created")
 
         # 5b. Apply content template (if requested and not already supplied via payload.content)
         if payload.content_template_id is not None and not payload.content:
@@ -579,10 +451,10 @@ async def upload_sow(
         sow_id = row["id"]
 
         # Seed collaboration so the uploader can access via /api/my-sows
-        await _seed_collaboration(conn, sow_id=sow_id, user_id=current_user.id)
+        await seed_collaboration(conn, sow_id=sow_id, user_id=current_user.id)
 
         # Audit trail
-        await _insert_history(conn, sow_id=sow_id, user_id=current_user.id, change_type="created")
+        await insert_history(conn, sow_id=sow_id, user_id=current_user.id, change_type="created")
 
     # ── Save file to disk (UUID name prevents directory traversal) ──────
     safe_filename = f"{sow_id}_{uuid.uuid4().hex}{ext}"
@@ -798,7 +670,7 @@ async def get_sow(sow_id: int, current_user: CurrentUser) -> SoWResponse:
     """
 
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -825,7 +697,7 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
     updates: dict[str, Any] = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not updates:
         async with database.pg_pool.acquire() as conn:
-            await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+            await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
             row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -860,7 +732,7 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
     )
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         # Capture old values for the diff
         old_row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
@@ -886,7 +758,7 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
                 }
 
         if diff:
-            await _insert_history(
+            await insert_history(
                 conn,
                 sow_id=sow_id,
                 user_id=current_user.id,
@@ -921,7 +793,7 @@ async def update_sow_status(
     collaborator on it.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         old_status = await conn.fetchval("SELECT status FROM sow_documents WHERE id = $1", sow_id)
         if old_status is None:
@@ -1000,7 +872,7 @@ async def update_sow_status(
         )
 
         if row and old_status != payload.status:
-            await _insert_history(
+            await insert_history(
                 conn,
                 sow_id=sow_id,
                 user_id=current_user.id,
@@ -1046,11 +918,11 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
         )
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         # Record deletion before the CASCADE removes related rows.
         # The FK is ON DELETE SET NULL so the history row survives.
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id=sow_id,
             user_id=current_user.id,
@@ -1293,7 +1165,7 @@ async def parse_sow(sow_id: int, current_user: CurrentUser) -> ParseResult:
     methodology keywords are missing, and any banned-phrase violations.
     """
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow(
             "SELECT metadata, methodology FROM sow_documents WHERE id = $1", sow_id
         )
@@ -1376,7 +1248,7 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
     Raises **422** if required exit criteria are not met.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not row:
@@ -1430,7 +1302,7 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                 )
 
         # Compute ESAP level
-        esap = _compute_esap_level(
+        esap = compute_esap_level(
             deal_value=float(row["deal_value"]) if row["deal_value"] else None,
             margin=float(row["estimated_margin"]) if row["estimated_margin"] else None,
         )
@@ -1447,7 +1319,7 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
             sow_id,
         )
 
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id=sow_id,
             user_id=current_user.id,
@@ -1536,7 +1408,7 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
     ``draft`` status (to allow optional pre-submission analysis).
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not row:
@@ -1577,7 +1449,7 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
             sow_id,
         )
 
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id=sow_id,
             user_id=current_user.id,
@@ -1604,7 +1476,7 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
     ESAP level.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
         row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not row:
@@ -1640,7 +1512,7 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                 role,
             )
             if reviewer:
-                await _create_assignment_with_prior(
+                await create_assignment_with_prior(
                     conn,
                     sow_id=sow_id,
                     user_id=reviewer["id"],
@@ -1648,17 +1520,17 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                     stage="internal-review",
                 )
                 # Add to collaboration if not already present
-                await _seed_collaboration(
+                await seed_collaboration(
                     conn, sow_id=sow_id, user_id=reviewer["id"], role="reviewer"
                 )
 
         # TESTING: Also assign the author as every required reviewer role so
         # they can walk through the full pipeline solo.  Remove this block
         # once proper role assignment is in place.
-        # (_create_assignment_with_prior already skips if a pending assignment
+        # (create_assignment_with_prior already skips if a pending assignment
         #  exists, so no extra existence check needed here.)
         for role in required_roles:
-            await _create_assignment_with_prior(
+            await create_assignment_with_prior(
                 conn,
                 sow_id=sow_id,
                 user_id=current_user.id,
@@ -1677,7 +1549,7 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
             sow_id,
         )
 
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id=sow_id,
             user_id=current_user.id,

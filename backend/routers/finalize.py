@@ -30,6 +30,7 @@ from models import (
     HandoffPackagePayload,
     HandoffPackageResponse,
 )
+from utils.db_helpers import insert_history, require_collaborator
 
 router = APIRouter(prefix="/api/finalize", tags=["finalize"])
 
@@ -76,33 +77,6 @@ def _generated_dir(sow_id: int) -> Path:
     d = Path(UPLOAD_DIR) / "generated" / str(sow_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-async def _insert_history(
-    conn, sow_id: int, user_id: int, change_type: str, diff: dict | None = None
-) -> None:
-    await conn.execute(
-        "INSERT INTO history (sow_id, changed_by, change_type, diff) VALUES ($1, $2, $3, $4::jsonb)",
-        sow_id,
-        user_id,
-        change_type,
-        json.dumps(diff) if diff else None,
-    )
-
-
-async def _require_collaborator(conn, sow_id: int, user_id: int) -> None:
-    """Raise 404 if the user is not a collaborator on this SoW.
-
-    Uses 404 rather than 403 so outsiders cannot confirm whether a SoW with
-    a given ID exists at all.
-    """
-    row = await conn.fetchrow(
-        "SELECT 1 FROM collaboration WHERE sow_id = $1 AND user_id = $2 LIMIT 1",
-        sow_id,
-        user_id,
-    )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
 
 # ── DOCX generation ───────────────────────────────────────────────────────────
@@ -368,7 +342,7 @@ async def generate_document(
         )
 
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -433,7 +407,7 @@ async def generate_document(
 async def download_document(sow_id: int, current_user: CurrentUser):
     """Serve the most recently generated document for a SoW."""
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
     # Find latest file in generated directory
     out_dir = _generated_dir(sow_id)
     candidates = list(out_dir.glob("*.docx")) + list(out_dir.glob("*.pdf"))
@@ -474,7 +448,7 @@ async def create_handoff(
     risk register, and review decisions alongside the supplied payload.
     """
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -620,7 +594,7 @@ async def create_handoff(
 async def get_handoff(sow_id: int, current_user: CurrentUser) -> HandoffPackageResponse:
     """Return the most recent handoff package for a SoW."""
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         row = await conn.fetchrow(
             "SELECT * FROM handoff_packages WHERE sow_id = $1 ORDER BY created_at DESC LIMIT 1",
             sow_id,
@@ -657,7 +631,7 @@ async def lock_sow(sow_id: int, current_user: CurrentUser) -> dict:
     After locking, PATCH and DELETE are rejected by the sow router guards.
     """
     async with database.pg_pool.acquire() as conn:
-        await _require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
@@ -736,7 +710,7 @@ async def lock_sow(sow_id: int, current_user: CurrentUser) -> dict:
             "UPDATE sow_workflow SET current_stage = 'finalized', updated_at = NOW() WHERE sow_id = $1",
             sow_id,
         )
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id,
             current_user.id,

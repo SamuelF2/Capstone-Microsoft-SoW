@@ -36,6 +36,11 @@ from models import (
     ReviewSubmitPayload,
     SendBackPayload,
 )
+from utils.db_helpers import (
+    create_assignment_with_prior,
+    insert_history,
+    seed_collaboration,
+)
 
 router = APIRouter(prefix="/api/review", tags=["review"])
 
@@ -354,79 +359,6 @@ def _load_checklist(role: str) -> dict:
     )
 
 
-async def _insert_history(
-    conn, sow_id: int, user_id: int, change_type: str, diff: dict | None = None
-) -> None:
-    await conn.execute(
-        "INSERT INTO history (sow_id, changed_by, change_type, diff) VALUES ($1, $2, $3, $4::jsonb)",
-        sow_id,
-        user_id,
-        change_type,
-        json.dumps(diff) if diff else None,
-    )
-
-
-async def _seed_collaboration(conn, sow_id: int, user_id: int, role: str = "reviewer") -> None:
-    await conn.execute(
-        "INSERT INTO collaboration (sow_id, user_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        sow_id,
-        user_id,
-        role,
-    )
-
-
-async def _create_assignment_with_prior(
-    conn, *, sow_id: int, user_id: int, reviewer_role: str, stage: str
-) -> None:
-    """Create a review assignment, carrying over checklist_responses and comments
-    from the most recent prior assignment for the same sow/role/stage (if any).
-
-    This lets reviewers see and edit their previous responses when a SoW is
-    resubmitted after rejection.  Skips creation if the user already has a
-    pending/in-progress assignment for this sow + role + stage.
-    """
-    existing = await conn.fetchval(
-        """
-        SELECT 1 FROM review_assignments
-        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3
-          AND stage = $4 AND status IN ('pending', 'in_progress')
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-    )
-    if existing:
-        return  # already has an active assignment for this role
-
-    prior = await conn.fetchrow(
-        """
-        SELECT checklist_responses, comments FROM review_assignments
-        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3 AND stage = $4
-          AND status IN ('completed', 'canceled')
-        ORDER BY COALESCE(completed_at, assigned_at) DESC
-        LIMIT 1
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-    )
-    await conn.execute(
-        """
-        INSERT INTO review_assignments
-            (sow_id, user_id, reviewer_role, stage, checklist_responses, comments)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-        prior["checklist_responses"] if prior else None,
-        prior["comments"] if prior else None,
-    )
-
-
 # ── GET /api/review/assigned ──────────────────────────────────────────────────
 
 
@@ -708,7 +640,7 @@ async def submit_review(
             json.dumps(payload.conditions) if payload.conditions else None,
         )
 
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id,
             current_user.id,
@@ -746,7 +678,7 @@ async def submit_review(
                 assignment["id"],
                 assignment["stage"],
             )
-            await _insert_history(
+            await insert_history(
                 conn,
                 sow_id,
                 current_user.id,
@@ -928,21 +860,21 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     role,
                 )
                 if reviewer:
-                    await _create_assignment_with_prior(
+                    await create_assignment_with_prior(
                         conn,
                         sow_id=sow_id,
                         user_id=reviewer["id"],
                         reviewer_role=role,
                         stage="drm-approval",
                     )
-                    await _seed_collaboration(conn, sow_id, reviewer["id"], "approver")
+                    await seed_collaboration(conn, sow_id, reviewer["id"], "approver")
                     assigned.append(role)
 
             # TESTING: Also assign the author as every DRM reviewer role so
             # they can walk through the full pipeline solo.  Remove this block
             # once proper role assignment is in place.
             for role in drm_roles:
-                await _create_assignment_with_prior(
+                await create_assignment_with_prior(
                     conn,
                     sow_id=sow_id,
                     user_id=current_user.id,
@@ -958,7 +890,7 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                 "UPDATE sow_workflow SET current_stage = 'drm_review', updated_at = NOW() WHERE sow_id = $1",
                 sow_id,
             )
-            await _insert_history(
+            await insert_history(
                 conn,
                 sow_id,
                 current_user.id,
@@ -1008,7 +940,7 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                 "UPDATE sow_workflow SET current_stage = 'approved', updated_at = NOW() WHERE sow_id = $1",
                 sow_id,
             )
-            await _insert_history(
+            await insert_history(
                 conn,
                 sow_id,
                 current_user.id,
@@ -1317,7 +1249,7 @@ async def send_back(
                     ir_role,
                 )
                 if reviewer:
-                    await _create_assignment_with_prior(
+                    await create_assignment_with_prior(
                         conn,
                         sow_id=sow_id,
                         user_id=reviewer["id"],
@@ -1327,7 +1259,7 @@ async def send_back(
 
             # TESTING: Also re-assign the author for each role
             for ir_role in roles_needed:
-                await _create_assignment_with_prior(
+                await create_assignment_with_prior(
                     conn,
                     sow_id=sow_id,
                     user_id=current_user.id,
@@ -1347,7 +1279,7 @@ async def send_back(
             sow_id,
         )
 
-        await _insert_history(
+        await insert_history(
             conn,
             sow_id,
             current_user.id,

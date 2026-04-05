@@ -1,11 +1,9 @@
-import { useState } from 'react';
-
-function genId() {
-  return `del-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const emptyDeliverable = () => ({
-  id: genId(),
+  id: genId('del'),
   name: '',
   description: '',
   acceptanceCriteria: '',
@@ -15,37 +13,7 @@ const emptyDeliverable = () => ({
 
 function DeliverableCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '320px',
-        maxWidth: '320px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <button
-        onClick={onRemove}
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: '18px',
-          lineHeight: 1,
-          padding: '2px',
-        }}
-        title="Remove deliverable"
-      >
-        ×
-      </button>
-
+    <ListCard width="320px" onRemove={onRemove} removeTitle="Remove deliverable">
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Deliverable Name <span style={{ color: 'var(--color-error)' }}>*</span>
@@ -115,7 +83,7 @@ function DeliverableCard({ item, onChange, onRemove }) {
           />
         </div>
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -123,29 +91,17 @@ export default function Deliverables({ data, onChange }) {
   const items = data ?? [];
 
   const handleAdd = () => onChange([...items, emptyDeliverable()]);
-
   const handleRemove = (id) => onChange(items.filter((i) => i.id !== id));
-
   const handleChange = (updated) => onChange(items.map((i) => (i.id === updated.id ? updated : i)));
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Deliverables & Acceptance</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the specific deliverables for this engagement, including acceptance criteria that
-          must be met before sign-off.
-        </p>
-      </div>
+      <SectionHeader
+        title="Deliverables & Acceptance"
+        description="Define the specific deliverables for this engagement, including acceptance criteria that must be met before sign-off."
+      />
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {items.map((item) => (
           <DeliverableCard
             key={item.id}
@@ -154,37 +110,8 @@ export default function Deliverables({ data, onChange }) {
             onRemove={() => handleRemove(item.id)}
           />
         ))}
-        <div
-          style={{
-            minWidth: '220px',
-            maxWidth: '220px',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            transition: 'border-color var(--transition-base), color var(--transition-base)',
-            minHeight: '200px',
-          }}
-          onClick={handleAdd}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-            e.currentTarget.style.color = 'var(--color-accent-blue)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-border-default)';
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
-          }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '28px', marginBottom: 'var(--spacing-sm)' }}>+</div>
-            <div className="text-sm">Add Deliverable</div>
-          </div>
-        </div>
-      </div>
+        <AddCardButton label="Add Deliverable" width="220px" onClick={handleAdd} />
+      </HorizontalCardList>
 
       {items.length === 0 && (
         <p className="text-sm text-secondary" style={{ marginTop: 'var(--spacing-md)' }}>

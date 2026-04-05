@@ -19,59 +19,13 @@ import WorkflowProgress from '../../components/WorkflowProgress';
 import HandoffPackageBuilder from '../../components/HandoffPackageBuilder';
 import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDeal(v) {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US');
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatDateTime(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatBytes(bytes) {
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function esapBadgeStyle(level) {
-  return (
-    {
-      'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-      'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-      'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-    }[level] || {}
-  );
-}
+import {
+  formatDeal,
+  formatDate,
+  formatDateTime,
+  formatBytes,
+  esapBadgeStyle,
+} from '../../lib/format';
 
 // ── Step card wrapper ─────────────────────────────────────────────────────────
 
@@ -835,7 +789,7 @@ export default function FinalizePage() {
                       }}
                     >
                       Generated {formatDateTime(docInfo.generated_at)} ·{' '}
-                      {formatBytes(docInfo.size_bytes)}
+                      {formatBytes(docInfo.size_bytes, '')}
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>

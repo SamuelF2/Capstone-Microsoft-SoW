@@ -8,6 +8,12 @@
  * loading     boolean
  */
 
+import { formatDeal as sharedFormatDeal } from '../lib/format';
+
+// DataRow renders the returned value as-is, so missing values must come back
+// as null (to be displayed as '—' by the caller) rather than the default '—'.
+const formatDeal = (v) => sharedFormatDeal(v, null);
+
 function Card({ title, children, warning }) {
   return (
     <div
@@ -98,12 +104,6 @@ function StatusRow({ label, ok, text }) {
       </span>
     </div>
   );
-}
-
-function formatDeal(v) {
-  if (v == null) return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : '$' + n.toLocaleString('en-US');
 }
 
 // ── CPL panels ────────────────────────────────────────────────────────────────

@@ -1,3 +1,7 @@
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function SupportOperations({ data, onChange }) {
   const operationalModel = data?.operationalModel ?? '';
   const monitoring = data?.monitoring ?? '';
@@ -9,39 +13,16 @@ export default function SupportOperations({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Support & Operations</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the operational model, monitoring strategy, and support structure for the
-          post-migration steady state.
-        </p>
-      </div>
+      <SectionHeader
+        title="Support & Operations"
+        description="Define the operational model, monitoring strategy, and support structure for the post-migration steady state."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Operational Model
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Describe how the solution will be transitioned to the customer's operations team after
-            go-live.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
+        <FormCard
+          title="Operational Model"
+          description="Describe how the solution will be transitioned to the customer's operations team after go-live."
+        >
           <textarea
             className="form-textarea"
             value={operationalModel}
@@ -49,25 +30,12 @@ export default function SupportOperations({ data, onChange }) {
             placeholder="Describe the cloud operating model — who manages the Azure environment, how changes are approved, cost management processes, and the division of responsibility between customer and partner..."
             rows={8}
           />
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Delivery Approach
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Ensure your approach aligns with the Cloud Adoption Framework and includes how you'll
-            manage risks and quality throughout the migration.
-          </p>
+        <FormCard
+          title="Delivery Approach"
+          description="Ensure your approach aligns with the Cloud Adoption Framework and includes how you'll manage risks and quality throughout the migration."
+        >
           <textarea
             className="form-textarea"
             value={monitoring}
@@ -75,8 +43,8 @@ export default function SupportOperations({ data, onChange }) {
             placeholder="Describe the monitoring and observability approach — Azure Monitor, Log Analytics, Application Insights, dashboards, alert rules, and incident response processes..."
             rows={8}
           />
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
 
       <div
         style={{

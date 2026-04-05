@@ -1,3 +1,7 @@
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function SupportTransition({ data, onChange }) {
   const transitionPlan = data?.transitionPlan ?? '';
   const supportModel = data?.supportModel ?? '';
@@ -7,40 +11,16 @@ export default function SupportTransition({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Support Transition</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define how the solution will be handed over to the customer's operations team and what
-          ongoing support is provided.
-        </p>
-      </div>
+      <SectionHeader
+        title="Support Transition"
+        description="Define how the solution will be handed over to the customer's operations team and what ongoing support is provided."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
-        {/* Transition Plan Card */}
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Transition Plan
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Describe how the solution will be transitioned to the customer's operations team after
-            go-live, including training, documentation, and handover activities.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
+        <FormCard
+          title="Transition Plan"
+          description="Describe how the solution will be transitioned to the customer's operations team after go-live, including training, documentation, and handover activities."
+        >
           <textarea
             className="form-textarea"
             value={transitionPlan}
@@ -48,26 +28,12 @@ export default function SupportTransition({ data, onChange }) {
             placeholder="Outline the transition activities, timelines, training sessions, and documentation that will be provided to the customer's team..."
             rows={8}
           />
-        </div>
+        </FormCard>
 
-        {/* Support Model Card */}
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Ongoing Support Model
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Describe the support model that will be in place after the transition, including SLAs,
-            contact channels, and escalation paths.
-          </p>
+        <FormCard
+          title="Ongoing Support Model"
+          description="Describe the support model that will be in place after the transition, including SLAs, contact channels, and escalation paths."
+        >
           <div className="form-group">
             <label className="form-label">Target Handover Date</label>
             <input
@@ -87,8 +53,8 @@ export default function SupportTransition({ data, onChange }) {
               rows={5}
             />
           </div>
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
     </div>
   );
 }

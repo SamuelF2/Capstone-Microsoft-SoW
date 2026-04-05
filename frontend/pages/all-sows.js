@@ -15,6 +15,7 @@ import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { formatDeal as formatDealValue, formatDate } from '../lib/format';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,25 +30,6 @@ const STATUS_COLOR = {
   // legacy
   in_review: 'var(--color-warning)',
 };
-
-function formatDealValue(raw) {
-  if (raw == null) return '—';
-  const num = parseFloat(raw);
-  return isNaN(num) ? '—' : '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0 });
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
 
 // ── Status-aware action buttons ───────────────────────────────────────────────
 

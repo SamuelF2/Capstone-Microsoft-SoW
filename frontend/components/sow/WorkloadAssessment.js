@@ -1,6 +1,6 @@
-function genId() {
-  return `wl-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const COMPLEXITY_LEVELS = ['Low', 'Medium', 'High'];
 const COMPLEXITY_COLORS = {
@@ -19,7 +19,7 @@ const MIGRATION_PATTERNS = [
 ];
 
 const emptyWorkload = () => ({
-  id: genId(),
+  id: genId('wl'),
   name: '',
   currentState: '',
   targetState: '',
@@ -29,28 +29,10 @@ const emptyWorkload = () => ({
 
 function WorkloadCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '320px',
-        maxWidth: '320px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          display: 'flex',
-          gap: 'var(--spacing-xs)',
-          alignItems: 'center',
-        }}
-      >
+    <ListCard
+      width="320px"
+      onRemove={onRemove}
+      headerExtras={
         <span
           style={{
             fontSize: 'var(--font-size-xs)',
@@ -63,22 +45,8 @@ function WorkloadCard({ item, onChange, onRemove }) {
         >
           {item.complexity}
         </span>
-        <button
-          onClick={onRemove}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--color-text-tertiary)',
-            cursor: 'pointer',
-            fontSize: '18px',
-            lineHeight: 1,
-            padding: '2px',
-          }}
-        >
-          ×
-        </button>
-      </div>
-
+      }
+    >
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Workload Name
@@ -156,7 +124,7 @@ function WorkloadCard({ item, onChange, onRemove }) {
           ))}
         </select>
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -170,13 +138,10 @@ export default function WorkloadAssessment({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Workload Assessment</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Assess each workload to be migrated, identifying the current state, target architecture,
-          migration pattern, and complexity.
-        </p>
-      </div>
+      <SectionHeader
+        title="Workload Assessment"
+        description="Assess each workload to be migrated, identifying the current state, target architecture, migration pattern, and complexity."
+      />
 
       {/* Summary stats */}
       {workloads.length > 0 && (
@@ -218,14 +183,7 @@ export default function WorkloadAssessment({ data, onChange }) {
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {workloads.map((wl) => (
           <WorkloadCard
             key={wl.id}
@@ -236,37 +194,11 @@ export default function WorkloadAssessment({ data, onChange }) {
             onRemove={() => onChange(workloads.filter((w) => w.id !== wl.id))}
           />
         ))}
-        <div
-          style={{
-            minWidth: '180px',
-            maxWidth: '180px',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            transition: 'border-color var(--transition-base), color var(--transition-base)',
-            minHeight: '200px',
-          }}
+        <AddCardButton
+          label="Add Workload"
           onClick={() => onChange([...workloads, emptyWorkload()])}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-            e.currentTarget.style.color = 'var(--color-accent-blue)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-border-default)';
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
-          }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-            <div className="text-sm">Add Workload</div>
-          </div>
-        </div>
-      </div>
+        />
+      </HorizontalCardList>
     </div>
   );
 }

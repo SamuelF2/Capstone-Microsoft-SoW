@@ -22,24 +22,7 @@ import WorkflowProgress from '../../components/WorkflowProgress';
 import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
 import ActivityLog from '../../components/ActivityLog';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDeal(v) {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US');
-}
-
-function esapBadgeStyle(level) {
-  if (!level) return {};
-  const map = {
-    'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-    'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-    'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-  };
-  return map[level] || {};
-}
+import { formatDeal, esapBadgeStyle } from '../../lib/format';
 
 // ── SoW content read-only renderer ───────────────────────────────────────────
 
