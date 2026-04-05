@@ -4,7 +4,7 @@
  * Step 3 — DRM Review page for CPL, CDP, and Delivery Manager reviewers.
  *
  * Layout:
- *   Top:    Back link + SoW header + ReviewStatusTracker
+ *   Top:    Back link + SoW header + WorkflowProgress
  *   Banner: Internal Review Results (SA/SQA decisions and conditions)
  *   Body:   Two-column split
  *     Left  (55%) — PersonaDashboard (role-specific summary)

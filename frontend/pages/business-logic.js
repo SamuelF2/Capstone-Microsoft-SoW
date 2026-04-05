@@ -512,6 +512,7 @@ function WorkflowTab({ authFetch }) {
   const [templateDetail, setTemplateDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState(null); // null => create mode
   const [form, setForm] = useState({ name: '', description: '', stages: [emptyStage()] });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
@@ -554,10 +555,55 @@ function WorkflowTab({ authFetch }) {
 
   const openCreateForm = () => {
     setShowCreateForm(true);
+    setEditingTemplateId(null);
     setSelectedTemplate(null);
     setTemplateDetail(null);
     setCreateError(null);
     setForm({ name: '', description: '', stages: [emptyStage()] });
+  };
+
+  // Populate the form from an existing template for editing. Filters out the
+  // auto-managed draft/approved/finalized/rejected stages so the user only
+  // sees and edits the custom stages that sit between them.
+  const openEditForm = async (tmpl) => {
+    if (tmpl.is_system) return;
+    setCreateError(null);
+    let detail = templateDetail;
+    if (!detail || detail.id !== tmpl.id) {
+      try {
+        const res = await authFetch(`/api/workflow/templates/${tmpl.id}`);
+        if (!res.ok) throw new Error(`Failed to load template (${res.status})`);
+        detail = await res.json();
+      } catch (e) {
+        setCreateError(e.message);
+        return;
+      }
+    }
+
+    const userStages = (detail.workflow_data?.stages || [])
+      .filter((s) => !RESERVED_STAGE_KEYS.has(s.stage_key))
+      .sort((a, b) => a.stage_order - b.stage_order)
+      .map((s) => ({
+        id: _wfId(),
+        displayName: s.display_name || '',
+        stageType: s.stage_type || 'review',
+        roles: (s.roles || []).map((r) => ({
+          id: _wfId(),
+          roleKey: r.role_key || '',
+          isRequired: r.is_required !== false,
+          esapLevels: Array.isArray(r.esap_levels) ? r.esap_levels : [],
+        })),
+      }));
+
+    setEditingTemplateId(tmpl.id);
+    setSelectedTemplate(tmpl);
+    setTemplateDetail(detail);
+    setForm({
+      name: detail.name || tmpl.name || '',
+      description: detail.description || tmpl.description || '',
+      stages: userStages.length > 0 ? userStages : [emptyStage()],
+    });
+    setShowCreateForm(true);
   };
 
   const updateStage = (stageId, field, value) =>
@@ -718,8 +764,12 @@ function WorkflowTab({ authFetch }) {
 
     setCreating(true);
     try {
-      const res = await authFetch('/api/workflow/templates', {
-        method: 'POST',
+      const isEdit = editingTemplateId != null;
+      const url = isEdit
+        ? `/api/workflow/templates/${editingTemplateId}`
+        : '/api/workflow/templates';
+      const res = await authFetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -727,19 +777,25 @@ function WorkflowTab({ authFetch }) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || `Server error ${res.status}`);
       }
-      const created = await res.json();
-      setTemplates((prev) => [
-        ...prev,
-        {
-          id: created.id,
-          name: created.name,
-          description: created.description,
-          is_system: false,
-          stage_count: created.workflow_data.stages.length,
-          created_at: created.created_at,
-        },
-      ]);
+      const saved = await res.json();
+      const summary = {
+        id: saved.id,
+        name: saved.name,
+        description: saved.description,
+        is_system: saved.is_system ?? false,
+        stage_count: saved.workflow_data.stages.length,
+        created_at: saved.created_at,
+      };
+      setTemplates((prev) =>
+        isEdit ? prev.map((t) => (t.id === saved.id ? summary : t)) : [...prev, summary]
+      );
+      if (isEdit) {
+        // Refresh the detail panel with the freshly-saved template
+        setSelectedTemplate(summary);
+        setTemplateDetail(saved);
+      }
       setShowCreateForm(false);
+      setEditingTemplateId(null);
       setForm({ name: '', description: '', stages: [emptyStage()] });
     } catch (e) {
       setCreateError(e.message);
@@ -957,7 +1013,7 @@ function WorkflowTab({ authFetch }) {
           }}
         >
           <h4 className="font-semibold mb-lg" style={{ fontSize: 'var(--font-size-base)' }}>
-            New Workflow Template
+            {editingTemplateId != null ? 'Edit Workflow Template' : 'New Workflow Template'}
           </h4>
 
           {/* Name + description */}
@@ -1109,6 +1165,7 @@ function WorkflowTab({ authFetch }) {
             <button
               onClick={() => {
                 setShowCreateForm(false);
+                setEditingTemplateId(null);
                 setCreateError(null);
               }}
               disabled={creating}
@@ -1140,7 +1197,13 @@ function WorkflowTab({ authFetch }) {
                 cursor: creating ? 'not-allowed' : 'pointer',
               }}
             >
-              {creating ? 'Creating…' : 'Create Template'}
+              {creating
+                ? editingTemplateId != null
+                  ? 'Saving…'
+                  : 'Creating…'
+                : editingTemplateId != null
+                  ? 'Save Changes'
+                  : 'Create Template'}
             </button>
           </div>
         </div>
@@ -1187,23 +1250,40 @@ function WorkflowTab({ authFetch }) {
               )}
             </div>
             {!selectedTemplate.is_system && (
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                style={{
-                  padding: 'var(--spacing-xs) var(--spacing-md)',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid rgba(220,38,38,0.4)',
-                  backgroundColor: 'rgba(220,38,38,0.06)',
-                  color: 'var(--color-error)',
-                  fontSize: 'var(--font-size-sm)',
-                  cursor: deleting ? 'not-allowed' : 'pointer',
-                  fontWeight: 500,
-                  flexShrink: 0,
-                }}
-              >
-                {deleting ? 'Deleting…' : 'Delete Template'}
-              </button>
+              <div style={{ display: 'flex', gap: 'var(--spacing-sm)', flexShrink: 0 }}>
+                <button
+                  onClick={() => openEditForm(selectedTemplate)}
+                  disabled={deleting || detailLoading}
+                  style={{
+                    padding: 'var(--spacing-xs) var(--spacing-md)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(124,58,237,0.4)',
+                    backgroundColor: 'rgba(124,58,237,0.06)',
+                    color: 'var(--color-accent-purple, #7c3aed)',
+                    fontSize: 'var(--font-size-sm)',
+                    cursor: deleting || detailLoading ? 'not-allowed' : 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  Edit Template
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  style={{
+                    padding: 'var(--spacing-xs) var(--spacing-md)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(220,38,38,0.4)',
+                    backgroundColor: 'rgba(220,38,38,0.06)',
+                    color: 'var(--color-error)',
+                    fontSize: 'var(--font-size-sm)',
+                    cursor: deleting ? 'not-allowed' : 'pointer',
+                    fontWeight: 500,
+                  }}
+                >
+                  {deleting ? 'Deleting…' : 'Delete Template'}
+                </button>
+              </div>
             )}
           </div>
 

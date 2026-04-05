@@ -30,6 +30,7 @@ review_results  — review findings (id, sow_id, reviewer, score, findings, revi
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 
@@ -498,23 +499,37 @@ async def lifespan(app: FastAPI):
                 RETURNING id
             """)
 
-            # Stages
+            # Stages — config.assignment_stage_keys maps workflow stage_key to
+            # the stage values stored in review_assignments.stage (which use a
+            # legacy hyphenated naming: "internal-review", "drm-approval").
             stage_defs = [
-                ("draft", "Draft", 1, "draft"),
-                ("ai_review", "AI Review", 2, "ai_analysis"),
-                ("internal_review", "Internal Review", 3, "review"),
-                ("drm_review", "DRM Review", 4, "approval"),
-                ("approved", "Approved", 5, "terminal"),
-                ("finalized", "Finalized", 6, "terminal"),
-                ("rejected", "Rejected", 0, "terminal"),
+                ("draft", "Draft", 1, "draft", {}),
+                ("ai_review", "AI Review", 2, "ai_analysis", {}),
+                (
+                    "internal_review",
+                    "Internal Review",
+                    3,
+                    "review",
+                    {"assignment_stage_keys": ["internal-review"]},
+                ),
+                (
+                    "drm_review",
+                    "DRM Review",
+                    4,
+                    "approval",
+                    {"assignment_stage_keys": ["drm-approval"]},
+                ),
+                ("approved", "Approved", 5, "terminal", {}),
+                ("finalized", "Finalized", 6, "terminal", {}),
+                ("rejected", "Rejected", 0, "terminal", {"is_failure": True}),
             ]
             stage_ids = {}
-            for key, name, order, stype in stage_defs:
+            for key, name, order, stype, cfg in stage_defs:
                 sid = await conn.fetchval(
                     """
                     INSERT INTO workflow_template_stages
-                        (template_id, stage_key, display_name, stage_order, stage_type)
-                    VALUES ($1, $2, $3, $4, $5)
+                        (template_id, stage_key, display_name, stage_order, stage_type, config)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                     RETURNING id
                 """,
                     template_id,
@@ -522,6 +537,7 @@ async def lifespan(app: FastAPI):
                     name,
                     order,
                     stype,
+                    json.dumps(cfg),
                 )
                 stage_ids[key] = sid
 
@@ -634,6 +650,65 @@ async def lifespan(app: FastAPI):
                         _json.dumps(tmpl_data.get("template_data", {})),
                     )
                     print(f"Seeded content template: {tmpl_data.get('name', tmpl_file.stem)}")
+
+        # ------------------------------------------------------------------ #
+        # 13a. BACKFILL assignment_stage_keys on default template            #
+        # Older seeds inserted empty configs. Patch the default template's   #
+        # internal_review / drm_review stages so WorkflowProgress can map    #
+        # review_assignments.stage back to workflow stages.                  #
+        # ------------------------------------------------------------------ #
+        default_tmpl_id_mig = await conn.fetchval(
+            "SELECT id FROM workflow_templates WHERE is_system = TRUE AND name = 'Default ESAP Workflow'"
+        )
+        if default_tmpl_id_mig:
+            stage_cfg_patches = {
+                "internal_review": {"assignment_stage_keys": ["internal-review"]},
+                "drm_review": {"assignment_stage_keys": ["drm-approval"]},
+                "rejected": {"is_failure": True},
+            }
+            for stage_key, patch in stage_cfg_patches.items():
+                await conn.execute(
+                    """
+                    UPDATE workflow_template_stages
+                    SET    config = COALESCE(config, '{}'::jsonb) || $1::jsonb
+                    WHERE  template_id = $2 AND stage_key = $3
+                    """,
+                    json.dumps(patch),
+                    default_tmpl_id_mig,
+                    stage_key,
+                )
+
+            # Re-snapshot any sow_workflow rows using this template whose
+            # snapshot is missing assignment_stage_keys on the mapped stages.
+            from routers.workflow import build_workflow_snapshot as _bws
+
+            fresh_snapshot = await _bws(conn, default_tmpl_id_mig)
+            fresh_snapshot_str = json.dumps(fresh_snapshot)
+            stale = await conn.fetch(
+                """
+                SELECT id, workflow_data FROM sow_workflow
+                WHERE template_id = $1
+                """,
+                default_tmpl_id_mig,
+            )
+            for sw in stale:
+                data = (
+                    sw["workflow_data"]
+                    if isinstance(sw["workflow_data"], dict)
+                    else json.loads(sw["workflow_data"])
+                )
+                needs = True
+                for st in data.get("stages", []):
+                    if st.get("stage_key") == "drm_review":
+                        if (st.get("config") or {}).get("assignment_stage_keys"):
+                            needs = False
+                        break
+                if needs:
+                    await conn.execute(
+                        "UPDATE sow_workflow SET workflow_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                        fresh_snapshot_str,
+                        sw["id"],
+                    )
 
         # ------------------------------------------------------------------ #
         # 13b. PHASE 5 MIGRATION — Backfill sow_workflow for legacy SoWs    #

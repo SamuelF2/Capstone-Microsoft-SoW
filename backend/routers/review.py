@@ -323,8 +323,10 @@ async def _get_required_roles(conn, sow_id: int, stage_key: str, esap_level: str
         if stage["stage_key"] == stage_key:
             roles = []
             for role in stage.get("roles", []):
+                if not role.get("is_required", True):
+                    continue
                 esap_list = role.get("esap_levels")
-                if esap_list is None or esap_level in esap_list and role.get("is_required", True):
+                if esap_list is None or esap_level in esap_list:
                     roles.append(role["role_key"])
             return roles
     return []

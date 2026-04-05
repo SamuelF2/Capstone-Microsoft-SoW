@@ -47,8 +47,8 @@ function Badge({ label, color }) {
         display: 'inline-block',
         padding: '2px 8px',
         borderRadius: '9999px',
-        fontSize: '11px',
-        fontWeight: 600,
+        fontSize: 'var(--font-size-xs)',
+        fontWeight: 'var(--font-weight-semibold)',
         letterSpacing: '0.04em',
         color,
         border: `1px solid ${color}`,
@@ -236,7 +236,7 @@ export default function AttachmentManager({
 
   if (loading) {
     return (
-      <div style={{ padding: '16px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+      <div style={{ padding: '16px', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
         Loading attachments...
       </div>
     );
@@ -251,34 +251,31 @@ export default function AttachmentManager({
 
   return (
     <div
-      style={{ border: '1px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden' }}
+      style={{
+        border: '1px solid var(--color-border-default)',
+        borderRadius: '8px',
+        overflow: 'hidden',
+      }}
     >
       {/* Header */}
       <div
         style={{
           padding: '12px 16px',
-          borderBottom: '1px solid var(--color-border)',
-          backgroundColor: 'var(--color-surface, #f8f9fa)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '16px' }}>{'\u{1F4CE}'}</span>
-          <strong style={{ fontSize: '14px' }}>Attachments</strong>
-          <span style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>
+          <strong style={{ fontSize: 'var(--font-size-sm)' }}>Attachments</strong>
+          <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}>
             ({attachments.length} file{attachments.length !== 1 ? 's' : ''})
           </span>
         </div>
         {showRequirements && reqsTotal > 0 && (
           <Badge
             label={`${reqsMet}/${reqsTotal} required`}
-            color={
-              reqsMet === reqsTotal
-                ? 'var(--color-success, #16a34a)'
-                : 'var(--color-error, #dc2626)'
-            }
+            color={reqsMet === reqsTotal ? 'var(--color-success)' : 'var(--color-error)'}
           />
         )}
       </div>
@@ -287,10 +284,10 @@ export default function AttachmentManager({
         <div
           style={{
             padding: '8px 16px',
-            backgroundColor: '#fef2f2',
-            color: '#dc2626',
-            fontSize: '13px',
-            borderBottom: '1px solid var(--color-border)',
+            backgroundColor: 'var(--color-error-bg, #fef2f2)',
+            color: 'var(--color-error)',
+            fontSize: 'var(--font-size-sm)',
+            borderBottom: '1px solid var(--color-border-default)',
           }}
         >
           {error}
@@ -301,8 +298,8 @@ export default function AttachmentManager({
               background: 'none',
               border: 'none',
               cursor: 'pointer',
-              color: '#dc2626',
-              fontWeight: 600,
+              color: 'var(--color-error)',
+              fontWeight: 'var(--font-weight-semibold)',
             }}
           >
             Dismiss
@@ -315,15 +312,15 @@ export default function AttachmentManager({
         <div
           style={{
             padding: '12px 16px',
-            borderBottom: '1px solid var(--color-border)',
-            backgroundColor: '#fafbfc',
+            borderBottom: '1px solid var(--color-border-default)',
+            backgroundColor: 'var(--color-bg-secondary, #fafbfc)',
           }}
         >
           <div
             style={{
-              fontSize: '12px',
-              fontWeight: 600,
-              color: 'var(--color-text-secondary)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 'var(--font-weight-semibold)',
+              color: 'var(--color-text-tertiary)',
               marginBottom: '8px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
@@ -339,19 +336,31 @@ export default function AttachmentManager({
                 alignItems: 'center',
                 gap: '8px',
                 padding: '4px 0',
-                fontSize: '13px',
+                fontSize: 'var(--font-size-sm)',
               }}
             >
               {req.fulfilled ? (
-                <span style={{ color: 'var(--color-success, #16a34a)', fontWeight: 700 }}>
+                <span
+                  style={{
+                    color: 'var(--color-success)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                  }}
+                >
                   {'\u2713'}
                 </span>
               ) : req.is_required ? (
-                <span style={{ color: 'var(--color-error, #dc2626)', fontWeight: 700 }}>
+                <span
+                  style={{ color: 'var(--color-error)', fontWeight: 'var(--font-weight-semibold)' }}
+                >
                   {'\u2717'}
                 </span>
               ) : (
-                <span style={{ color: 'var(--color-text-muted)', fontWeight: 700 }}>
+                <span
+                  style={{
+                    color: 'var(--color-text-tertiary)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                  }}
+                >
                   {'\u25CB'}
                 </span>
               )}
@@ -359,16 +368,18 @@ export default function AttachmentManager({
               {req.is_required && (
                 <span
                   style={{
-                    fontSize: '10px',
-                    color: 'var(--color-error, #dc2626)',
-                    fontWeight: 600,
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-error)',
+                    fontWeight: 'var(--font-weight-semibold)',
                   }}
                 >
                   REQUIRED
                 </span>
               )}
               {req.description && (
-                <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
+                <span
+                  style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-xs)' }}
+                >
                   — {req.description}
                 </span>
               )}
@@ -379,7 +390,9 @@ export default function AttachmentManager({
 
       {/* Upload area */}
       {!readOnly && (
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border)' }}>
+        <div
+          style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-default)' }}
+        >
           {/* Document type + description row */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
             <select
@@ -388,9 +401,8 @@ export default function AttachmentManager({
               style={{
                 padding: '6px 10px',
                 borderRadius: '6px',
-                border: '1px solid var(--color-border)',
-                fontSize: '13px',
-                backgroundColor: 'white',
+                border: '1px solid var(--color-border-default)',
+                fontSize: 'var(--font-size-sm)',
                 flex: '0 0 200px',
               }}
             >
@@ -409,8 +421,8 @@ export default function AttachmentManager({
                 flex: 1,
                 padding: '6px 10px',
                 borderRadius: '6px',
-                border: '1px solid var(--color-border)',
-                fontSize: '13px',
+                border: '1px solid var(--color-border-default)',
+                fontSize: 'var(--font-size-sm)',
               }}
             />
           </div>
@@ -423,30 +435,42 @@ export default function AttachmentManager({
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
             style={{
-              border: `2px dashed ${dragActive ? 'var(--color-primary, #1967d2)' : 'var(--color-border)'}`,
+              border: `2px dashed ${dragActive ? 'var(--color-primary)' : 'var(--color-border-default)'}`,
               borderRadius: '8px',
               padding: '20px',
               textAlign: 'center',
               cursor: 'pointer',
-              backgroundColor: dragActive ? '#eff6ff' : 'transparent',
-              transition: 'all 0.15s ease',
+              backgroundColor: dragActive ? 'var(--color-primary-bg, #eff6ff)' : 'transparent',
+              transition: 'all 0.2s',
             }}
           >
             {uploading ? (
-              <span style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>
+              <span
+                style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}
+              >
                 Uploading...
               </span>
             ) : (
               <>
-                <div style={{ fontSize: '24px', marginBottom: '4px' }}>{'\u{2B06}\u{FE0F}'}</div>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>
+                <div
+                  style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}
+                >
                   Drag & drop a file here, or{' '}
-                  <span style={{ color: 'var(--color-primary, #1967d2)', fontWeight: 600 }}>
+                  <span
+                    style={{
+                      color: 'var(--color-primary)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                    }}
+                  >
                     browse
                   </span>
                 </div>
                 <div
-                  style={{ color: 'var(--color-text-muted)', fontSize: '11px', marginTop: '4px' }}
+                  style={{
+                    color: 'var(--color-text-tertiary)',
+                    fontSize: 'var(--font-size-xs)',
+                    marginTop: '4px',
+                  }}
                 >
                   PDF, DOCX, XLSX, CSV, PPTX, PNG, JPG — max 25 MB
                 </div>
@@ -469,8 +493,8 @@ export default function AttachmentManager({
           style={{
             padding: '20px 16px',
             textAlign: 'center',
-            color: 'var(--color-text-muted)',
-            fontSize: '13px',
+            color: 'var(--color-text-tertiary)',
+            fontSize: 'var(--font-size-sm)',
           }}
         >
           No attachments yet
@@ -487,8 +511,8 @@ export default function AttachmentManager({
                   alignItems: 'center',
                   gap: '10px',
                   padding: '10px 16px',
-                  borderBottom: '1px solid var(--color-border)',
-                  fontSize: '13px',
+                  borderBottom: '1px solid var(--color-border-default)',
+                  fontSize: 'var(--font-size-sm)',
                 }}
               >
                 <span style={{ fontSize: '18px', flexShrink: 0 }}>
@@ -497,7 +521,7 @@ export default function AttachmentManager({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      fontWeight: 500,
+                      fontWeight: 'var(--font-weight-medium)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -512,11 +536,21 @@ export default function AttachmentManager({
                       label={DOCUMENT_TYPE_LABELS[att.document_type] || att.document_type}
                       color={typeColor}
                     />
-                    <span style={{ color: 'var(--color-text-muted)', fontSize: '11px' }}>
+                    <span
+                      style={{
+                        color: 'var(--color-text-tertiary)',
+                        fontSize: 'var(--font-size-xs)',
+                      }}
+                    >
                       {formatBytes(att.file_size)}
                     </span>
                     {att.stage_key && (
-                      <span style={{ color: 'var(--color-text-muted)', fontSize: '11px' }}>
+                      <span
+                        style={{
+                          color: 'var(--color-text-tertiary)',
+                          fontSize: 'var(--font-size-xs)',
+                        }}
+                      >
                         Stage: {att.stage_key}
                       </span>
                     )}
@@ -528,15 +562,16 @@ export default function AttachmentManager({
                     style={{
                       padding: '4px 10px',
                       borderRadius: '6px',
-                      border: '1px solid var(--color-border)',
-                      background: 'white',
+                      border: '1px solid var(--color-border-default)',
+                      background: 'var(--color-bg-secondary)',
                       cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight: 500,
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: 'var(--font-weight-medium)',
+                      color: 'var(--color-primary)',
                     }}
                     title="Download"
                   >
-                    {'\u{2B07}'} Download
+                    Download
                   </button>
                   {!readOnly && (
                     <button
@@ -544,16 +579,16 @@ export default function AttachmentManager({
                       style={{
                         padding: '4px 10px',
                         borderRadius: '6px',
-                        border: '1px solid #fecaca',
-                        background: '#fef2f2',
+                        border: '1px solid var(--color-error-border, #fecaca)',
+                        background: 'var(--color-error-bg, #fef2f2)',
                         cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                        color: '#dc2626',
+                        fontSize: 'var(--font-size-xs)',
+                        fontWeight: 'var(--font-weight-medium)',
+                        color: 'var(--color-error)',
                       }}
                       title="Delete"
                     >
-                      {'\u{1F5D1}'}
+                      Remove
                     </button>
                   )}
                 </div>

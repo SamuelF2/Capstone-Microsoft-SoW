@@ -175,6 +175,26 @@ export default function AllSoWs() {
     return () => clearTimeout(debounceTimer.current);
   }, [search, filterMethod, filterStatus, user, authFetch]);
 
+  // Dynamically build the stage filter from loaded SoWs, so custom workflow
+  // stages surface automatically. Uses stage_display_name from the workflow
+  // snapshot (falls back to the raw status key with basic prettification).
+  const stageOptions = useMemo(() => {
+    const seen = new Map();
+    const prettify = (s) =>
+      s
+        .split(/[-_]/)
+        .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(' ');
+    for (const sow of sows) {
+      const key = sow.status || '';
+      if (!key || seen.has(key)) continue;
+      seen.set(key, sow.stage_display_name || prettify(key));
+    }
+    return [...seen.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([value, label]) => ({ value, label }));
+  }, [sows]);
+
   // Client-side filter used when search is short or server search is unavailable
   const filtered = useMemo(
     () =>
@@ -334,14 +354,12 @@ export default function AllSoWs() {
               className="form-select"
               style={{ flex: '1', minWidth: '140px' }}
             >
-              <option value="All">All Statuses</option>
-              <option value="draft">Draft</option>
-              <option value="ai_review">AI Review</option>
-              <option value="internal_review">Internal Review</option>
-              <option value="drm_review">DRM Review</option>
-              <option value="approved">Approved</option>
-              <option value="finalized">Finalized</option>
-              <option value="rejected">Rejected</option>
+              <option value="All">All Stages</option>
+              {stageOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
 

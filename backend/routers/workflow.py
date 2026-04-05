@@ -8,6 +8,7 @@ Endpoints
   GET    /api/workflow/templates                  List all workflow templates
   POST   /api/workflow/templates                  Create a workflow template
   GET    /api/workflow/templates/{template_id}     Get full template detail
+  PUT    /api/workflow/templates/{template_id}     Update a non-system template
   DELETE /api/workflow/templates/{template_id}     Delete a non-system template
   GET    /api/workflow/sow/{sow_id}               Get SoW workflow instance
   POST   /api/workflow/sow/{sow_id}               Create workflow instance for existing SoW
@@ -258,6 +259,114 @@ async def get_template(template_id: int, current_user: CurrentUser) -> WorkflowT
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
         snapshot = await build_workflow_snapshot(conn, template_id)
+
+    return WorkflowTemplateResponse(
+        id=row["id"],
+        name=row["name"],
+        description=row["description"],
+        is_system=row["is_system"],
+        workflow_data=WorkflowData(**snapshot),
+        created_at=row["created_at"],
+    )
+
+
+@router.put(
+    "/templates/{template_id}",
+    response_model=WorkflowTemplateResponse,
+    summary="Update a non-system workflow template",
+)
+async def update_template(
+    template_id: int, payload: WorkflowTemplateCreate, current_user: CurrentUser
+) -> WorkflowTemplateResponse:
+    wd = payload.workflow_data
+
+    # Validate: all transition stage keys must exist in stages
+    stage_keys = {s.stage_key for s in wd.stages}
+    for t in wd.transitions:
+        if t.from_stage not in stage_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Transition references unknown stage '{t.from_stage}'",
+            )
+        if t.to_stage not in stage_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Transition references unknown stage '{t.to_stage}'",
+            )
+
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        existing = await conn.fetchrow(
+            "SELECT id, is_system FROM workflow_templates WHERE id = $1", template_id
+        )
+        if not existing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+        if existing["is_system"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="System templates cannot be edited. Clone it first.",
+            )
+
+        await conn.execute(
+            """
+            UPDATE workflow_templates
+            SET    name = $1, description = $2, updated_at = NOW()
+            WHERE  id = $3
+            """,
+            payload.name,
+            payload.description,
+            template_id,
+        )
+
+        # Replace stages/roles/transitions wholesale (cascade deletes roles)
+        await conn.execute(
+            "DELETE FROM workflow_template_stages WHERE template_id = $1", template_id
+        )
+        await conn.execute(
+            "DELETE FROM workflow_template_transitions WHERE template_id = $1", template_id
+        )
+
+        for s in wd.stages:
+            stage_id = await conn.fetchval(
+                """
+                INSERT INTO workflow_template_stages
+                    (template_id, stage_key, display_name, stage_order, stage_type, config)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                RETURNING id
+                """,
+                template_id,
+                s.stage_key,
+                s.display_name,
+                s.stage_order,
+                s.stage_type,
+                json.dumps(s.config),
+            )
+            for role in s.roles:
+                await conn.execute(
+                    """
+                    INSERT INTO workflow_template_stage_roles
+                        (stage_id, role_key, is_required, esap_levels)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    stage_id,
+                    role.role_key,
+                    role.is_required,
+                    role.esap_levels,
+                )
+
+        for t in wd.transitions:
+            await conn.execute(
+                """
+                INSERT INTO workflow_template_transitions
+                    (template_id, from_stage_key, to_stage_key)
+                VALUES ($1, $2, $3)
+                """,
+                template_id,
+                t.from_stage,
+                t.to_stage,
+            )
+
+        snapshot = await build_workflow_snapshot(conn, template_id)
+        row = await conn.fetchrow("SELECT * FROM workflow_templates WHERE id = $1", template_id)
 
     return WorkflowTemplateResponse(
         id=row["id"],
