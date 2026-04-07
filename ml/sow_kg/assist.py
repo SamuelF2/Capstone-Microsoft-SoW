@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from neo4j import Driver
 
-from .graphrag import DealContext, RetrievedContext, retrieve
+from .graphrag import retrieve
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +25,13 @@ Rules:
 
 
 def assist(
-    driver:     Driver,
+    driver: Driver,
     model,
-    query:      str,
-    sow_id:     Optional[str] = None,
-    history:    Optional[list[dict]] = None,
-    top_k:      int = 5,
-    hop_depth:  int = 2,
+    query: str,
+    sow_id: str | None = None,
+    history: list[dict] | None = None,
+    top_k: int = 5,
+    hop_depth: int = 2,
     max_tokens: int = 2048,
 ) -> dict:
     ctx = retrieve(driver, model, query, sow_id=sow_id, top_k=top_k, hop_depth=hop_depth)
@@ -42,13 +41,11 @@ def assist(
         messages.extend(history[-6:])
 
     context_block = ctx.to_prompt_context()
-    user_content = (
-        f"<context>\n{context_block}\n</context>\n\n{query}"
-        if context_block else query
-    )
+    user_content = f"<context>\n{context_block}\n</context>\n\n{query}" if context_block else query
     messages.append({"role": "user", "content": user_content})
 
     from .llm_client import get_client, get_model
+
     response = get_client().chat.completions.create(
         model=get_model(),
         messages=messages,
@@ -59,19 +56,36 @@ def assist(
     return {
         "answer": answer,
         "context": {
-            "sections_used":        len(ctx.sections),
-            "rules_applied":        len(ctx.rules),
+            "sections_used": len(ctx.sections),
+            "rules_applied": len(ctx.rules),
             "banned_phrases_found": len(ctx.banned_phrases),
-            "risks_surfaced":       len(ctx.risks),
-            "similar_sections":     len(ctx.similar_sections),
-            "methodology":          ctx.deal_context.methodology,
-            "deal_value":           ctx.deal_context.deal_value,
-            "sow_id":               sow_id,
+            "risks_surfaced": len(ctx.risks),
+            "similar_sections": len(ctx.similar_sections),
+            "methodology": ctx.deal_context.methodology,
+            "deal_value": ctx.deal_context.deal_value,
+            "sow_id": sow_id,
         },
         "retrieved": {
-            "sections":       [{"id": s.get("id"), "heading": s.get("heading"), "type": s.get("section_type")} for s in ctx.sections],
-            "rules":          [{"id": r.get("rule_id"), "description": r.get("description"), "severity": r.get("severity")} for r in ctx.rules],
+            "sections": [
+                {"id": s.get("id"), "heading": s.get("heading"), "type": s.get("section_type")}
+                for s in ctx.sections
+            ],
+            "rules": [
+                {
+                    "id": r.get("rule_id"),
+                    "description": r.get("description"),
+                    "severity": r.get("severity"),
+                }
+                for r in ctx.rules
+            ],
             "banned_phrases": ctx.banned_phrases,
-            "risks":          [{"id": r.get("id"), "description": r.get("description"), "severity": r.get("severity")} for r in ctx.risks],
+            "risks": [
+                {
+                    "id": r.get("id"),
+                    "description": r.get("description"),
+                    "severity": r.get("severity"),
+                }
+                for r in ctx.risks
+            ],
         },
     }

@@ -1,17 +1,18 @@
 @cli.command()
 @click.argument("query")
-@click.option("--sow-id",       default=None)
-@click.option("--top-k",        default=5,     show_default=True)
-@click.option("--hop-depth",    default=2,     show_default=True)
-@click.option("--context-only", is_flag=True,  help="Return retrieved subgraph without calling LLM")
+@click.option("--sow-id", default=None)
+@click.option("--top-k", default=5, show_default=True)
+@click.option("--hop-depth", default=2, show_default=True)
+@click.option("--context-only", is_flag=True, help="Return retrieved subgraph without calling LLM")
 def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bool):
     """Context-aware SOW authoring assistant powered by GraphRAG."""
     from sentence_transformers import SentenceTransformer
-    from sow_kg.graphrag import retrieve
+
     from sow_kg.assist import assist as _assist
+    from sow_kg.graphrag import retrieve
 
     driver = get_driver()
-    model  = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
     console.print(f"\n[bold]Query:[/] [cyan]{query}[/]")
     if sow_id:
@@ -35,8 +36,8 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
         if ctx.sections:
             t = Table(title="Retrieved Sections")
             t.add_column("Heading")
-            t.add_column("Type",   style="dim")
-            t.add_column("Conf",   justify="right")
+            t.add_column("Type", style="dim")
+            t.add_column("Conf", justify="right")
             t.add_column("Preview")
             for s in ctx.sections:
                 conf = f"{s.get('llm_confidence', 0):.2f}" if s.get("llm_confidence") else "—"
@@ -63,7 +64,7 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
 
         if ctx.banned_phrases:
             t = Table(title="Banned Phrases")
-            t.add_column("Phrase",     style="red")
+            t.add_column("Phrase", style="red")
             t.add_column("Suggestion", style="dim")
             for b in ctx.banned_phrases:
                 t.add_row(b.get("phrase", ""), b.get("suggestion", ""))

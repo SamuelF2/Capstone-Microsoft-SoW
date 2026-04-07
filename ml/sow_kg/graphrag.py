@@ -1,49 +1,57 @@
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+
 from neo4j import Driver
+
 logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 SCORE_THRESHOLDS = {
-    "section":    0.55,
-    "rule":       0.50,
+    "section": 0.55,
+    "rule": 0.50,
     "clausetype": 0.50,
 }
 
-MAX_ANCHOR_SECTIONS  = 8
-MAX_ANCHOR_RULES     = 4
-MAX_ANCHOR_CLAUSES   = 4
-MAX_TRAVERSAL_NODES  = 50
-MAX_CROSS_SOW        = 5
+MAX_ANCHOR_SECTIONS = 8
+MAX_ANCHOR_RULES = 4
+MAX_ANCHOR_CLAUSES = 4
+MAX_TRAVERSAL_NODES = 50
+MAX_CROSS_SOW = 5
 
 
 @dataclass
 class DealContext:
-    sow_id:      Optional[str]   = None
-    methodology: Optional[str]   = None
-    deal_value:  Optional[float] = None
-    industry:    Optional[str]   = None
+    sow_id: str | None = None
+    methodology: str | None = None
+    deal_value: float | None = None
+    industry: str | None = None
 
 
 @dataclass
 class RetrievedContext:
-    query:            str
-    deal_context:     DealContext
-    sections:         list[dict] = field(default_factory=list)
-    rules:            list[dict] = field(default_factory=list)
-    banned_phrases:   list[dict] = field(default_factory=list)
-    risks:            list[dict] = field(default_factory=list)
-    deliverables:     list[dict] = field(default_factory=list)
+    query: str
+    deal_context: DealContext
+    sections: list[dict] = field(default_factory=list)
+    rules: list[dict] = field(default_factory=list)
+    banned_phrases: list[dict] = field(default_factory=list)
+    risks: list[dict] = field(default_factory=list)
+    deliverables: list[dict] = field(default_factory=list)
     similar_sections: list[dict] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not any([
-            self.sections, self.rules, self.banned_phrases,
-            self.risks, self.deliverables, self.similar_sections,
-        ])
+        return not any(
+            [
+                self.sections,
+                self.rules,
+                self.banned_phrases,
+                self.risks,
+                self.deliverables,
+                self.similar_sections,
+            ]
+        )
 
     def to_prompt_context(self) -> str:
         parts: list[str] = []
@@ -62,41 +70,41 @@ class RetrievedContext:
         if self.sections:
             parts.append("## Relevant SOW Sections")
             for s in self.sections:
-                heading  = s.get("heading", "")
-                stype    = s.get("section_type", "")
-                content  = (s.get("content") or "")[:600]
-                conf     = s.get("llm_confidence")
-                tag      = f" [{stype}]" if stype and stype != "other" else ""
+                heading = s.get("heading", "")
+                stype = s.get("section_type", "")
+                content = (s.get("content") or "")[:600]
+                conf = s.get("llm_confidence")
+                tag = f" [{stype}]" if stype and stype != "other" else ""
                 conf_tag = f" (conf={conf:.2f})" if conf else ""
                 parts.append(f"### {heading}{tag}{conf_tag}\n{content}")
 
         if self.rules:
             parts.append("## Applicable Validation Rules")
             for r in self.rules:
-                sev  = (r.get("severity") or "").upper()
+                sev = (r.get("severity") or "").upper()
                 desc = r.get("description", "")
-                cat  = r.get("category", "")
+                cat = r.get("category", "")
                 parts.append(f"- [{sev}] {desc} (category: {cat})")
 
         if self.banned_phrases:
             parts.append("## Banned Phrases")
             for b in self.banned_phrases:
-                parts.append(f"- \"{b.get('phrase')}\" → {b.get('suggestion', 'avoid this term')}")
+                parts.append(f'- "{b.get("phrase")}" → {b.get("suggestion", "avoid this term")}')
 
         if self.risks:
             parts.append("## Identified Risks")
             for r in self.risks:
-                sev     = (r.get("severity") or "medium").upper()
-                desc    = r.get("description", "")
-                mit     = r.get("mitigation", "")
+                sev = (r.get("severity") or "medium").upper()
+                desc = r.get("description", "")
+                mit = r.get("mitigation", "")
                 mit_str = f" | mitigation: {mit}" if mit else " | no mitigation documented"
                 parts.append(f"- [{sev}] {desc}{mit_str}")
 
         if self.deliverables:
             parts.append("## Deliverables")
             for d in self.deliverables:
-                title  = d.get("title", "")
-                ac     = d.get("acceptance_criteria", "")
+                title = d.get("title", "")
+                ac = d.get("acceptance_criteria", "")
                 ac_str = f" | AC: {ac}" if ac else " | no acceptance criteria"
                 parts.append(f"- {title}{ac_str}")
 
@@ -104,10 +112,10 @@ class RetrievedContext:
             parts.append("## Sections from Similar Deals")
             for s in self.similar_sections:
                 heading = s.get("heading", "")
-                sow     = s.get("sow_title", "")
-                meth    = s.get("methodology", "")
+                sow = s.get("sow_title", "")
+                meth = s.get("methodology", "")
                 content = (s.get("content") or "")[:400]
-                meta    = f" [{meth}]" if meth else ""
+                meta = f" [{meth}]" if meth else ""
                 parts.append(f"### {heading} (from {sow}{meta})\n{content}")
 
         return "\n\n".join(parts)
@@ -137,12 +145,12 @@ def _load_deal_context(driver: Driver, sow_id: str) -> DealContext:
 
 
 def retrieve(
-    driver:     Driver,
+    driver: Driver,
     model,
-    query:      str,
-    sow_id:     Optional[str] = None,
-    top_k:      int = 5,
-    hop_depth:  int = 2,
+    query: str,
+    sow_id: str | None = None,
+    top_k: int = 5,
+    hop_depth: int = 2,
 ) -> RetrievedContext:
     query_vec = model.encode(query, normalize_embeddings=True).tolist()
 
@@ -150,18 +158,27 @@ def retrieve(
     ctx = RetrievedContext(query=query, deal_context=deal_ctx)
 
     anchor_section_ids = _vector_search(
-        driver, query_vec, "section_embeddings", "id",
+        driver,
+        query_vec,
+        "section_embeddings",
+        "id",
         score_threshold=SCORE_THRESHOLDS["section"],
         top_k=min(top_k, MAX_ANCHOR_SECTIONS),
         sow_id=sow_id,
     )
     anchor_rule_ids = _vector_search(
-        driver, query_vec, "rule_embeddings", "rule_id",
+        driver,
+        query_vec,
+        "rule_embeddings",
+        "rule_id",
         score_threshold=SCORE_THRESHOLDS["rule"],
         top_k=MAX_ANCHOR_RULES,
     )
     anchor_clause_ids = _vector_search(
-        driver, query_vec, "clausetype_embeddings", "type_id",
+        driver,
+        query_vec,
+        "clausetype_embeddings",
+        "type_id",
         score_threshold=SCORE_THRESHOLDS["clausetype"],
         top_k=MAX_ANCHOR_CLAUSES,
     )
@@ -169,10 +186,10 @@ def retrieve(
     if not anchor_section_ids and not anchor_rule_ids:
         return ctx
 
-    all_section_ids   = set(anchor_section_ids)
-    all_rule_ids      = set(anchor_rule_ids)
-    all_banned_ids:   set[str] = set()
-    all_risk_ids:     set[str] = set()
+    all_section_ids = set(anchor_section_ids)
+    all_rule_ids = set(anchor_rule_ids)
+    all_banned_ids: set[str] = set()
+    all_risk_ids: set[str] = set()
     all_deliverable_ids: set[str] = set()
 
     all_rule_ids |= _expand_clauses_to_rules(driver, anchor_clause_ids)
@@ -181,35 +198,38 @@ def retrieve(
         if len(all_section_ids) + len(all_rule_ids) > MAX_TRAVERSAL_NODES:
             break
 
-        new_sections, new_rules, new_banned, new_risks, new_deliverables = (
-            _expand_from_sections(driver, list(all_section_ids), deal_ctx)
+        new_sections, new_rules, new_banned, new_risks, new_deliverables = _expand_from_sections(
+            driver, list(all_section_ids), deal_ctx
         )
-        all_section_ids   |= new_sections
-        all_rule_ids      |= new_rules
-        all_banned_ids    |= new_banned
-        all_risk_ids      |= new_risks
+        all_section_ids |= new_sections
+        all_rule_ids |= new_rules
+        all_banned_ids |= new_banned
+        all_risk_ids |= new_risks
         all_deliverable_ids |= new_deliverables
 
-    ctx.sections       = _fetch_sections(driver, list(all_section_ids)[:top_k * 2])
-    ctx.rules          = _fetch_rules(driver, list(all_rule_ids)[:12])
+    ctx.sections = _fetch_sections(driver, list(all_section_ids)[: top_k * 2])
+    ctx.rules = _fetch_rules(driver, list(all_rule_ids)[:12])
     ctx.banned_phrases = _fetch_banned_phrases(driver, list(all_banned_ids))
-    ctx.risks          = _fetch_risks(driver, list(all_risk_ids)[:8])
-    ctx.deliverables   = _fetch_deliverables(driver, list(all_deliverable_ids)[:6])
+    ctx.risks = _fetch_risks(driver, list(all_risk_ids)[:8])
+    ctx.deliverables = _fetch_deliverables(driver, list(all_deliverable_ids)[:6])
     ctx.similar_sections = _fetch_cross_deal_sections(
-        driver, list(anchor_section_ids), deal_ctx, limit=MAX_CROSS_SOW,
+        driver,
+        list(anchor_section_ids),
+        deal_ctx,
+        limit=MAX_CROSS_SOW,
     )
 
     return ctx
 
 
 def _vector_search(
-    driver:          Driver,
-    query_vec:       list[float],
-    index_name:      str,
-    id_field:        str,
+    driver: Driver,
+    query_vec: list[float],
+    index_name: str,
+    id_field: str,
     score_threshold: float,
-    top_k:           int,
-    sow_id:          Optional[str] = None,
+    top_k: int,
+    sow_id: str | None = None,
 ) -> list[str]:
     with driver.session() as session:
         rows = session.run(
@@ -220,10 +240,14 @@ def _vector_search(
               AND ($sow_id IS NULL OR (node)<-[:HAS_SECTION]-(:SOW {{id: $sow_id}}))
             RETURN node.{id_field} AS id
             """,
-            index_name=index_name, k=top_k, vec=query_vec,
-            threshold=score_threshold, sow_id=sow_id,
+            index_name=index_name,
+            k=top_k,
+            vec=query_vec,
+            threshold=score_threshold,
+            sow_id=sow_id,
         ).data()
     return [r["id"] for r in rows if r["id"]]
+
 
 def _expand_clauses_to_rules(driver: Driver, clause_ids: list[str]) -> set[str]:
     if not clause_ids:
@@ -237,8 +261,8 @@ def _expand_clauses_to_rules(driver: Driver, clause_ids: list[str]) -> set[str]:
 
 
 def _expand_from_sections(
-    driver:   Driver,
-    sec_ids:  list[str],
+    driver: Driver,
+    sec_ids: list[str],
     deal_ctx: DealContext,
 ) -> tuple[set, set, set, set, set]:
     if not sec_ids:
@@ -352,11 +376,12 @@ def _fetch_deliverables(driver: Driver, ids: list[str]) -> list[dict]:
             ids=ids,
         ).data()
 
+
 def _fetch_cross_deal_sections(
-    driver:     Driver,
+    driver: Driver,
     anchor_ids: list[str],
-    deal_ctx:   DealContext,
-    limit:      int,
+    deal_ctx: DealContext,
+    limit: int,
 ) -> list[dict]:
     if not anchor_ids:
         return []

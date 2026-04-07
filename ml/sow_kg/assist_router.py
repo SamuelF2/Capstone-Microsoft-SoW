@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import os
 import logging
-from typing import Optional
+import os
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["assist"])
 
 _driver = None
-_model  = None
+_model = None
 
 
 def _init():
@@ -33,16 +32,16 @@ def _init():
 
 
 class AssistRequest(BaseModel):
-    query:      str
-    sow_id:     Optional[str]        = None
-    history:    Optional[list[dict]] = None
-    top_k:      int                  = 5
-    hop_depth:  int                  = 2
+    query: str
+    sow_id: str | None = None
+    history: list[dict] | None = None
+    top_k: int = 5
+    hop_depth: int = 2
 
 
 class AssistResponse(BaseModel):
-    answer:    str
-    context:   dict
+    answer: str
+    context: dict
     retrieved: dict
 
 
@@ -53,10 +52,15 @@ async def assist_endpoint(req: AssistRequest):
     try:
         driver, model = _init()
         from sow_kg.assist import assist
+
         result = assist(
-            driver=driver, model=model, query=req.query,
-            sow_id=req.sow_id, history=req.history,
-            top_k=req.top_k, hop_depth=req.hop_depth,
+            driver=driver,
+            model=model,
+            query=req.query,
+            sow_id=req.sow_id,
+            history=req.history,
+            top_k=req.top_k,
+            hop_depth=req.hop_depth,
         )
         return AssistResponse(**result)
     except Exception as e:
@@ -66,9 +70,9 @@ async def assist_endpoint(req: AssistRequest):
 
 @router.get("/assist/context")
 async def context_endpoint(
-    query:     str,
-    sow_id:    Optional[str] = None,
-    top_k:     int = 5,
+    query: str,
+    sow_id: str | None = None,
+    top_k: int = 5,
     hop_depth: int = 2,
 ):
     if not query.strip():
@@ -76,19 +80,20 @@ async def context_endpoint(
     try:
         driver, model = _init()
         from sow_kg.graphrag import retrieve
+
         ctx = retrieve(driver, model, query, sow_id=sow_id, top_k=top_k, hop_depth=hop_depth)
         return {
-            "query":            query,
-            "sow_id":           sow_id,
-            "methodology":      ctx.deal_context.methodology,
-            "deal_value":       ctx.deal_context.deal_value,
-            "sections":         ctx.sections,
-            "rules":            ctx.rules,
-            "banned_phrases":   ctx.banned_phrases,
-            "risks":            ctx.risks,
-            "deliverables":     ctx.deliverables,
+            "query": query,
+            "sow_id": sow_id,
+            "methodology": ctx.deal_context.methodology,
+            "deal_value": ctx.deal_context.deal_value,
+            "sections": ctx.sections,
+            "rules": ctx.rules,
+            "banned_phrases": ctx.banned_phrases,
+            "risks": ctx.risks,
+            "deliverables": ctx.deliverables,
             "similar_sections": ctx.similar_sections,
-            "empty":            ctx.is_empty(),
+            "empty": ctx.is_empty(),
         }
     except Exception as e:
         logger.exception("context endpoint error")

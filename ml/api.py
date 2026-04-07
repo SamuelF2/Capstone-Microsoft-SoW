@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 import logging
+import os
 from contextlib import asynccontextmanager
-from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -15,11 +14,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _driver = None
-_model  = None
+_model = None
 
 
 def _get_driver():
     from neo4j import GraphDatabase
+
     return GraphDatabase.driver(
         os.getenv("NEO4J_URI", "bolt://localhost:7687"),
         auth=(os.getenv("NEO4J_USER", "neo4j"), os.getenv("NEO4J_PASSWORD", "password")),
@@ -28,6 +28,7 @@ def _get_driver():
 
 def _get_model():
     from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
 
@@ -37,7 +38,7 @@ async def lifespan(app: FastAPI):
     logger.info("Loading embedding model and Neo4j driver")
     _driver = _get_driver()
     _driver.verify_connectivity()
-    _model  = _get_model()
+    _model = _get_model()
     logger.info("GraphRAG API ready")
     yield
     if _driver:
@@ -60,31 +61,31 @@ app.add_middleware(
 
 
 class AssistRequest(BaseModel):
-    query:     str
-    sow_id:    Optional[str]        = None
-    history:   Optional[list[dict]] = None
-    top_k:     int                  = 5
-    hop_depth: int                  = 2
+    query: str
+    sow_id: str | None = None
+    history: list[dict] | None = None
+    top_k: int = 5
+    hop_depth: int = 2
 
 
 class AssistResponse(BaseModel):
-    answer:    str
-    context:   dict
+    answer: str
+    context: dict
     retrieved: dict
 
 
 class ContextResponse(BaseModel):
-    query:            str
-    sow_id:           Optional[str]
-    methodology:      Optional[str]
-    deal_value:       Optional[float]
-    sections:         list[dict]
-    rules:            list[dict]
-    banned_phrases:   list[dict]
-    risks:            list[dict]
-    deliverables:     list[dict]
+    query: str
+    sow_id: str | None
+    methodology: str | None
+    deal_value: float | None
+    sections: list[dict]
+    rules: list[dict]
+    banned_phrases: list[dict]
+    risks: list[dict]
+    deliverables: list[dict]
     similar_sections: list[dict]
-    empty:            bool
+    empty: bool
 
 
 @app.get("/health")
@@ -99,10 +100,10 @@ def health():
 
 @app.get("/context", response_model=ContextResponse)
 def get_context(
-    query:     str           = Query(..., min_length=1),
-    sow_id:    Optional[str] = Query(None),
-    top_k:     int           = Query(5, ge=1, le=20),
-    hop_depth: int           = Query(2, ge=1, le=3),
+    query: str = Query(..., min_length=1),
+    sow_id: str | None = Query(None),
+    top_k: int = Query(5, ge=1, le=20),
+    hop_depth: int = Query(2, ge=1, le=3),
 ):
     """
     Pure graph retrieval — no LLM call.
@@ -116,6 +117,7 @@ def get_context(
     """
     try:
         from sow_kg.graphrag import retrieve
+
         ctx = retrieve(_driver, _model, query, sow_id=sow_id, top_k=top_k, hop_depth=hop_depth)
         return ContextResponse(
             query=query,
@@ -150,10 +152,15 @@ def post_assist(req: AssistRequest):
         raise HTTPException(status_code=400, detail="query must not be empty")
     try:
         from sow_kg.assist import assist
+
         result = assist(
-            driver=_driver, model=_model, query=req.query,
-            sow_id=req.sow_id, history=req.history,
-            top_k=req.top_k, hop_depth=req.hop_depth,
+            driver=_driver,
+            model=_model,
+            query=req.query,
+            sow_id=req.sow_id,
+            history=req.history,
+            top_k=req.top_k,
+            hop_depth=req.hop_depth,
         )
         return AssistResponse(**result)
     except Exception as e:
@@ -182,6 +189,7 @@ def list_sows():
 def validate_sow(sow_id: str):
     """Run rule-based validation against a SOW. Returns structured findings."""
     from sow_kg.queries import validate_sow as _validate
+
     try:
         return _validate(_driver, sow_id)
     except Exception as e:
@@ -192,9 +200,10 @@ def validate_sow(sow_id: str):
 def get_risks(sow_id: str):
     """Return risk register and rule-triggered risks for a SOW."""
     from sow_kg.queries import get_risk_summary, get_rule_triggered_risks
+
     try:
         return {
-            "risks":     get_risk_summary(_driver, sow_id),
+            "risks": get_risk_summary(_driver, sow_id),
             "triggered": get_rule_triggered_risks(_driver, sow_id),
         }
     except Exception as e:
@@ -205,6 +214,7 @@ def get_risks(sow_id: str):
 def get_similar(sow_id: str, limit: int = Query(5, ge=1, le=20)):
     """Find SOWs with overlapping clause types."""
     from sow_kg.queries import find_similar_sows
+
     try:
         return find_similar_sows(_driver, sow_id, limit=limit)
     except Exception as e:
@@ -213,11 +223,12 @@ def get_similar(sow_id: str, limit: int = Query(5, ge=1, le=20)):
 
 @app.get("/approval")
 def get_approval(
-    value:  float = Query(..., gt=0),
+    value: float = Query(..., gt=0),
     margin: float = Query(...),
 ):
     """Determine ESAP level and approval chain for a deal."""
     from sow_kg.queries import get_approval_chain
+
     try:
         return get_approval_chain(_driver, value, margin)
     except Exception as e:
@@ -226,8 +237,8 @@ def get_approval(
 
 @app.get("/schema/proposals")
 def get_schema_proposals(
-    status: Optional[str] = Query(None, regex="^(pending|accepted|rejected)$"),
-    kind:   Optional[str] = Query(None),
+    status: str | None = Query(None, regex="^(pending|accepted|rejected)$"),
+    kind: str | None = Query(None),
 ):
     """List schema evolution proposals generated during ingestion."""
     filters = []
