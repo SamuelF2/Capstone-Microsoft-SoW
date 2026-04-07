@@ -160,9 +160,7 @@ export function workflowToGraph({ stages, transitions }) {
           y: idx * ROW_HEIGHT - ((items.length - 1) * ROW_HEIGHT) / 2,
         },
         data: { stage },
-        // Anchor stages cannot be dragged — they're visually locked at fixed
-        // layers so the graph keeps a predictable left-to-right reading order.
-        draggable: !isAnchorStage(stage.stage_key),
+        // Anchor stages cannot be deleted.
         deletable: !isAnchorStage(stage.stage_key),
       });
     });
@@ -177,7 +175,6 @@ export function workflowToGraph({ stages, transitions }) {
       type: 'stage',
       position: { x: (maxLayer / 2) * COL_WIDTH, y: REJECTED_OFFSET_Y },
       data: { stage: rejected },
-      draggable: false,
       deletable: false,
     });
   }
