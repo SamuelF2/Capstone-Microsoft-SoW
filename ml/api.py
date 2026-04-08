@@ -134,7 +134,7 @@ def get_context(
         )
     except Exception as e:
         logger.exception("context retrieval error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/assist", response_model=AssistResponse)
@@ -165,7 +165,7 @@ def post_assist(req: AssistRequest):
         return AssistResponse(**result)
     except Exception as e:
         logger.exception("assist error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/sows")
@@ -193,7 +193,7 @@ def validate_sow(sow_id: str):
     try:
         return _validate(_driver, sow_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/sows/{sow_id}/risks")
@@ -207,7 +207,7 @@ def get_risks(sow_id: str):
             "triggered": get_rule_triggered_risks(_driver, sow_id),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/sows/{sow_id}/similar")
@@ -218,7 +218,7 @@ def get_similar(sow_id: str, limit: int = Query(5, ge=1, le=20)):
     try:
         return find_similar_sows(_driver, sow_id, limit=limit)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/approval")
@@ -232,7 +232,7 @@ def get_approval(
     try:
         return get_approval_chain(_driver, value, margin)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/schema/proposals")

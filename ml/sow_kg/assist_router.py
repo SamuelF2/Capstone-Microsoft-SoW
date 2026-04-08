@@ -65,7 +65,7 @@ async def assist_endpoint(req: AssistRequest):
         return AssistResponse(**result)
     except Exception as e:
         logger.exception("assist endpoint error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/assist/context")
@@ -97,4 +97,4 @@ async def context_endpoint(
         }
     except Exception as e:
         logger.exception("context endpoint error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

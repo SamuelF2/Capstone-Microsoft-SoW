@@ -136,37 +136,86 @@ docker compose up -d --build
 Capstone-Microsoft-SoW/
 ├── backend/                  # Python/FastAPI API
 │   ├── Dockerfile
-│   ├── main.py               # API routes and database connections
-│   ├── requirements.txt      # Python dependencies
-│   └── pyproject.toml
-├── frontend/                 # Next.js UI
+│   ├── main.py               # App entry point, lifespan, middleware
+│   ├── config.py             # Centralized env var reads
+│   ├── database.py           # Shared DB connections (Neo4j + asyncpg)
+│   ├── auth.py               # Entra ID JWT validation
+│   ├── models.py             # Pydantic models
+│   ├── validators.py         # Pure input validation functions
+│   ├── status.py             # Health dashboard
+│   ├── routers/              # Route modules
+│   │   ├── auth.py           # /api/auth — login, logout, user info
+│   │   ├── sow.py            # /api/sow — SoW CRUD + status
+│   │   ├── review.py         # /api/review — review workflow
+│   │   ├── finalize.py       # /api/finalize — finalization workflow
+│   │   └── rules.py          # /api/rules — rule queries
+│   ├── services/             # Business logic (AI integration)
+│   └── tests/                # Backend unit + smoke tests
+├── frontend/                 # Next.js React UI
 │   ├── Dockerfile
-│   ├── package.json
-│   └── pages/
-├── infrastructure/
-│   └── postgres/init/        # SQL init scripts (auto-run on first start)
-├── docs/                     # Documentation
-├── tests/                    # Test suites
+│   ├── pages/                # Route pages (login, create, review, etc.)
+│   └── components/           # Reusable React components
+├── ml/                       # CLI for knowledge graph + GraphRAG
+│   ├── main.py               # Click CLI entry point
+│   ├── api.py                # FastAPI GraphRAG API
+│   └── sow_kg/               # KG modules (ingest, enrich, queries, etc.)
+├── tests/                    # ML module unit tests
+├── Data/                     # Rules JSON + SOW markdown guides
+├── infra/                    # Azure Bicep IaC
+├── infrastructure/           # Postgres init SQL
 ├── docker-compose.yml        # Container orchestration
-├── .env.example              # Environment template
 ├── ruff.toml                 # Python linting config
 ├── .pre-commit-config.yaml   # Git hook config
-├── .editorconfig             # Editor formatting config
-├── .prettierrc               # JS/CSS formatting config
 └── README.md
 ```
 
 ## API Endpoints
 
+### Core
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (Neo4j + PostgreSQL status) |
+| GET | `/status` | HTML system status dashboard |
+| GET | `/api/graph/stats` | Neo4j graph statistics |
+| POST | `/api/graph/sow-knowledge` | Add entities/relationships to graph |
+
+### Auth (`/api/auth`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/logout` | Logout |
+| GET | `/api/auth/me` | Current user info |
+
+### SoW (`/api/sow`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | GET | `/api/sow` | List all SoW documents |
 | POST | `/api/sow` | Create a new SoW document |
 | GET | `/api/sow/{id}` | Get a single SoW document |
+| PATCH | `/api/sow/{id}` | Update a SoW document |
 | DELETE | `/api/sow/{id}` | Delete a SoW document |
-| GET | `/api/graph/stats` | Neo4j graph statistics |
-| POST | `/api/graph/sow-knowledge` | Add entities/relationships to graph |
+
+### Review (`/api/review`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/review/{sow_id}` | Get reviews for a SoW |
+| POST | `/api/review/{sow_id}` | Submit a review |
+
+### Finalize (`/api/finalize`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/finalize/{sow_id}` | Finalize a SoW |
+| GET | `/api/finalize/{sow_id}/status` | Finalization status |
+
+### Rules (`/api/rules`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/rules` | List validation rules |
 
 ## Sprint Schedule
 

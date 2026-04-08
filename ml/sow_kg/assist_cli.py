@@ -1,3 +1,14 @@
+import click
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from sow_kg.db import get_driver
+
+console = Console()
+cli = click.Group()
+
+
 @cli.command()
 @click.argument("query")
 @click.option("--sow-id", default=None)
