@@ -14,5 +14,6 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Run in dev mode with hot reload
-CMD ["npm", "run", "dev"]
+# Build at startup so NEXT_PUBLIC_* env vars (set by Azure Container Apps)
+# are baked into the production bundle, then serve in production mode.
+CMD ["sh", "-c", "npm run build && npm run start"]

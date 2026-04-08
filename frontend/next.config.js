@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Allow large SoW file uploads through the rewrite proxy
+  experimental: {
+    proxyTimeout: 120_000,
+    middlewareClientMaxBodySize: '25mb',
+  },
   /**
    * Proxy /api/* requests to the FastAPI backend so the frontend can call
    * fetch('/api/sow', ...) without hard-coding the backend URL.
