@@ -817,25 +817,46 @@ async def lifespan(app: FastAPI):
         # Infer conditions from topology for rows still set to 'default'.    #
         # ------------------------------------------------------------------ #
         await conn.execute("""
-            UPDATE workflow_template_transitions
+            UPDATE workflow_template_transitions t
             SET    condition = 'on_reject'
-            WHERE  to_stage_key = 'rejected'
-              AND  condition = 'default';
+            WHERE  t.to_stage_key = 'rejected'
+              AND  t.condition = 'default'
+              AND  NOT EXISTS (
+                    SELECT 1 FROM workflow_template_transitions dup
+                    WHERE  dup.template_id    = t.template_id
+                      AND  dup.from_stage_key = t.from_stage_key
+                      AND  dup.to_stage_key   = t.to_stage_key
+                      AND  dup.condition       = 'on_reject'
+              );
         """)
         await conn.execute("""
-            UPDATE workflow_template_transitions
+            UPDATE workflow_template_transitions t
             SET    condition = 'on_send_back'
-            WHERE  from_stage_key IN ('drm_review', 'internal_review', 'ai_review')
-              AND  to_stage_key  IN ('draft', 'internal_review')
-              AND  condition = 'default'
-              AND  from_stage_key != to_stage_key;
+            WHERE  t.from_stage_key IN ('drm_review', 'internal_review', 'ai_review')
+              AND  t.to_stage_key  IN ('draft', 'internal_review')
+              AND  t.condition = 'default'
+              AND  t.from_stage_key != t.to_stage_key
+              AND  NOT EXISTS (
+                    SELECT 1 FROM workflow_template_transitions dup
+                    WHERE  dup.template_id    = t.template_id
+                      AND  dup.from_stage_key = t.from_stage_key
+                      AND  dup.to_stage_key   = t.to_stage_key
+                      AND  dup.condition       = 'on_send_back'
+              );
         """)
         await conn.execute("""
-            UPDATE workflow_template_transitions
+            UPDATE workflow_template_transitions t
             SET    condition = 'on_approve'
-            WHERE  from_stage_key IN ('internal_review', 'drm_review')
-              AND  to_stage_key NOT IN ('rejected', 'draft', 'internal_review')
-              AND  condition = 'default';
+            WHERE  t.from_stage_key IN ('internal_review', 'drm_review')
+              AND  t.to_stage_key NOT IN ('rejected', 'draft', 'internal_review')
+              AND  t.condition = 'default'
+              AND  NOT EXISTS (
+                    SELECT 1 FROM workflow_template_transitions dup
+                    WHERE  dup.template_id    = t.template_id
+                      AND  dup.from_stage_key = t.from_stage_key
+                      AND  dup.to_stage_key   = t.to_stage_key
+                      AND  dup.condition       = 'on_approve'
+              );
         """)
 
         # ------------------------------------------------------------------ #
