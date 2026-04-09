@@ -36,7 +36,14 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 import database
-from config import CONTENT_TEMPLATES_DIR, DATABASE_URL, NEO4J_PASSWORD, NEO4J_URI, NEO4J_USER
+from config import (
+    CONTENT_TEMPLATES_DIR,
+    DATABASE_URL,
+    NEO4J_PASSWORD,
+    NEO4J_URI,
+    NEO4J_USER,
+    PG_SSL,
+)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
@@ -78,29 +85,43 @@ async def lifespan(app: FastAPI):
     if not AZURE_AD_CLIENT_ID:
         print("WARNING: AZURE_AD_CLIENT_ID is empty — auth will reject all tokens")
 
-    # ── Connect databases (non-blocking) ─────────────────────────────────────
-    # Try once quickly. If it fails, start in degraded mode so the container
-    # passes Azure's startup probe. The /health endpoint reports status.
+    # ── Connect databases (with retries) ────────────────────────────────────
+    # On Azure Container Apps, databases may still be starting when the API
+    # boots. Retry a few times before falling back to degraded mode.
 
-    # Neo4j — 5s hard timeout
-    try:
-        database.neo4j_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        database.neo4j_driver.verify_connectivity()
-        print("Neo4j connected")
-    except Exception as e:
-        print(f"Neo4j connection failed, starting in degraded mode: {e}")
-        database.neo4j_driver = None
+    max_retries = 6
+    retry_delay = 5  # seconds
 
-    # PostgreSQL — 5s hard timeout (asyncpg timeout alone can hang on DNS)
-    try:
-        database.pg_pool = await asyncio.wait_for(
-            asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10),
-            timeout=5,
-        )
-        print("PostgreSQL connected")
-    except Exception as e:
-        print(f"PostgreSQL connection failed, starting in degraded mode: {e}")
-        database.pg_pool = None
+    # Neo4j
+    for attempt in range(1, max_retries + 1):
+        try:
+            database.neo4j_driver = GraphDatabase.driver(
+                NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)
+            )
+            database.neo4j_driver.verify_connectivity()
+            print("Neo4j connected")
+            break
+        except Exception as e:
+            print(f"Neo4j attempt {attempt}/{max_retries} failed: {e}")
+            database.neo4j_driver = None
+            if attempt < max_retries:
+                await asyncio.sleep(retry_delay)
+
+    # PostgreSQL
+    ssl_ctx = False if PG_SSL == "disable" else PG_SSL
+    for attempt in range(1, max_retries + 1):
+        try:
+            database.pg_pool = await asyncio.wait_for(
+                asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10, ssl=ssl_ctx),
+                timeout=5,
+            )
+            print("PostgreSQL connected")
+            break
+        except Exception as e:
+            print(f"PostgreSQL attempt {attempt}/{max_retries} failed: {e}")
+            database.pg_pool = None
+            if attempt < max_retries:
+                await asyncio.sleep(retry_delay)
 
     # ── Schema bootstrap ─────────────────────────────────────────────────────
     # Core tables from infrastructure/postgres/init/01-init.sql are created on
@@ -111,13 +132,16 @@ async def lifespan(app: FastAPI):
         yield
         return
 
-    async with database.pg_pool.acquire() as conn:
-        # ------------------------------------------------------------------ #
-        # 1. USERS                                                            #
-        # Authenticated via Microsoft Entra ID. oid is the stable Entra       #
-        # object ID; users are auto-created on first sign-in.                 #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+    print("Starting schema bootstrap...")
+    # noinspection PyBroadException
+    try:
+        async with database.pg_pool.acquire() as conn:
+            # ------------------------------------------------------------------ #
+            # 1. USERS                                                            #
+            # Authenticated via Microsoft Entra ID. oid is the stable Entra       #
+            # object ID; users are auto-created on first sign-in.                 #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id              SERIAL PRIMARY KEY,
                 oid             TEXT UNIQUE,
@@ -131,29 +155,29 @@ async def lifespan(app: FastAPI):
                 updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
-        # Migration: make hashed_password nullable for existing databases
-        await conn.execute("""
+            # Migration: make hashed_password nullable for existing databases
+            await conn.execute("""
             DO $$ BEGIN
                 ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL;
             EXCEPTION WHEN undefined_column THEN NULL;
             END $$;
         """)
-        for col_ddl in [
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS oid TEXT UNIQUE;",
-        ]:
-            await conn.execute(col_ddl)
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_oid ON users(oid);")
+            for col_ddl in [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS oid TEXT UNIQUE;",
+            ]:
+                await conn.execute(col_ddl)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_oid ON users(oid);")
 
-        # ------------------------------------------------------------------ #
-        # 2. AI SUGGESTION                                                    #
-        # Must exist before sow_documents references it.                      #
-        # PDF §2.3: id, flag (Green/Yellow/Red), validation_recommendation,  #
-        #           risks                                                      #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 2. AI SUGGESTION                                                    #
+            # Must exist before sow_documents references it.                      #
+            # PDF §2.3: id, flag (Green/Yellow/Red), validation_recommendation,  #
+            #           risks                                                      #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS ai_suggestion (
                 id                        SERIAL PRIMARY KEY,
                 flag                      TEXT,
@@ -162,12 +186,12 @@ async def lifespan(app: FastAPI):
             );
         """)
 
-        # ------------------------------------------------------------------ #
-        # 3. CONTENT (skeleton — child FK columns added after child tables)  #
-        # PDF §2.2: id, scope_id, price_id, assumption_id, resource_id       #
-        # Created without FK constraints first; FKs are added below.         #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 3. CONTENT (skeleton — child FK columns added after child tables)  #
+            # PDF §2.2: id, scope_id, price_id, assumption_id, resource_id       #
+            # Created without FK constraints first; FKs are added below.         #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS content (
                 id            SERIAL PRIMARY KEY,
                 scope_id      INTEGER,
@@ -177,13 +201,13 @@ async def lifespan(app: FastAPI):
             );
         """)
 
-        # ------------------------------------------------------------------ #
-        # 4. CHILD CONTENT TABLES  (PDF §2.2.1–2.2.4)                        #
-        # Each references content(id) via content_id.                         #
-        # Extra columns store the actual section data (JSONB for flexibility) #
-        # until the PDF's TBD types are finalised.                            #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 4. CHILD CONTENT TABLES  (PDF §2.2.1–2.2.4)                        #
+            # Each references content(id) via content_id.                         #
+            # Extra columns store the actual section data (JSONB for flexibility) #
+            # until the PDF's TBD types are finalised.                            #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS scope (
                 id         SERIAL PRIMARY KEY,
                 content_id INTEGER REFERENCES content(id) ON DELETE CASCADE,
@@ -191,7 +215,7 @@ async def lifespan(app: FastAPI):
                 out_scope  JSONB
             );
         """)
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS pricing (
                 id          SERIAL PRIMARY KEY,
                 content_id  INTEGER REFERENCES content(id) ON DELETE CASCADE,
@@ -199,14 +223,14 @@ async def lifespan(app: FastAPI):
                 breakdown   JSONB
             );
         """)
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS assumptions (
                 id         SERIAL PRIMARY KEY,
                 content_id INTEGER REFERENCES content(id) ON DELETE CASCADE,
                 items      JSONB
             );
         """)
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS resources (
                 id         SERIAL PRIMARY KEY,
                 content_id INTEGER REFERENCES content(id) ON DELETE CASCADE,
@@ -214,13 +238,13 @@ async def lifespan(app: FastAPI):
             );
         """)
 
-        # ------------------------------------------------------------------ #
-        # 5. SOW_DOCUMENTS  (primary SOW record)                              #
-        # Core columns from infra SQL; extended to match PDF §2.1.            #
-        # PDF §2.1: id, cycle (1–4), content_id → content,                   #
-        #           ai_suggestion_id → ai_suggestion                          #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 5. SOW_DOCUMENTS  (primary SOW record)                              #
+            # Core columns from infra SQL; extended to match PDF §2.1.            #
+            # PDF §2.1: id, cycle (1–4), content_id → content,                   #
+            #           ai_suggestion_id → ai_suggestion                          #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS sow_documents (
                 id          SERIAL PRIMARY KEY,
                 title       TEXT NOT NULL,
@@ -231,30 +255,30 @@ async def lifespan(app: FastAPI):
                 metadata    JSONB
             );
         """)
-        for col_ddl in [
-            # PDF §2.1 columns
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS cycle INTEGER;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS content_id INTEGER REFERENCES content(id);",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS ai_suggestion_id INTEGER REFERENCES ai_suggestion(id);",
-            # Application bridging + metadata columns
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS client_id TEXT UNIQUE;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS methodology TEXT;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS customer_name TEXT;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS opportunity_id TEXT;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS deal_value NUMERIC;",
-            # Phase 1: ESAP + margin columns
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS esap_level TEXT;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS estimated_margin NUMERIC;",
-            # Phase 4: finalization columns
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;",
-            "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_by INTEGER REFERENCES users(id);",
-        ]:
-            await conn.execute(col_ddl)
+            for col_ddl in [
+                # PDF §2.1 columns
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS cycle INTEGER;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS content_id INTEGER REFERENCES content(id);",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS ai_suggestion_id INTEGER REFERENCES ai_suggestion(id);",
+                # Application bridging + metadata columns
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS client_id TEXT UNIQUE;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS methodology TEXT;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS customer_name TEXT;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS opportunity_id TEXT;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS deal_value NUMERIC;",
+                # Phase 1: ESAP + margin columns
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS esap_level TEXT;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS estimated_margin NUMERIC;",
+                # Phase 4: finalization columns
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_by INTEGER REFERENCES users(id);",
+            ]:
+                await conn.execute(col_ddl)
 
-        # ------------------------------------------------------------------ #
-        # 6. REVIEW RESULTS                                                   #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 6. REVIEW RESULTS                                                   #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS review_results (
                 id          SERIAL PRIMARY KEY,
                 sow_id      INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
@@ -265,13 +289,13 @@ async def lifespan(app: FastAPI):
             );
         """)
 
-        # ------------------------------------------------------------------ #
-        # 7. HISTORY  (audit log)                                             #
-        # PDF §2.4: id (+ application columns for full audit trail)           #
-        # sow_id uses ON DELETE SET NULL so audit records survive SoW         #
-        # deletion (the sow_title is captured in the diff where useful).      #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 7. HISTORY  (audit log)                                             #
+            # PDF §2.4: id (+ application columns for full audit trail)           #
+            # sow_id uses ON DELETE SET NULL so audit records survive SoW         #
+            # deletion (the sow_title is captured in the diff where useful).      #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS history (
                 id          SERIAL PRIMARY KEY,
                 sow_id      INTEGER REFERENCES sow_documents(id) ON DELETE SET NULL,
@@ -281,8 +305,8 @@ async def lifespan(app: FastAPI):
                 diff        JSONB
             );
         """)
-        # Migration: change existing CASCADE to SET NULL for audit preservation
-        await conn.execute("""
+            # Migration: change existing CASCADE to SET NULL for audit preservation
+            await conn.execute("""
             DO $$ BEGIN
                 ALTER TABLE history DROP CONSTRAINT IF EXISTS history_sow_id_fkey;
                 ALTER TABLE history ADD CONSTRAINT history_sow_id_fkey
@@ -290,11 +314,11 @@ async def lifespan(app: FastAPI):
             END $$;
         """)
 
-        # ------------------------------------------------------------------ #
-        # 8. COLLABORATION  (user↔SOW role mapping)                           #
-        # PDF §2.5: user_id → users, role                                     #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 8. COLLABORATION  (user↔SOW role mapping)                           #
+            # PDF §2.5: user_id → users, role                                     #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS collaboration (
                 id      SERIAL PRIMARY KEY,
                 sow_id  INTEGER REFERENCES sow_documents(id) ON DELETE CASCADE,
@@ -303,10 +327,10 @@ async def lifespan(app: FastAPI):
             );
         """)
 
-        # ------------------------------------------------------------------ #
-        # 9. REVIEW ASSIGNMENTS  (Phase 1+: per-SoW review duties)           #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 9. REVIEW ASSIGNMENTS  (Phase 1+: per-SoW review duties)           #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS review_assignments (
                 id                  SERIAL PRIMARY KEY,
                 sow_id              INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
@@ -323,20 +347,20 @@ async def lifespan(app: FastAPI):
             );
         """)
 
-        # Phase 2: enhance review_results with additional columns
-        for col_ddl in [
-            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS reviewer_user_id INTEGER REFERENCES users(id);",
-            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS review_stage TEXT;",
-            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS checklist_responses JSONB;",
-            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS decision TEXT;",
-            "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS conditions JSONB;",
-        ]:
-            await conn.execute(col_ddl)
+            # Phase 2: enhance review_results with additional columns
+            for col_ddl in [
+                "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS reviewer_user_id INTEGER REFERENCES users(id);",
+                "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS review_stage TEXT;",
+                "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS checklist_responses JSONB;",
+                "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS decision TEXT;",
+                "ALTER TABLE review_results ADD COLUMN IF NOT EXISTS conditions JSONB;",
+            ]:
+                await conn.execute(col_ddl)
 
-        # ------------------------------------------------------------------ #
-        # 10. HANDOFF PACKAGES  (Phase 4: finalization)                       #
-        # ------------------------------------------------------------------ #
-        await conn.execute("""
+            # ------------------------------------------------------------------ #
+            # 10. HANDOFF PACKAGES  (Phase 4: finalization)                       #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS handoff_packages (
                 id              SERIAL PRIMARY KEY,
                 sow_id          INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
@@ -951,7 +975,9 @@ async def lifespan(app: FastAPI):
             WHERE search_vector IS NULL
         """)
 
-    print("PostgreSQL schema ready")
+        print("PostgreSQL schema ready")
+    except Exception as e:
+        print(f"Schema bootstrap FAILED: {e}")
 
     # ── Upload directory ──────────────────────────────────────────────────────
     from pathlib import Path

@@ -183,15 +183,14 @@ module api 'modules/container-app.bicep' = {
     external: true
     env: [
       { name: 'ENV', value: 'production' }
-      { name: 'NEO4J_URI', value: 'bolt://${neo4j.outputs.fqdn}:7687' }
+      { name: 'NEO4J_URI', value: 'bolt://${neo4j.outputs.name}:7687' }
       { name: 'NEO4J_USER', value: 'neo4j' }
       { name: 'NEO4J_PASSWORD', secretRef: 'neo4j-password' }
-      { name: 'POSTGRES_HOST', value: postgres.outputs.fqdn }
+      { name: 'POSTGRES_HOST', value: postgres.outputs.name }
       { name: 'POSTGRES_PORT', value: '5432' }
       { name: 'POSTGRES_DB', value: postgresDbName }
       { name: 'POSTGRES_USER', value: postgresUser }
       { name: 'POSTGRES_PASSWORD', secretRef: 'postgres-password' }
-      { name: 'DATABASE_URL', value: 'postgresql://${postgresUser}:${postgresPassword}@${postgres.outputs.fqdn}:5432/${postgresDbName}' }
       { name: 'AZURE_AI_ENDPOINT', secretRef: 'azure-ai-endpoint' }
       { name: 'AZURE_AI_KEY', secretRef: 'azure-ai-key' }
       { name: 'AZURE_AD_CLIENT_ID', value: azureAdClientId }

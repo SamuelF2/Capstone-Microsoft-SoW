@@ -49,6 +49,7 @@ resource postgres 'Microsoft.App/containerApps@2024-03-01' = {
       ingress: {
         external: false
         targetPort: 5432
+        exposedPort: 5432
         transport: 'tcp'
       }
 

@@ -20,6 +20,9 @@ PG_PORT = os.getenv("POSTGRES_PORT", "5432")
 
 DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 
+# Disable SSL for internal Container Apps connections (PG doesn't serve TLS)
+PG_SSL: str = os.getenv("PG_SSL", "disable")
+
 # ── Microsoft Entra ID ───────────────────────────────────────────────────────
 AZURE_AD_CLIENT_ID: str = os.getenv("AZURE_AD_CLIENT_ID", "")
 AZURE_AD_JWKS_URL: str = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
