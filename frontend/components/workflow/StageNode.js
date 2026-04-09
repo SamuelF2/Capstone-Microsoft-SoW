@@ -1,187 +1,279 @@
 /**
- * StageNode — custom React Flow node for a workflow stage.
+ * StageNode — React Flow node for workflow stages (pipeline-first model).
  *
- * A single component handles every stage type (draft / review / approval /
- * ai_analysis / terminal) by switching icon, accent color, and label hints
- * based on the stage record carried in `data.stage`. Keeping it in one file
- * avoids five near-duplicate components for what amounts to a pill with a
- * coloured stripe.
+ * Simplified layout (1 input, 1 output):
+ *   ┌──────────────────────────────┐
+ *   │  ✎  Internal Review     🔒  │  colored header
+ *   ├──────────────────────────────┤
+ *   │ ● in               default ●│  single input + output
+ *   ├──────────────────────────────┤
+ *   │  internal_review        AND  │  info (stage key, join badge)
+ *   │  2 req · 1 opt              │  role summary
+ *   │  ↩ send back: Draft         │  send-back target badge
+ *   └──────────────────────────────┘
  *
- * The node exposes two React Flow handles (left = target, right = source) so
- * authors can wire edges by dragging from one node's right edge to another
- * node's left edge. Anchors (draft/approved/finalized/rejected) show a lock
- * badge and hide their inline inputs — their display_name is immutable.
+ * Forward progression, rejection, and send-back are all implicit in the
+ * pipeline model — only the single "default" output port is available for
+ * drawing explicit override edges.
  */
 
 import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
-import { ANCHOR_STAGES, isAnchorStage, stageColor } from '../../lib/workflowStages';
+import { isAnchorStage } from '../../lib/workflowStages';
 
-// Icon + short hint per stage type. Anchors override the icon so Draft always
-// looks like an entry card and Approved/Finalized/Rejected always look like
-// terminals, regardless of what stage_type the backend assigned to them.
+// ── Constants ───────────────────────────────────────────────────────────────
+
+const NODE_W = 220;
+const DOT = 12;
+
 const TYPE_META = {
   draft: { icon: '✎', hint: 'Entry' },
-  ai_analysis: { icon: '🤖', hint: 'AI Analysis' },
+  ai_analysis: { icon: '🤖', hint: 'AI' },
   review: { icon: '👁', hint: 'Review' },
   approval: { icon: '✔', hint: 'Approval' },
   terminal: { icon: '⏹', hint: 'Terminal' },
+  parallel_gateway: { icon: '⑃', hint: 'Parallel' },
 };
+
+const HEADER_BG = {
+  draft: '#475569',
+  ai_analysis: '#2563eb',
+  review: '#d97706',
+  approval: '#7c3aed',
+  terminal: '#059669',
+  parallel_gateway: '#0d9488',
+};
+
+const PORT = {
+  in: '#3b82f6',
+  default: '#94a3b8',
+};
+
+// ── Handle definitions (single source + single target) ──────────────────────
+
+const SOURCE_HANDLES = [{ id: 'src-default', condition: 'default', position: Position.Right }];
+
+const TARGET_HANDLES = [{ id: 'tgt-in', position: Position.Left }];
+
+// ── Port dot + invisible Handle ─────────────────────────────────────────────
+
+function PortDot({ id, type, position, color }) {
+  return (
+    <div style={{ position: 'relative', width: DOT, height: DOT, flexShrink: 0 }}>
+      <div
+        style={{
+          width: DOT,
+          height: DOT,
+          borderRadius: '50%',
+          backgroundColor: color,
+          border: '2px solid rgba(255,255,255,0.15)',
+          boxShadow: `0 0 6px ${color}50`,
+        }}
+      />
+      <Handle
+        id={id}
+        type={type}
+        position={position}
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: DOT + 8,
+          height: DOT + 8,
+          opacity: 0,
+          background: 'transparent',
+          border: 'none',
+          cursor: 'crosshair',
+        }}
+      />
+    </div>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────────────────
 
 function StageNode({ id, data, selected }) {
   const stage = data.stage || {};
   const isAnchor = isAnchorStage(id);
-  const accent = stageColor(id, stage.stage_type);
+  const sType = stage.stage_type || 'review';
   const meta = isAnchor
     ? { icon: iconForAnchor(id), hint: anchorHint(id) }
-    : TYPE_META[stage.stage_type] || TYPE_META.review;
+    : TYPE_META[sType] || TYPE_META.review;
+
+  const isReviewable = sType === 'review' || sType === 'approval';
+  const isAI = sType === 'ai_analysis';
+  const headerBg = isAnchor ? anchorHeaderBg(id) : HEADER_BG[sType] || HEADER_BG.review;
 
   const roleCount = Array.isArray(stage.roles) ? stage.roles.length : 0;
   const requiredRoleCount = Array.isArray(stage.roles)
     ? stage.roles.filter((r) => r.is_required).length
     : 0;
 
+  const joinMode = stage.config?.join_mode;
+  const showJoinBadge = joinMode && joinMode !== 'default';
+  const sendBackTarget = stage.config?.send_back_target;
+  const showSendBack = (isReviewable || isAI) && !isAnchor;
+
   return (
     <div
       style={{
-        minWidth: '190px',
-        maxWidth: '220px',
-        borderRadius: 'var(--radius-md)',
-        backgroundColor: 'var(--color-bg-secondary)',
-        border: `2px solid ${selected ? 'var(--color-accent-blue)' : 'var(--color-border-default)'}`,
-        boxShadow: selected ? '0 0 0 3px rgba(59,130,246,0.15)' : '0 1px 3px rgba(0,0,0,0.08)',
+        width: NODE_W,
+        borderRadius: 8,
+        backgroundColor: '#1e293b',
+        border: `2px solid ${selected ? '#60a5fa' : '#334155'}`,
+        boxShadow: selected
+          ? '0 0 0 2px rgba(96,165,250,0.25), 0 4px 12px rgba(0,0,0,0.3)'
+          : '0 2px 8px rgba(0,0,0,0.25)',
         overflow: 'hidden',
-        transition: 'border-color var(--transition-base), box-shadow var(--transition-base)',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
       }}
     >
-      {/* Left target handle — where incoming edges connect */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{ background: accent, width: 10, height: 10, border: '2px solid white' }}
-      />
-
-      {/* Accent stripe uses stageColor so anchors and middle stages read at
-          a glance — green for approved, red for rejected, purple for approval
-          stages, etc. */}
-      <div style={{ height: '4px', backgroundColor: accent }} />
-
-      <div style={{ padding: '10px 12px' }}>
-        {/* Top row: icon + type hint + lock (for anchors) */}
-        <div
+      {/* ── HEADER ─────────────────────────────────────────────────── */}
+      <div
+        style={{
+          backgroundColor: headerBg,
+          padding: '7px 10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <span style={{ fontSize: 13 }}>{meta.icon}</span>
+        <span
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            marginBottom: '6px',
-            fontSize: 'var(--font-size-xs)',
-            color: 'var(--color-text-tertiary)',
-            fontWeight: 'var(--font-weight-semibold)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.4px',
-          }}
-        >
-          <span style={{ fontSize: '14px' }}>{meta.icon}</span>
-          <span>{meta.hint}</span>
-          {isAnchor && (
-            <span
-              title={ANCHOR_STAGES[id]?.description || 'Anchor stage — locked'}
-              style={{ marginLeft: 'auto', fontSize: '11px' }}
-            >
-              🔒
-            </span>
-          )}
-        </div>
-
-        {/* Display name */}
-        <div
-          style={{
-            fontSize: 'var(--font-size-sm)',
-            fontWeight: 'var(--font-weight-semibold)',
-            color: 'var(--color-text-primary)',
-            lineHeight: 1.3,
-            wordBreak: 'break-word',
+            fontSize: 12,
+            fontWeight: 700,
+            color: '#fff',
+            flex: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
           }}
         >
           {stage.display_name || id}
-        </div>
-
-        {/* stage_key subline (monospace) only for middle stages — anchors
-            always have well-known keys that don't need to be shown. */}
-        {!isAnchor && stage.stage_key && (
-          <div
-            style={{
-              fontSize: '10px',
-              color: 'var(--color-text-tertiary)',
-              fontFamily: 'monospace',
-              marginTop: '2px',
-            }}
-          >
-            {stage.stage_key}
-          </div>
-        )}
-
-        {/* Role chips — show required count for review/approval stages so it's
-            obvious at a glance whether a stage has any reviewers assigned. */}
-        {!isAnchor && roleCount > 0 && (
-          <div
-            style={{
-              marginTop: '6px',
-              fontSize: '10px',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            {requiredRoleCount > 0 && (
-              <span
-                style={{
-                  padding: '1px 6px',
-                  borderRadius: 'var(--radius-full)',
-                  backgroundColor: `${accent}22`,
-                  color: accent,
-                  fontWeight: 600,
-                  marginRight: '4px',
-                }}
-              >
-                {requiredRoleCount} req
-              </span>
-            )}
-            {roleCount - requiredRoleCount > 0 && (
-              <span style={{ color: 'var(--color-text-tertiary)' }}>
-                +{roleCount - requiredRoleCount} optional
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Empty state for middle stages with no roles — quietly nudge the
-            author that reviewers still need to be assigned. */}
-        {!isAnchor &&
-          roleCount === 0 &&
-          (stage.stage_type === 'review' || stage.stage_type === 'approval') && (
-            <div
-              style={{
-                marginTop: '6px',
-                fontSize: '10px',
-                color: 'var(--color-warning)',
-                fontStyle: 'italic',
-              }}
-            >
-              no reviewers
-            </div>
-          )}
+        </span>
+        {isAnchor && <span style={{ fontSize: 10, opacity: 0.7 }}>🔒</span>}
       </div>
 
-      {/* Right source handle — where outgoing edges originate */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{ background: accent, width: 10, height: 10, border: '2px solid white' }}
-      />
+      {/* ── PORTS (single row: input left, output right) ──────────── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 4px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingLeft: 0 }}>
+          <PortDot id="tgt-in" type="target" position={Position.Left} color={PORT.in} />
+          <span style={{ fontSize: 10, color: '#cbd5e1', fontWeight: 500 }}>from prev</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingRight: 0 }}>
+          <span style={{ fontSize: 10, color: PORT.default, fontWeight: 500 }}>
+            {isReviewable ? 'on approve' : 'next'}
+          </span>
+          <PortDot id="src-default" type="source" position={Position.Right} color={PORT.default} />
+        </div>
+      </div>
+
+      {/* ── INFO SECTION ───────────────────────────────────────────── */}
+      {(!isAnchor || showJoinBadge || roleCount > 0) && (
+        <div
+          style={{
+            padding: '4px 10px 6px',
+            borderTop: '1px solid #334155',
+          }}
+        >
+          {/* Stage key + join badge */}
+          {!isAnchor && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                marginBottom: roleCount > 0 || showSendBack ? 3 : 0,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 9,
+                  color: '#64748b',
+                  fontFamily: 'monospace',
+                }}
+              >
+                {stage.stage_key}
+              </span>
+              {showJoinBadge && (
+                <span
+                  style={{
+                    fontSize: 8,
+                    fontWeight: 700,
+                    padding: '1px 4px',
+                    borderRadius: 3,
+                    backgroundColor: '#0d9488',
+                    color: '#fff',
+                  }}
+                >
+                  {joinMode === 'all_required'
+                    ? 'AND'
+                    : joinMode === 'any_required'
+                      ? 'OR'
+                      : 'JOIN'}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Role summary */}
+          {!isAnchor && roleCount > 0 && (
+            <div style={{ fontSize: 10, color: '#94a3b8' }}>
+              <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{requiredRoleCount}</span>
+              <span> req</span>
+              {roleCount - requiredRoleCount > 0 && (
+                <span> · {roleCount - requiredRoleCount} opt</span>
+              )}
+            </div>
+          )}
+
+          {/* No reviewers warning */}
+          {!isAnchor && roleCount === 0 && isReviewable && (
+            <div style={{ fontSize: 10, color: '#f59e0b', fontStyle: 'italic' }}>no reviewers</div>
+          )}
+
+          {/* Send-back target badge */}
+          {showSendBack && (
+            <div
+              style={{
+                fontSize: 9,
+                color: '#f59e0b',
+                marginTop: 3,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+            >
+              <span style={{ fontSize: 10 }}>&#8617;</span>
+              send back: {_sendBackLabel(sendBackTarget)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bottom padding */}
+      <div style={{ height: 4 }} />
     </div>
   );
 }
 
-// ── Anchor-specific helpers ─────────────────────────────────────────────────
+function _sendBackLabel(target) {
+  if (!target || target === 'previous') return 'previous';
+  if (target === 'draft') return 'Draft';
+  return target.replace(/_/g, ' ');
+}
+
+// ── Anchor helpers ──────────────────────────────────────────────────────────
 
 function iconForAnchor(key) {
   switch (key) {
@@ -213,6 +305,25 @@ function anchorHint(key) {
   }
 }
 
-// React Flow re-renders heavily during drag; memo avoids re-rendering every
-// stage on every pointer move.
+function anchorHeaderBg(key) {
+  switch (key) {
+    case 'draft':
+      return '#475569';
+    case 'approved':
+      return '#059669';
+    case 'finalized':
+      return '#2563eb';
+    case 'rejected':
+      return '#dc2626';
+    default:
+      return '#475569';
+  }
+}
+
+const HANDLE_COLORS = {
+  default: PORT.default,
+  target: PORT.in,
+};
+
 export default memo(StageNode);
+export { SOURCE_HANDLES, TARGET_HANDLES, HANDLE_COLORS };

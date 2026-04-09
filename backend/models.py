@@ -465,12 +465,28 @@ class WorkflowStageRoleConfig(BaseModel):
 
 
 class WorkflowStageConfig(BaseModel):
-    """A single stage within a workflow template."""
+    """A single stage within a workflow template.
+
+    stage_type values:
+        draft, ai_analysis, review, approval, terminal, parallel_gateway
+
+    config dict may contain:
+        approval_mode:      str  — all_must_approve | any_can_approve | majority | threshold
+        approval_threshold:  int  — required count when mode is 'threshold'
+        auto_advance:        bool — auto-advance when gating rules met
+        is_failure:          bool — marks stage as a failure / revision branch
+        reviewer_instructions: str — banner text shown to reviewers
+        assignment_stage_keys: list[str] — legacy hyphenated keys for review_assignments
+        join_mode:           str  — default | all_required | any_required | custom
+        required_predecessors: list[str] — stage_keys that must complete before join (custom mode)
+    """
 
     stage_key: str
     display_name: str
     stage_order: int
-    stage_type: str = "review"  # draft, ai_analysis, review, approval, terminal
+    stage_type: str = (
+        "review"  # draft | ai_analysis | review | approval | terminal | parallel_gateway
+    )
     roles: list[WorkflowStageRoleConfig] = []
     config: dict[str, Any] = {}
 
@@ -480,6 +496,7 @@ class WorkflowTransitionConfig(BaseModel):
 
     from_stage: str
     to_stage: str
+    condition: str = "default"  # default | on_approve | on_reject | on_send_back | on_condition_met (on_condition_met is backend-only, not exposed in the graph editor UI)
 
 
 class WorkflowData(BaseModel):

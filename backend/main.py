@@ -452,8 +452,38 @@ async def lifespan(app: FastAPI):
                 template_id     INTEGER NOT NULL REFERENCES workflow_templates(id) ON DELETE CASCADE,
                 from_stage_key  TEXT NOT NULL,
                 to_stage_key    TEXT NOT NULL,
-                UNIQUE(template_id, from_stage_key, to_stage_key)
+                condition       TEXT NOT NULL DEFAULT 'default',
+                UNIQUE(template_id, from_stage_key, to_stage_key, condition)
             );
+        """)
+
+        # Migration: add condition column if table was created before this change
+        await conn.execute("""
+            ALTER TABLE workflow_template_transitions
+            ADD COLUMN IF NOT EXISTS condition TEXT NOT NULL DEFAULT 'default';
+        """)
+
+        # Drop the old 3-column unique constraint (template_id, from_stage_key,
+        # to_stage_key) if it exists, since the new schema allows the same pair
+        # with different conditions.  Look up the constraint name dynamically to
+        # avoid hard-coding a possibly-truncated auto-generated name.
+        await conn.execute("""
+            DO $$
+            DECLARE _cname text;
+            BEGIN
+                SELECT conname INTO _cname
+                FROM   pg_constraint
+                WHERE  conrelid = 'workflow_template_transitions'::regclass
+                  AND  contype  = 'u'
+                  AND  array_length(conkey, 1) = 3;
+                IF _cname IS NOT NULL THEN
+                    EXECUTE format('ALTER TABLE workflow_template_transitions DROP CONSTRAINT %I', _cname);
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_wtt_template_from_to_condition
+            ON workflow_template_transitions (template_id, from_stage_key, to_stage_key, condition);
         """)
 
         await conn.execute("""
@@ -466,6 +496,12 @@ async def lifespan(app: FastAPI):
                 created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+        """)
+
+        # Add parallel_branches column for parallel gateway fan-out tracking
+        await conn.execute("""
+            ALTER TABLE sow_workflow
+            ADD COLUMN IF NOT EXISTS parallel_branches JSONB;
         """)
 
         # ------------------------------------------------------------------ #
@@ -562,30 +598,33 @@ async def lifespan(app: FastAPI):
                     esap_levels,
                 )
 
-            # Transitions (mirrors _VALID_TRANSITIONS)
+            # Transitions — matches the "Fixed Default ESAP Workflow"
+            # reference template.  Forward edges are real (user-editable),
+            # reject/send-back are implicit but included for backend routing.
             transitions = [
-                ("draft", "ai_review"),
-                ("ai_review", "internal_review"),
-                ("ai_review", "draft"),
-                ("internal_review", "drm_review"),
-                ("internal_review", "rejected"),
-                ("internal_review", "draft"),
-                ("drm_review", "approved"),
-                ("drm_review", "rejected"),
-                ("drm_review", "internal_review"),
-                ("approved", "finalized"),
-                ("rejected", "draft"),
+                ("draft", "ai_review", "default"),
+                ("ai_review", "internal_review", "default"),
+                ("internal_review", "drm_review", "on_approve"),
+                ("drm_review", "approved", "on_approve"),
+                ("approved", "finalized", "default"),
+                ("ai_review", "draft", "on_send_back"),
+                ("internal_review", "ai_review", "on_send_back"),
+                ("internal_review", "rejected", "on_reject"),
+                ("drm_review", "internal_review", "on_send_back"),
+                ("drm_review", "rejected", "on_reject"),
+                ("rejected", "draft", "default"),
             ]
-            for from_key, to_key in transitions:
+            for from_key, to_key, condition in transitions:
                 await conn.execute(
                     """
                     INSERT INTO workflow_template_transitions
-                        (template_id, from_stage_key, to_stage_key)
-                    VALUES ($1, $2, $3)
+                        (template_id, from_stage_key, to_stage_key, condition)
+                    VALUES ($1, $2, $3, $4)
                 """,
                     template_id,
                     from_key,
                     to_key,
+                    condition,
                 )
 
             print(f"Seeded default workflow template (id={template_id})")
@@ -622,6 +661,37 @@ async def lifespan(app: FastAPI):
                     desc,
                 )
             print("Seeded default document requirements")
+
+        # Backfill any transitions that may be missing from previously-seeded
+        # templates (the guard above skips re-seeding if the template exists).
+        esap_id = existing_template or template_id
+        if esap_id:
+            required_transitions = [
+                ("draft", "ai_review", "default"),
+                ("ai_review", "internal_review", "default"),
+                ("internal_review", "drm_review", "on_approve"),
+                ("drm_review", "approved", "on_approve"),
+                ("approved", "finalized", "default"),
+                ("ai_review", "draft", "on_send_back"),
+                ("internal_review", "ai_review", "on_send_back"),
+                ("internal_review", "rejected", "on_reject"),
+                ("drm_review", "internal_review", "on_send_back"),
+                ("drm_review", "rejected", "on_reject"),
+                ("rejected", "draft", "default"),
+            ]
+            for from_key, to_key, condition in required_transitions:
+                await conn.execute(
+                    """
+                    INSERT INTO workflow_template_transitions
+                        (template_id, from_stage_key, to_stage_key, condition)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    esap_id,
+                    from_key,
+                    to_key,
+                    condition,
+                )
 
         # ── Seed content templates from JSON files ────────────────────────
         import json as _json
@@ -741,6 +811,32 @@ async def lifespan(app: FastAPI):
                         snapshot_str,
                     )
                 print(f"Backfilled sow_workflow for {len(existing_sows)} existing SoWs")
+
+        # ------------------------------------------------------------------ #
+        # 13c. BACKFILL transition conditions on existing templates           #
+        # Infer conditions from topology for rows still set to 'default'.    #
+        # ------------------------------------------------------------------ #
+        await conn.execute("""
+            UPDATE workflow_template_transitions
+            SET    condition = 'on_reject'
+            WHERE  to_stage_key = 'rejected'
+              AND  condition = 'default';
+        """)
+        await conn.execute("""
+            UPDATE workflow_template_transitions
+            SET    condition = 'on_send_back'
+            WHERE  from_stage_key IN ('drm_review', 'internal_review', 'ai_review')
+              AND  to_stage_key  IN ('draft', 'internal_review')
+              AND  condition = 'default'
+              AND  from_stage_key != to_stage_key;
+        """)
+        await conn.execute("""
+            UPDATE workflow_template_transitions
+            SET    condition = 'on_approve'
+            WHERE  from_stage_key IN ('internal_review', 'drm_review')
+              AND  to_stage_key NOT IN ('rejected', 'draft', 'internal_review')
+              AND  condition = 'default';
+        """)
 
         # ------------------------------------------------------------------ #
         # 14. INDEXES                                                         #

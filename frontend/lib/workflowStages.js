@@ -106,6 +106,28 @@ export const TRANSITION_CONDITIONS = [
   { value: 'on_send_back', label: 'On send-back', description: 'Reviewer requested revisions' },
 ];
 
+// on_condition_met still exists in the backend (used by coa.py) but is no
+// longer exposed in the graph editor UI.
+
+// ── Pipeline-first implicit transition helpers ─────────────────────────────
+
+/**
+ * The rejected anchor is kept in the data model but hidden from the canvas.
+ * A small indicator pill is rendered instead.
+ */
+export function isHiddenAnchor(stageKey) {
+  return stageKey === 'rejected';
+}
+
+/**
+ * Default send-back target options shown in the stage settings dropdown.
+ * Dynamic options (preceding stages) are appended at render time.
+ */
+export const SEND_BACK_TARGETS = [
+  { value: 'previous', label: 'Previous stage' },
+  { value: 'draft', label: 'Draft (start)' },
+];
+
 export function transitionConditionLabel(cond) {
   return TRANSITION_CONDITIONS.find((c) => c.value === cond)?.label || 'Default';
 }
@@ -137,7 +159,48 @@ const STAGE_TYPE_COLORS = {
   review: 'var(--color-warning)',
   approval: 'var(--color-accent-purple, #7c3aed)',
   terminal: 'var(--color-success)',
+  parallel_gateway: 'var(--color-accent-teal, #0d9488)',
 };
+
+// ── Parallel gateway & join configuration ──────────────────────────────────
+
+/**
+ * Join modes determine how a stage with multiple incoming transitions waits
+ * for predecessor stages to complete before activating.
+ *
+ *   all_required → every incoming predecessor must complete (AND-join)
+ *   any_required → first completed predecessor activates the stage (OR-join)
+ *   custom       → user picks specific predecessors from the incoming set
+ */
+export const JOIN_MODES = [
+  {
+    value: 'default',
+    label: 'Default (single predecessor)',
+    description: 'Standard single-source transition',
+  },
+  {
+    value: 'all_required',
+    label: 'All predecessors required',
+    description: 'Wait for every incoming branch to complete',
+  },
+  {
+    value: 'any_required',
+    label: 'Any predecessor sufficient',
+    description: 'Activate when the first branch completes',
+  },
+  {
+    value: 'custom',
+    label: 'Custom selection',
+    description: 'Choose which predecessors are required',
+  },
+];
+
+/**
+ * Helper — returns true if a stage_type represents a parallel gateway node.
+ */
+export function isParallelGateway(stageType) {
+  return stageType === 'parallel_gateway';
+}
 
 export function stageColor(stageKey, stageType) {
   if (isAnchorStage(stageKey)) return ANCHOR_STAGES[stageKey].color;

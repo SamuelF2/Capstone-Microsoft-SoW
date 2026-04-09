@@ -37,9 +37,7 @@ from models import (
     SendBackPayload,
 )
 from utils.db_helpers import (
-    create_assignment_with_prior,
     insert_history,
-    seed_collaboration,
 )
 
 router = APIRouter(prefix="/api/review", tags=["review"])
@@ -652,19 +650,17 @@ async def submit_review(
             },
         )
 
-        # Rejection: send SoW back to draft and cancel all other pending
-        # assignments at this stage (including the current user's other role
-        # assignments, which matter when the author holds multiple roles for
-        # testing).
+        # Rejection: route to the on_reject target defined in the workflow
+        # template.  Falls back to 'draft' for backward compatibility.
         if payload.decision == "rejected":
-            await conn.execute(
-                "UPDATE sow_documents SET status = 'draft', updated_at = NOW() WHERE id = $1",
-                sow_id,
-            )
-            await conn.execute(
-                "UPDATE sow_workflow SET current_stage = 'draft', updated_at = NOW() WHERE sow_id = $1",
-                sow_id,
-            )
+            from services.workflow_engine import execute_transition, resolve_transition
+
+            target = await resolve_transition(conn, sow_id, sow["status"], "on_reject")
+            target_key = target["stage_key"] if target else "draft"
+
+            # Cancel other pending assignments at the current stage before
+            # transitioning (the submitter's own assignment was already marked
+            # completed above).
             await conn.execute(
                 """
                 UPDATE review_assignments
@@ -678,15 +674,10 @@ async def submit_review(
                 assignment["id"],
                 assignment["stage"],
             )
-            await insert_history(
-                conn,
-                sow_id,
-                current_user.id,
-                "sent_back_to_draft",
-                {
-                    "reason": payload.comments,
-                    "rejected_by_role": assignment["reviewer_role"],
-                },
+
+            esap = sow["esap_level"] or "type-3"
+            await execute_transition(
+                conn, sow_id, target_key, current_user.id, esap, payload.comments
             )
 
         # Auto-create COA rows for approved-with-conditions decisions.
@@ -714,7 +705,79 @@ async def submit_review(
                         current_user.id,
                     )
 
-    return {"decision": payload.decision, "sow_id": sow_id}
+    result = {"decision": payload.decision, "sow_id": sow_id}
+
+    # Auto-advance: if the stage has auto_advance enabled and the approval
+    # decision just satisfied all gating rules, automatically advance.
+    # For parallel branches, use complete_parallel_branch instead.
+    if payload.decision in ("approved", "approved-with-conditions"):
+        from services.workflow_engine import (
+            _find_stage,
+            _load_workflow_data,
+            check_gating_rules,
+            complete_parallel_branch,
+            execute_transition,
+            resolve_transition,
+        )
+
+        async with database.pg_pool.acquire() as conn2:
+            sow_now = await conn2.fetchrow(
+                "SELECT status, esap_level FROM sow_documents WHERE id = $1", sow_id
+            )
+        if sow_now:
+            current = sow_now["status"]
+            esap = sow_now["esap_level"] or "type-3"
+            async with database.pg_pool.acquire() as conn2:
+                wd = await _load_workflow_data(conn2, sow_id)
+                # Check if this stage is part of a parallel group
+                pb_row = await conn2.fetchrow(
+                    "SELECT parallel_branches FROM sow_workflow WHERE sow_id = $1",
+                    sow_id,
+                )
+            parallel_branches = (
+                pb_row["parallel_branches"] if pb_row and pb_row["parallel_branches"] else None
+            )
+            is_parallel_branch = (
+                parallel_branches
+                and isinstance(parallel_branches, dict)
+                and current in parallel_branches
+            )
+
+            stage_cfg = _find_stage(wd, current)
+            if stage_cfg and (stage_cfg.get("config") or {}).get("auto_advance"):
+                async with database.pg_pool.acquire() as conn2, conn2.transaction():
+                    met, _ = await check_gating_rules(conn2, sow_id, current, esap)
+                    if met:
+                        if is_parallel_branch:
+                            # This is a parallel branch — check if the join can proceed
+                            join_result = await complete_parallel_branch(
+                                conn2, sow_id, current, current_user.id, esap
+                            )
+                            if join_result:
+                                result["auto_advanced"] = True
+                                result["new_status"] = join_result["new_status"]
+                                result["assigned_roles"] = join_result.get("assigned_roles", [])
+                            else:
+                                # Branch complete but join not ready yet
+                                result["parallel_branch_completed"] = True
+                                result["branch_stage"] = current
+                        else:
+                            target = await resolve_transition(conn2, sow_id, current, "on_approve")
+                            if not target:
+                                target = await resolve_transition(conn2, sow_id, current, "default")
+                            if target:
+                                advance_result = await execute_transition(
+                                    conn2,
+                                    sow_id,
+                                    target["stage_key"],
+                                    current_user.id,
+                                    esap,
+                                )
+                                result["auto_advanced"] = True
+                                result["new_status"] = advance_result["new_status"]
+                                result["assigned_roles"] = advance_result.get("assigned_roles", [])
+
+    return result
 
 
 # ── GET /api/review/{sow_id}/status ──────────────────────────────────────────
@@ -804,156 +867,87 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
 
 @router.post(
     "/{sow_id}/advance",
-    summary="Advance the SoW through the workflow (internal review → DRM review → approved)",
+    summary="Advance the SoW to the next stage based on workflow template routing",
 )
 async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
-    """Advance the SoW to the next stage, checking all gating rules.
+    """Advance the SoW to the next stage, checking gating rules defined in
+    the workflow template.
 
-    - ``internal_review`` → ``drm_review``: requires all internal-review approvals
-    - ``drm_review`` → ``approved``: requires all DRM approvals
+    Reads the per-SoW workflow snapshot to determine the ``on_approve``
+    transition target and required approvals.
 
-    Raises **409** if gating rules are not satisfied.
+    Raises **409** if gating rules are not satisfied or no advance transition
+    is defined for the current stage.
     """
+    from services.workflow_engine import (
+        check_gating_rules,
+        complete_parallel_branch,
+        execute_transition,
+        resolve_transition,
+    )
+
     async with database.pg_pool.acquire() as conn, conn.transaction():
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
         esap = sow["esap_level"] or "type-3"
+        current_stage = sow["status"]
 
-        # ── Branch: internal_review → drm_review ─────────────────────────────
-        if sow["status"] == "internal_review":
-            required_roles = await _get_required_roles(conn, sow_id, "internal_review", esap)
-            # Only consider the latest assignment per (user, role) to avoid
-            # counting stale approvals from prior reject/resubmit cycles.
-            existing = await conn.fetch(
-                """
-                SELECT DISTINCT ON (user_id, reviewer_role) *
-                FROM   review_assignments
-                WHERE  sow_id = $1 AND stage = 'internal-review'
-                ORDER  BY user_id, reviewer_role, assigned_at DESC
-                """,
-                sow_id,
-            )
-            completed_roles = {
-                r["reviewer_role"]
-                for r in existing
-                if r["status"] == "completed"
-                and r["decision"] in ("approved", "approved-with-conditions")
-            }
-            outstanding = [role for role in required_roles if role not in completed_roles]
-            if outstanding:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        "Gating rules not met. Pending approvals from: "
-                        + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
-                    ),
-                )
-
-            # Assign DRM reviewers, carrying over any prior responses
-            drm_roles = await _get_required_roles(conn, sow_id, "drm_review", esap)
-            assigned: list[str] = []
-            for role in drm_roles:
-                reviewer = await conn.fetchrow(
-                    "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
-                    role,
-                )
-                if reviewer:
-                    await create_assignment_with_prior(
-                        conn,
-                        sow_id=sow_id,
-                        user_id=reviewer["id"],
-                        reviewer_role=role,
-                        stage="drm-approval",
-                    )
-                    await seed_collaboration(conn, sow_id, reviewer["id"], "approver")
-                    assigned.append(role)
-
-            # TESTING: Also assign the author as every DRM reviewer role so
-            # they can walk through the full pipeline solo.  Remove this block
-            # once proper role assignment is in place.
-            for role in drm_roles:
-                await create_assignment_with_prior(
-                    conn,
-                    sow_id=sow_id,
-                    user_id=current_user.id,
-                    reviewer_role=role,
-                    stage="drm-approval",
-                )
-
-            await conn.execute(
-                "UPDATE sow_documents SET status = 'drm_review', updated_at = NOW() WHERE id = $1",
-                sow_id,
-            )
-            await conn.execute(
-                "UPDATE sow_workflow SET current_stage = 'drm_review', updated_at = NOW() WHERE sow_id = $1",
-                sow_id,
-            )
-            await insert_history(
-                conn,
-                sow_id,
-                current_user.id,
-                "advanced_to_drm",
-                {"esap_level": esap, "assigned_drm_roles": assigned},
-            )
-            return {
-                "advanced": True,
-                "sow_id": sow_id,
-                "new_status": "drm_review",
-                "assigned_roles": assigned,
-            }
-
-        # ── Branch: drm_review → approved ─────────────────────────────────────
-        elif sow["status"] == "drm_review":
-            required_roles = await _get_required_roles(conn, sow_id, "drm_review", esap)
-            existing = await conn.fetch(
-                """
-                SELECT DISTINCT ON (user_id, reviewer_role) *
-                FROM   review_assignments
-                WHERE  sow_id = $1 AND stage = 'drm-approval'
-                ORDER  BY user_id, reviewer_role, assigned_at DESC
-                """,
-                sow_id,
-            )
-            completed_roles = {
-                r["reviewer_role"]
-                for r in existing
-                if r["status"] == "completed"
-                and r["decision"] in ("approved", "approved-with-conditions")
-            }
-            outstanding = [role for role in required_roles if role not in completed_roles]
-            if outstanding:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        "DRM gating rules not met. Pending approvals from: "
-                        + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
-                    ),
-                )
-
-            await conn.execute(
-                "UPDATE sow_documents SET status = 'approved', updated_at = NOW() WHERE id = $1",
-                sow_id,
-            )
-            await conn.execute(
-                "UPDATE sow_workflow SET current_stage = 'approved', updated_at = NOW() WHERE sow_id = $1",
-                sow_id,
-            )
-            await insert_history(
-                conn,
-                sow_id,
-                current_user.id,
-                "drm_approved",
-                {"esap_level": esap},
-            )
-            return {"advanced": True, "sow_id": sow_id, "new_status": "approved"}
-
-        else:
+        # Check gating rules for the current stage
+        met, outstanding = await check_gating_rules(conn, sow_id, current_stage, esap)
+        if not met:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"SoW in '{sow['status']}' cannot be advanced",
+                detail=(
+                    "Gating rules not met. Pending approvals from: "
+                    + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
+                ),
             )
+
+        # Check if this stage is part of a parallel group
+        pb_row = await conn.fetchrow(
+            "SELECT parallel_branches FROM sow_workflow WHERE sow_id = $1",
+            sow_id,
+        )
+        parallel_branches = (
+            pb_row["parallel_branches"] if pb_row and pb_row["parallel_branches"] else None
+        )
+        is_parallel_branch = (
+            parallel_branches
+            and isinstance(parallel_branches, dict)
+            and current_stage in parallel_branches
+        )
+
+        if is_parallel_branch:
+            # This is a parallel branch — try to complete it and check the join
+            join_result = await complete_parallel_branch(
+                conn, sow_id, current_stage, current_user.id, esap
+            )
+            if join_result:
+                return join_result
+            # Branch marked complete but join not ready yet
+            return {
+                "advanced": False,
+                "sow_id": sow_id,
+                "parallel_branch_completed": True,
+                "branch_stage": current_stage,
+                "detail": "Branch completed. Waiting for other parallel branches.",
+            }
+
+        # Resolve the on_approve transition, falling back to default
+        target = await resolve_transition(conn, sow_id, current_stage, "on_approve")
+        if not target:
+            target = await resolve_transition(conn, sow_id, current_stage, "default")
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"No advance transition defined from '{current_stage}'",
+            )
+
+        # Execute the transition
+        result = await execute_transition(conn, sow_id, target["stage_key"], current_user.id, esap)
+        return result
 
 
 # ── GET /api/review/{sow_id}/drm-summary ─────────────────────────────────────
@@ -1145,18 +1139,17 @@ async def send_back(
     payload: SendBackPayload,
     current_user: CurrentUser,
 ) -> dict:
-    """Send a SoW back from DRM review to draft or internal review.
+    """Send a SoW back to an earlier stage defined by ``on_send_back``
+    transitions in the workflow template.
 
-    Clears pending DRM assignments, records a rejection audit entry, and
-    optionally re-creates internal-review assignments when targeting
-    ``internal_review``.
+    Clears pending assignments at the current stage, records an audit entry,
+    and creates new assignments at the target stage if it requires reviewers.
     """
-    valid_targets = {"draft", "internal_review"}
-    if payload.target_stage not in valid_targets:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid target_stage. Must be one of {sorted(valid_targets)}",
-        )
+    from services.workflow_engine import (
+        execute_transition,
+        get_valid_send_back_targets,
+    )
+
     if not payload.comments:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1164,10 +1157,27 @@ async def send_back(
         )
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
+        sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not sow:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        current_stage = sow["status"]
+
+        # Validate target_stage against workflow-defined send-back targets
+        valid_targets = await get_valid_send_back_targets(conn, sow_id, current_stage)
+        valid_keys = {t["stage_key"] for t in valid_targets}
+        if payload.target_stage not in valid_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid target_stage '{payload.target_stage}'. Valid targets: {sorted(valid_keys)}",
+            )
+
+        # Find the reviewer's assignment at the current stage
         assignment = await conn.fetchrow(
             """SELECT * FROM review_assignments
-               WHERE sow_id = $1 AND user_id = $2 AND stage = 'drm-approval'
-               ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END
+               WHERE sow_id = $1 AND user_id = $2
+                 AND status IN ('pending', 'in_progress')
+               ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END
                LIMIT 1""",
             sow_id,
             current_user.id,
@@ -1175,22 +1185,12 @@ async def send_back(
         if not assignment:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="SoW not found",
-            )
-
-        sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
-        if not sow:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
-
-        if sow["status"] not in ("drm_review", "internal_review"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"SoW is in '{sow['status']}' status — cannot send back",
+                detail="No active assignment found",
             )
 
         now = datetime.now(UTC)
 
-        # Mark the submitter's specific assignment as completed/rejected
+        # Mark the submitter's assignment as completed/rejected
         await conn.execute(
             """
             UPDATE review_assignments
@@ -1205,18 +1205,19 @@ async def send_back(
             assignment["id"],
         )
 
-        # Cancel other pending DRM assignments
+        # Cancel other pending assignments at the current stage
         await conn.execute(
             """
             UPDATE review_assignments
             SET    status = 'canceled'
             WHERE  sow_id   = $1
-              AND  user_id != $2
-              AND  stage    = 'drm-approval'
+              AND  id      != $2
+              AND  stage    = $3
               AND  status  IN ('pending', 'in_progress')
             """,
             sow_id,
-            current_user.id,
+            assignment["id"],
+            assignment["stage"],
         )
 
         # Audit entry
@@ -1233,63 +1234,17 @@ async def send_back(
             json.dumps({"comments": payload.comments, "action_items": payload.action_items}),
             now,
             current_user.id,
-            "drm-approval",
+            assignment["stage"],
             json.dumps([]),
             "rejected",
             None,
         )
 
-        # If sending back to internal_review, re-create SA/SQA assignments
-        if payload.target_stage == "internal_review":
-            esap = sow["esap_level"] or "type-3"
-            roles_needed = await _get_required_roles(conn, sow_id, "internal_review", esap)
-            for ir_role in roles_needed:
-                reviewer = await conn.fetchrow(
-                    "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
-                    ir_role,
-                )
-                if reviewer:
-                    await create_assignment_with_prior(
-                        conn,
-                        sow_id=sow_id,
-                        user_id=reviewer["id"],
-                        reviewer_role=ir_role,
-                        stage="internal-review",
-                    )
-
-            # TESTING: Also re-assign the author for each role
-            for ir_role in roles_needed:
-                await create_assignment_with_prior(
-                    conn,
-                    sow_id=sow_id,
-                    user_id=current_user.id,
-                    reviewer_role=ir_role,
-                    stage="internal-review",
-                )
-
-        # Update SoW status
-        await conn.execute(
-            "UPDATE sow_documents SET status = $1, updated_at = NOW() WHERE id = $2",
-            payload.target_stage,
-            sow_id,
-        )
-        await conn.execute(
-            "UPDATE sow_workflow SET current_stage = $1, updated_at = NOW() WHERE sow_id = $2",
-            payload.target_stage,
-            sow_id,
-        )
-
-        await insert_history(
-            conn,
-            sow_id,
-            current_user.id,
-            "sent_back",
-            {
-                "target_stage": payload.target_stage,
-                "reason": payload.comments,
-                "action_items": payload.action_items,
-                "sent_back_by_role": assignment["reviewer_role"],
-            },
+        # Execute the transition to the target stage (handles status update,
+        # assignment creation for review/approval targets, and history).
+        esap = sow["esap_level"] or "type-3"
+        await execute_transition(
+            conn, sow_id, payload.target_stage, current_user.id, esap, payload.comments
         )
 
     return {"sent_back": True, "sow_id": sow_id, "target_stage": payload.target_stage}

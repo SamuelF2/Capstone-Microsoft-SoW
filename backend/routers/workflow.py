@@ -73,7 +73,13 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
             for r in role_rows
         ]
 
-        stage_config = s["config"] if isinstance(s["config"], dict) else {}
+        raw_cfg = s["config"]
+        if isinstance(raw_cfg, dict):
+            stage_config = raw_cfg
+        elif isinstance(raw_cfg, str):
+            stage_config = json.loads(raw_cfg)
+        else:
+            stage_config = {}
 
         # Fetch document requirements for this stage (Phase 4)
         doc_req_rows = await conn.fetch(
@@ -108,14 +114,19 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
 
     transition_rows = await conn.fetch(
         """
-        SELECT from_stage_key, to_stage_key
+        SELECT from_stage_key, to_stage_key, condition
         FROM   workflow_template_transitions
         WHERE  template_id = $1
         """,
         template_id,
     )
     transitions = [
-        {"from_stage": t["from_stage_key"], "to_stage": t["to_stage_key"]} for t in transition_rows
+        {
+            "from_stage": t["from_stage_key"],
+            "to_stage": t["to_stage_key"],
+            "condition": t["condition"] or "default",
+        }
+        for t in transition_rows
     ]
 
     return {"stages": stages, "transitions": transitions}
@@ -124,6 +135,66 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
 async def get_default_template_id(conn) -> int | None:
     """Return the ID of the system default workflow template, or None."""
     return await conn.fetchval("SELECT id FROM workflow_templates WHERE is_system = TRUE LIMIT 1")
+
+
+def _validate_workflow_data(wd: WorkflowData) -> None:
+    """Validate a workflow's stages and transitions before persisting."""
+    stage_keys = {s.stage_key for s in wd.stages}
+    stage_map = {s.stage_key: s for s in wd.stages}
+
+    # All transition endpoints must reference existing stages
+    for t in wd.transitions:
+        if t.from_stage not in stage_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Transition references unknown stage '{t.from_stage}'",
+            )
+        if t.to_stage not in stage_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Transition references unknown stage '{t.to_stage}'",
+            )
+
+    # Review/approval stages should have at least one on_approve or default
+    review_stages = {s.stage_key for s in wd.stages if s.stage_type in ("review", "approval")}
+    for stage_key in review_stages:
+        conditions = {t.condition for t in wd.transitions if t.from_stage == stage_key}
+        if "on_approve" not in conditions and "default" not in conditions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stage '{stage_key}' needs an on_approve or default outgoing transition",
+            )
+
+    # ── Parallel gateway validation ──────────────────────────────────────
+    gateways = [s for s in wd.stages if s.stage_type == "parallel_gateway"]
+    for gw in gateways:
+        # Must have at least 2 outgoing transitions
+        outgoing = [t for t in wd.transitions if t.from_stage == gw.stage_key]
+        if len(outgoing) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Parallel gateway '{gw.stage_key}' must have at least 2 outgoing transitions",
+            )
+        # No nested gateways (gateway's outgoing targets must not be gateways)
+        for t in outgoing:
+            target = stage_map.get(t.to_stage)
+            if target and target.stage_type == "parallel_gateway":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Parallel gateway '{gw.stage_key}' cannot lead to another gateway (no nesting)",
+                )
+
+    # Validate join_config references
+    for s in wd.stages:
+        config = s.config or {}
+        if config.get("join_mode") == "custom":
+            required = config.get("required_predecessors", [])
+            for pred in required:
+                if pred not in stage_keys:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Stage '{s.stage_key}' references unknown predecessor '{pred}' in join config",
+                    )
 
 
 # ── Template endpoints ───────────────────────────────────────────────────────
@@ -168,19 +239,7 @@ async def create_template(
 ) -> WorkflowTemplateResponse:
     wd = payload.workflow_data
 
-    # Validate: all transition stage keys must exist in stages
-    stage_keys = {s.stage_key for s in wd.stages}
-    for t in wd.transitions:
-        if t.from_stage not in stage_keys:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Transition references unknown stage '{t.from_stage}'",
-            )
-        if t.to_stage not in stage_keys:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Transition references unknown stage '{t.to_stage}'",
-            )
+    _validate_workflow_data(wd)
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
         template_id = await conn.fetchval(
@@ -226,12 +285,13 @@ async def create_template(
             await conn.execute(
                 """
                 INSERT INTO workflow_template_transitions
-                    (template_id, from_stage_key, to_stage_key)
-                VALUES ($1, $2, $3)
+                    (template_id, from_stage_key, to_stage_key, condition)
+                VALUES ($1, $2, $3, $4)
                 """,
                 template_id,
                 t.from_stage,
                 t.to_stage,
+                t.condition,
             )
 
         snapshot = await build_workflow_snapshot(conn, template_id)
@@ -282,20 +342,7 @@ async def update_template(
     template_id: int, payload: WorkflowTemplateCreate, current_user: CurrentUser
 ) -> WorkflowTemplateResponse:
     wd = payload.workflow_data
-
-    # Validate: all transition stage keys must exist in stages
-    stage_keys = {s.stage_key for s in wd.stages}
-    for t in wd.transitions:
-        if t.from_stage not in stage_keys:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Transition references unknown stage '{t.from_stage}'",
-            )
-        if t.to_stage not in stage_keys:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Transition references unknown stage '{t.to_stage}'",
-            )
+    _validate_workflow_data(wd)
 
     async with database.pg_pool.acquire() as conn, conn.transaction():
         existing = await conn.fetchrow(
@@ -360,12 +407,13 @@ async def update_template(
             await conn.execute(
                 """
                 INSERT INTO workflow_template_transitions
-                    (template_id, from_stage_key, to_stage_key)
-                VALUES ($1, $2, $3)
+                    (template_id, from_stage_key, to_stage_key, condition)
+                VALUES ($1, $2, $3, $4)
                 """,
                 template_id,
                 t.from_stage,
                 t.to_stage,
+                t.condition,
             )
 
         snapshot = await build_workflow_snapshot(conn, template_id)

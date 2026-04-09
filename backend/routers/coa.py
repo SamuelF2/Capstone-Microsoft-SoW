@@ -40,6 +40,44 @@ _VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 _VALID_STATUSES = {"open", "in_progress", "resolved", "waived"}
 
 
+async def _check_condition_met_transition(conn, sow_id: int, user_id: int) -> dict | None:
+    """After resolving/waiving a COA, check if ALL remaining COAs for the SoW
+    are now resolved or waived.  If so, and the current stage has an
+    ``on_condition_met`` transition, execute it automatically.
+
+    Returns the transition result dict if an auto-advance happened, else None.
+    """
+    from services.workflow_engine import (
+        execute_transition,
+        resolve_transition,
+    )
+
+    # Check for outstanding (non-terminal) COAs
+    outstanding = await conn.fetchval(
+        """
+        SELECT count(*) FROM conditions_of_approval
+        WHERE  sow_id = $1 AND status NOT IN ('resolved', 'waived')
+        """,
+        sow_id,
+    )
+    if outstanding > 0:
+        return None
+
+    # All COAs cleared — look for an on_condition_met transition
+    sow = await conn.fetchrow("SELECT status, esap_level FROM sow_documents WHERE id = $1", sow_id)
+    if not sow:
+        return None
+
+    target = await resolve_transition(conn, sow_id, sow["status"], "on_condition_met")
+    if not target:
+        return None
+
+    esap = sow["esap_level"] or "type-3"
+    return await execute_transition(
+        conn, sow_id, target["stage_key"], user_id, esap, "All conditions of approval met"
+    )
+
+
 def _row_to_coa(row: dict) -> COAResponse:
     evidence = row.get("evidence")
     if isinstance(evidence, str):
@@ -286,6 +324,9 @@ async def resolve_coa(
             datetime.now(UTC),
             coa_id,
         )
+        # Check if all COAs are now cleared and trigger on_condition_met
+        await _check_condition_met_transition(conn, row["sow_id"], current_user.id)
+
     return _row_to_coa(dict(row))
 
 
@@ -328,4 +369,8 @@ async def waive_coa(
             datetime.now(UTC),
             coa_id,
         )
+
+        # Check if all COAs are now cleared and trigger on_condition_met
+        await _check_condition_met_transition(conn, row["sow_id"], current_user.id)
+
     return _row_to_coa(dict(row))

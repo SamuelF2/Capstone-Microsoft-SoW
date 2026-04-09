@@ -1054,20 +1054,24 @@ export default function ReviewPage() {
   const canReview = isSystemAdmin || !!myAssignment;
   const isMyReviewDone = myAssignment?.status === 'completed';
 
-  // Send-back target options: any earlier non-failure stage + draft.
+  // Send-back target options: read from on_send_back transitions in workflow data.
   const sendBackTargets = useMemo(() => {
     if (!workflow || !currentStage) return [{ stage_key: 'draft', display_name: 'Draft' }];
+    const transitions = workflow.workflow_data?.transitions || [];
     const stages = workflow.workflow_data?.stages || [];
-    const earlier = stages
-      .filter((s) => !isFailureBranch(s) && !isTerminalStage(s))
-      .filter((s) => (s.stage_order ?? 0) < (currentStage.stage_order ?? 0))
-      .sort((a, b) => b.stage_order - a.stage_order);
-    const seen = new Set(earlier.map((s) => s.stage_key));
-    const targets = earlier.map((s) => ({
-      stage_key: s.stage_key,
-      display_name: s.display_name,
-    }));
-    if (!seen.has('draft')) targets.push({ stage_key: 'draft', display_name: 'Draft' });
+    const stageMap = Object.fromEntries(stages.map((s) => [s.stage_key, s]));
+
+    const targets = transitions
+      .filter((t) => t.from_stage === currentStage.stage_key && t.condition === 'on_send_back')
+      .map((t) => ({
+        stage_key: t.to_stage,
+        display_name: stageMap[t.to_stage]?.display_name || t.to_stage,
+      }));
+
+    // Always include draft as a fallback
+    if (!targets.find((t) => t.stage_key === 'draft')) {
+      targets.push({ stage_key: 'draft', display_name: 'Draft' });
+    }
     return targets;
   }, [workflow, currentStage]);
 
@@ -1183,7 +1187,21 @@ export default function ReviewPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `Submission failed (${res.status})`);
       }
+      const resBody = await res.json().catch(() => ({}));
       setModal(null);
+
+      if (resBody.auto_advanced) {
+        showToast('Review submitted — automatically advanced to next stage');
+        setTimeout(() => router.push('/my-reviews'), 1500);
+        return;
+      }
+
+      if (resBody.parallel_branch_completed) {
+        showToast('Your branch review is complete. Waiting for other parallel branches.');
+        await refreshProgress();
+        return;
+      }
+
       showToast(
         decision === 'rejected' ? 'SoW returned to draft' : 'Review submitted successfully'
       );
@@ -1478,6 +1496,27 @@ export default function ReviewPage() {
               currentStage={currentStage}
               isSystemAdmin={isSystemAdmin}
             />
+          )}
+
+          {/* Reviewer instructions from workflow stage config */}
+          {currentStage?.config?.reviewer_instructions && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--spacing-sm)',
+                padding: 'var(--spacing-sm) var(--spacing-md)',
+                marginBottom: 'var(--spacing-lg)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--color-info-border, #93c5fd)',
+                backgroundColor: 'var(--color-info-bg, #eff6ff)',
+                color: 'var(--color-info-text, #1e40af)',
+                fontSize: 'var(--text-sm)',
+                lineHeight: 1.5,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>ℹ</span>
+              <span>{currentStage.config.reviewer_instructions}</span>
+            </div>
           )}
 
           {/* Two-column body */}

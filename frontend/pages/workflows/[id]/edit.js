@@ -17,7 +17,7 @@
  *     the user can clone them into their own template via "Save as copy".
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../../lib/auth';
@@ -32,6 +32,10 @@ export default function WorkflowEditPage() {
 
   const [workflow, setWorkflow] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Ref to synchronously read the freshest workflow_data from the editor,
+  // bypassing the async useEffect propagation that can lag behind user edits.
+  const getWorkflowDataRef = useRef(null);
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -99,10 +103,13 @@ export default function WorkflowEditPage() {
       setSaveError('Workflow name is required.');
       return;
     }
+    // Read the freshest graph state directly from the editor ref to avoid
+    // stale workflow_data when the async propagation effect hasn't fired yet.
+    const freshData = getWorkflowDataRef.current?.() ?? workflow.workflow_data;
     const payload = {
       name: asCopy ? `${workflow.name} (copy)` : workflow.name.trim(),
       description: workflow.description?.trim() || null,
-      workflow_data: workflow.workflow_data,
+      workflow_data: freshData,
     };
     setSaving(true);
     try {
@@ -331,25 +338,28 @@ export default function WorkflowEditPage() {
           )}
         </div>
 
-        {/* Editor canvas fills remaining height */}
+        {/* Editor canvas fills remaining height — full width, no max-width cap */}
         <div
           style={{
             flex: 1,
             display: 'flex',
-            padding: 'var(--spacing-lg) var(--spacing-xl) var(--spacing-xl)',
+            padding: 'var(--spacing-sm) var(--spacing-sm) var(--spacing-sm)',
             minHeight: 0,
           }}
         >
           <div
             style={{
-              maxWidth: 'var(--container-xl)',
               width: '100%',
-              margin: '0 auto',
               display: 'flex',
               minHeight: '600px',
             }}
           >
-            <WorkflowFlowEditor workflow={workflow} onChange={setWorkflow} readOnly={readOnly} />
+            <WorkflowFlowEditor
+              workflow={workflow}
+              onChange={setWorkflow}
+              readOnly={readOnly}
+              getWorkflowDataRef={getWorkflowDataRef}
+            />
           </div>
         </div>
       </div>

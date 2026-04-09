@@ -12,7 +12,7 @@
  *   Bottom: DRM reviewer status footer
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -345,8 +345,15 @@ function DecisionModal({ type, onClose, onSubmit, submitting }) {
 
 // ── Send-Back Modal ───────────────────────────────────────────────────────────
 
-function SendBackModal({ onClose, onSubmit, submitting }) {
-  const [targetStage, setTargetStage] = useState('internal_review');
+function SendBackModal({ onClose, onSubmit, submitting, availableStages }) {
+  const targets =
+    availableStages && availableStages.length > 0
+      ? availableStages
+      : [
+          { stage_key: 'internal_review', display_name: 'Internal Review' },
+          { stage_key: 'draft', display_name: 'Draft' },
+        ];
+  const [targetStage, setTargetStage] = useState(targets[0]?.stage_key || 'internal_review');
   const [comments, setComments] = useState('');
   const [actionItems, setActionItems] = useState(['']);
 
@@ -423,10 +430,7 @@ function SendBackModal({ onClose, onSubmit, submitting }) {
             Return to
           </label>
           <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-            {[
-              { value: 'internal_review', label: 'Internal Review' },
-              { value: 'draft', label: 'Draft' },
-            ].map(({ value, label }) => (
+            {targets.map(({ stage_key: value, display_name: label }) => (
               <button
                 key={value}
                 onClick={() => setTargetStage(value)}
@@ -656,6 +660,7 @@ export default function DrmReview() {
   const { user, authFetch } = useAuth();
 
   const [sow, setSow] = useState(null);
+  const [workflowData, setWorkflowData] = useState(null);
   const [checklistItems, setChecklistItems] = useState([]);
   const [checklistRole, setChecklistRole] = useState('');
   const [responses, setResponses] = useState([]);
@@ -672,6 +677,31 @@ export default function DrmReview() {
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
+  // Compute send-back targets from workflow on_send_back transitions
+  const sendBackTargets = useMemo(() => {
+    if (!workflowData || !sow) return null; // null = use modal defaults
+    const transitions = workflowData.transitions || [];
+    const stages = workflowData.stages || [];
+    const stageMap = Object.fromEntries(stages.map((s) => [s.stage_key, s]));
+    const targets = transitions
+      .filter((t) => t.from_stage === sow.status && t.condition === 'on_send_back')
+      .map((t) => ({
+        stage_key: t.to_stage,
+        display_name: stageMap[t.to_stage]?.display_name || t.to_stage,
+      }));
+    if (!targets.find((t) => t.stage_key === 'draft')) {
+      targets.push({ stage_key: 'draft', display_name: 'Draft' });
+    }
+    return targets;
+  }, [workflowData, sow]);
+
+  // Derive the current workflow stage object
+  const currentStage = useMemo(() => {
+    if (!workflowData || !sow) return null;
+    const stages = workflowData.stages || [];
+    return stages.find((s) => s.stage_key === sow.status) || null;
+  }, [workflowData, sow]);
+
   function showToast(msg, type = 'success') {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -682,15 +712,21 @@ export default function DrmReview() {
     setLoading(true);
     setError(null);
     try {
-      const [sowRes, checklistRes, statusRes] = await Promise.all([
+      const [sowRes, checklistRes, statusRes, wfRes] = await Promise.all([
         authFetch(`/api/sow/${id}`),
         authFetch(`/api/review/${id}/checklist`),
         authFetch(`/api/review/${id}/status`),
+        authFetch(`/api/workflow/sow/${id}`),
       ]);
 
       if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
       if (!checklistRes.ok) throw new Error(`Checklist load failed (${checklistRes.status})`);
       if (!statusRes.ok) throw new Error(`Status load failed (${statusRes.status})`);
+
+      if (wfRes.ok) {
+        const wfData = await wfRes.json();
+        setWorkflowData(wfData.workflow_data || null);
+      }
 
       const [sowData, checklistData, statusData] = await Promise.all([
         sowRes.json(),
@@ -755,7 +791,21 @@ export default function DrmReview() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `Submit failed (${res.status})`);
       }
+      const resBody = await res.json().catch(() => ({}));
       setModal(null);
+
+      if (resBody.auto_advanced) {
+        showToast('Review submitted — automatically advanced to next stage');
+        setTimeout(() => router.push('/drm-dashboard'), 1500);
+        return;
+      }
+
+      if (resBody.parallel_branch_completed) {
+        showToast('Your branch review is complete. Waiting for other parallel branches.');
+        await loadAll();
+        return;
+      }
+
       showToast(
         decision === 'approved'
           ? 'Review approved'
@@ -922,6 +972,7 @@ export default function DrmReview() {
           onClose={() => setModal(null)}
           onSubmit={handleSendBack}
           submitting={submitting}
+          availableStages={sendBackTargets}
         />
       )}
 
@@ -1036,6 +1087,27 @@ export default function DrmReview() {
 
           {/* Internal review results banner */}
           <InternalReviewBanner reviewStatus={reviewStatus} />
+
+          {/* Reviewer instructions from workflow stage config */}
+          {currentStage?.config?.reviewer_instructions && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--spacing-sm)',
+                padding: 'var(--spacing-sm) var(--spacing-md)',
+                marginBottom: 'var(--spacing-xl)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--color-info-border, #93c5fd)',
+                backgroundColor: 'var(--color-info-bg, #eff6ff)',
+                color: 'var(--color-info-text, #1e40af)',
+                fontSize: 'var(--text-sm)',
+                lineHeight: 1.5,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>ℹ</span>
+              <span>{currentStage.config.reviewer_instructions}</span>
+            </div>
+          )}
 
           {/* Two-column body */}
           <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'flex-start' }}>

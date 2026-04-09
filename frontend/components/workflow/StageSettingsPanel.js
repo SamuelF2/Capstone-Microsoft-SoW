@@ -1,29 +1,35 @@
 /**
- * StageSettingsPanel — side panel that edits the currently-selected node.
+ * StageSettingsPanel — side panel for the pipeline-first workflow editor.
  *
- * When no node is selected the panel shows workflow-level settings (name,
- * description) plus any graph validation warnings. When a middle stage node
- * is selected it shows the stage's display name, stage_key, stage_type, and
- * per-role assignment table. Anchors are read-only — they have fixed keys
- * and no editable settings.
- *
- * Props
- * ─────
- * workflow            { name, description }
- * onWorkflowChange    (patch) => void   — merge into workflow
- * selectedNode        Node | null       — currently selected React Flow node
- * onStageChange       (stage) => void   — replace selected node's data.stage
- * onDeleteStage       () => void
- * warnings            string[]           — from validateGraph
+ * Shows context-aware forms:
+ *   - Nothing selected → workflow name/description + implicit rules summary
+ *   - Stage selected   → stage settings including send-back target dropdown
+ *   - Edge selected    → explicit (override) edge condition picker
+ *   - Anchor selected  → read-only anchor info
  */
 
-import { useEffect, useState } from 'react';
-import { ANCHOR_STAGES, isAnchorStage } from '../../lib/workflowStages';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ANCHOR_STAGES,
+  isAnchorStage,
+  TRANSITION_CONDITIONS,
+  JOIN_MODES,
+  isParallelGateway,
+  SEND_BACK_TARGETS,
+} from '../../lib/workflowStages';
 
 const MIDDLE_STAGE_TYPES = [
   { value: 'review', label: 'Review' },
   { value: 'approval', label: 'Approval' },
   { value: 'ai_analysis', label: 'AI Analysis' },
+  { value: 'parallel_gateway', label: 'Parallel Gateway' },
+];
+
+const APPROVAL_MODES = [
+  { value: 'all_must_approve', label: 'All required must approve' },
+  { value: 'any_can_approve', label: 'Any one can approve' },
+  { value: 'majority', label: 'Majority vote' },
+  { value: 'threshold', label: 'Custom threshold' },
 ];
 
 const KNOWN_ROLES = ['solution-architect', 'sqa-reviewer', 'cpl', 'cdp', 'delivery-manager'];
@@ -40,8 +46,37 @@ export default function StageSettingsPanel({
   selectedNode,
   onStageChange,
   onDeleteStage,
+  selectedEdge,
+  onEdgeChange,
+  onDeleteEdge,
+  nodes,
+  edges,
   warnings,
 }) {
+  let content;
+  if (selectedEdge) {
+    content = (
+      <EdgeForm
+        edge={selectedEdge}
+        onChange={onEdgeChange}
+        onDelete={onDeleteEdge}
+        nodes={nodes || []}
+      />
+    );
+  } else if (selectedNode) {
+    content = (
+      <StageForm
+        node={selectedNode}
+        onChange={onStageChange}
+        onDelete={onDeleteStage}
+        nodes={nodes || []}
+        edges={edges || []}
+      />
+    );
+  } else {
+    content = <WorkflowForm workflow={workflow} onChange={onWorkflowChange} warnings={warnings} />;
+  }
+
   return (
     <aside
       style={{
@@ -53,16 +88,12 @@ export default function StageSettingsPanel({
         padding: 'var(--spacing-lg)',
       }}
     >
-      {selectedNode ? (
-        <StageForm node={selectedNode} onChange={onStageChange} onDelete={onDeleteStage} />
-      ) : (
-        <WorkflowForm workflow={workflow} onChange={onWorkflowChange} warnings={warnings} />
-      )}
+      {content}
     </aside>
   );
 }
 
-// ── Workflow-level form (shown when nothing is selected) ────────────────────
+// ── Workflow-level form ────────────────────────────────────────────────────
 
 function WorkflowForm({ workflow, onChange, warnings }) {
   return (
@@ -86,6 +117,38 @@ function WorkflowForm({ workflow, onChange, warnings }) {
           placeholder="Optional — describe when to use this workflow"
         />
       </Field>
+
+      {/* Pipeline model explanation */}
+      <div style={{ marginTop: 'var(--spacing-lg)' }}>
+        <SectionTitle>Pipeline Rules</SectionTitle>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 'var(--spacing-xs)',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-secondary)',
+            lineHeight: 1.5,
+          }}
+        >
+          <RuleBadge color="#475569" label="Forward">
+            Each stage advances to the next in order
+          </RuleBadge>
+          <RuleBadge color="#ef4444" label="Reject">
+            Review/approval stages reject to Rejected
+          </RuleBadge>
+          <RuleBadge color="#f59e0b" label="Send back">
+            Configured per-stage (default: previous stage)
+          </RuleBadge>
+        </div>
+        <p
+          className="text-xs text-tertiary"
+          style={{ marginTop: 'var(--spacing-sm)', lineHeight: 1.4 }}
+        >
+          These transitions are automatic. Draw an edge between stages only to override the default
+          pipeline flow.
+        </p>
+      </div>
 
       {warnings && warnings.length > 0 && (
         <>
@@ -121,25 +184,81 @@ function WorkflowForm({ workflow, onChange, warnings }) {
         className="text-xs text-tertiary"
         style={{ marginTop: 'var(--spacing-xl)', lineHeight: 1.5 }}
       >
-        Select a stage on the canvas to edit its details. Drag from a stage's right edge to another
-        stage's left edge to create a transition.
+        Select a stage on the canvas to edit its details.
       </p>
     </div>
   );
 }
 
-// ── Stage form (shown when a node is selected) ──────────────────────────────
+function RuleBadge({ color, label, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <span
+        style={{
+          display: 'inline-block',
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          backgroundColor: color,
+          opacity: 0.6,
+          marginTop: 4,
+          flexShrink: 0,
+        }}
+      />
+      <div>
+        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{label}:</span>{' '}
+        {children}
+      </div>
+    </div>
+  );
+}
 
-function StageForm({ node, onChange, onDelete }) {
+// ── Stage form ────────────────────────────────────────────────────────────
+
+function StageForm({ node, onChange, onDelete, nodes, edges }) {
   const stage = node.data.stage || {};
   const locked = isAnchorStage(node.id);
+  const isGateway = isParallelGateway(stage.stage_type);
 
-  // Local draft state for the stage_key so the user can type freely without
-  // triggering a re-slug on every keystroke. We commit on blur.
   const [draftKey, setDraftKey] = useState(stage.stage_key || '');
   useEffect(() => {
     setDraftKey(stage.stage_key || '');
   }, [node.id, stage.stage_key]);
+
+  // Compute incoming predecessors for join config
+  const incomingPredecessors = useMemo(() => {
+    if (!edges || !nodes) return [];
+    const incoming = edges.filter((e) => e.target === node.id && !e.data?.isGhost);
+    const sourceIds = [...new Set(incoming.map((e) => e.source))];
+    return sourceIds.map((sid) => {
+      const srcNode = nodes.find((n) => n.id === sid);
+      return {
+        stage_key: sid,
+        display_name: srcNode?.data?.stage?.display_name || sid,
+      };
+    });
+  }, [edges, nodes, node.id]);
+
+  const hasMultiplePredecessors = incomingPredecessors.length >= 2;
+
+  // Compute preceding stages for send-back dropdown
+  const precedingStages = useMemo(() => {
+    if (!nodes) return [];
+    const currentX = node.position?.x ?? 0;
+    return nodes
+      .filter(
+        (n) =>
+          n.type !== 'rejected_indicator' &&
+          !isAnchorStage(n.id) &&
+          n.id !== node.id &&
+          (n.position?.x ?? 0) < currentX
+      )
+      .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
+      .map((n) => ({
+        stage_key: n.id,
+        display_name: n.data?.stage?.display_name || n.id,
+      }));
+  }, [nodes, node.id, node.position]);
 
   if (locked) {
     return (
@@ -163,8 +282,7 @@ function StageForm({ node, onChange, onDelete }) {
 
   const patch = (p) => onChange({ ...stage, ...p });
 
-  // ── Role list mutators ────────────────────────────────────────────────────
-
+  // Role list mutators
   const addRole = () =>
     patch({
       roles: [...(stage.roles || []), { role_key: '', is_required: true, esap_levels: null }],
@@ -176,6 +294,123 @@ function StageForm({ node, onChange, onDelete }) {
     });
 
   const removeRole = (idx) => patch({ roles: (stage.roles || []).filter((_, i) => i !== idx) });
+
+  const isReviewable = stage.stage_type === 'review' || stage.stage_type === 'approval';
+  const isAI = stage.stage_type === 'ai_analysis';
+  const showSendBack = isReviewable || isAI;
+
+  // ── Parallel Gateway form ─────────────────────────────────────────────
+
+  if (isGateway) {
+    return (
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 'var(--spacing-md)',
+          }}
+        >
+          <SectionTitle style={{ margin: 0 }}>
+            <span style={{ color: 'var(--color-accent-teal, #0d9488)' }}>|||</span> Parallel Gateway
+          </SectionTitle>
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete this gateway"
+            style={{
+              background: 'none',
+              border: '1px solid rgba(220,38,38,0.3)',
+              color: 'var(--color-error)',
+              padding: '3px 10px',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--font-size-xs)',
+              cursor: 'pointer',
+            }}
+          >
+            Delete
+          </button>
+        </div>
+
+        <div
+          style={{
+            padding: 'var(--spacing-sm)',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'rgba(13,148,136,0.06)',
+            border: '1px solid rgba(13,148,136,0.2)',
+            color: 'var(--color-text-secondary)',
+            fontSize: 'var(--font-size-xs)',
+            lineHeight: 1.5,
+            marginBottom: 'var(--spacing-md)',
+          }}
+        >
+          When this gateway is reached, <strong>all outgoing stages</strong> are activated
+          simultaneously. Connect multiple stages from this node to create parallel branches.
+        </div>
+
+        <Field label="Display name">
+          <input
+            type="text"
+            className="form-input"
+            value={stage.display_name || ''}
+            onChange={(e) => patch({ display_name: e.target.value })}
+          />
+        </Field>
+        <Field label="Gateway key" hint="Lowercase, underscores. Must be unique.">
+          <input
+            type="text"
+            className="form-input"
+            value={draftKey}
+            onChange={(e) => setDraftKey(e.target.value)}
+            onBlur={() => patch({ stage_key: draftKey })}
+            style={{ fontFamily: 'monospace' }}
+          />
+        </Field>
+
+        {edges && (
+          <div style={{ marginTop: 'var(--spacing-lg)' }}>
+            <SectionTitle>Outgoing Branches</SectionTitle>
+            {(() => {
+              const outEdges = edges.filter((e) => e.source === node.id && !e.data?.isGhost);
+              if (outEdges.length === 0) {
+                return (
+                  <p className="text-xs text-tertiary" style={{ fontStyle: 'italic', margin: 0 }}>
+                    No branches yet. Connect this gateway to 2+ stages.
+                  </p>
+                );
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {outEdges.map((e) => {
+                    const tgt = nodes.find((n) => n.id === e.target);
+                    return (
+                      <div
+                        key={e.id}
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'var(--color-bg-primary)',
+                          border: '1px solid var(--color-border-subtle)',
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-text-secondary)',
+                        }}
+                      >
+                        <span style={{ color: 'var(--color-accent-teal, #0d9488)' }}>→</span>{' '}
+                        {tgt?.data?.stage?.display_name || e.target}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Standard stage form ───────────────────────────────────────────────
 
   return (
     <div>
@@ -238,9 +473,275 @@ function StageForm({ node, onChange, onDelete }) {
         </select>
       </Field>
 
-      {/* Roles — only meaningful for review / approval stages, but we always
-          show the editor so authors can configure ai_analysis stages too (e.g.
-          attaching a notification role). */}
+      {/* ── Join Configuration ─────────────────────────────────────────── */}
+      {hasMultiplePredecessors && (
+        <div style={{ marginTop: 'var(--spacing-lg)' }}>
+          <SectionTitle>Join Configuration</SectionTitle>
+          <div
+            style={{
+              padding: 'var(--spacing-xs) var(--spacing-sm)',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'rgba(13,148,136,0.06)',
+              border: '1px solid rgba(13,148,136,0.2)',
+              color: 'var(--color-text-secondary)',
+              fontSize: '10px',
+              lineHeight: 1.4,
+              marginBottom: 'var(--spacing-sm)',
+            }}
+          >
+            This stage has {incomingPredecessors.length} predecessors. Configure which must complete
+            before this stage activates.
+          </div>
+          <Field label="Join mode" hint="How to wait for predecessor stages">
+            <select
+              className="form-select"
+              value={(stage.config || {}).join_mode || 'default'}
+              onChange={(e) =>
+                patch({
+                  config: {
+                    ...stage.config,
+                    join_mode: e.target.value,
+                    ...(e.target.value !== 'custom' ? { required_predecessors: undefined } : {}),
+                  },
+                })
+              }
+            >
+              {JOIN_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {(stage.config || {}).join_mode === 'custom' && (
+            <div style={{ marginBottom: 'var(--spacing-md)' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: '6px',
+                }}
+              >
+                Required predecessors
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {incomingPredecessors.map((pred) => {
+                  const selected = ((stage.config || {}).required_predecessors || []).includes(
+                    pred.stage_key
+                  );
+                  return (
+                    <label
+                      key={pred.stage_key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: selected
+                          ? 'rgba(13,148,136,0.08)'
+                          : 'var(--color-bg-primary)',
+                        border: `1px solid ${selected ? 'rgba(13,148,136,0.3)' : 'var(--color-border-subtle)'}`,
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--color-text-secondary)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(e) => {
+                          const cur = (stage.config || {}).required_predecessors || [];
+                          const next = e.target.checked
+                            ? [...cur, pred.stage_key]
+                            : cur.filter((k) => k !== pred.stage_key);
+                          patch({
+                            config: { ...stage.config, required_predecessors: next },
+                          });
+                        }}
+                      />
+                      {pred.display_name}
+                      <span
+                        style={{
+                          fontSize: '9px',
+                          fontFamily: 'monospace',
+                          color: 'var(--color-text-tertiary)',
+                        }}
+                      >
+                        ({pred.stage_key})
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-tertiary" style={{ margin: '4px 0 0', fontSize: '10px' }}>
+                Only checked predecessors must complete before this stage activates.
+              </p>
+            </div>
+          )}
+
+          {(stage.config || {}).join_mode === 'all_required' && (
+            <div
+              style={{
+                fontSize: '10px',
+                color: 'var(--color-accent-teal, #0d9488)',
+                fontWeight: 600,
+                marginBottom: 'var(--spacing-sm)',
+              }}
+            >
+              AND join: all {incomingPredecessors.length} predecessors must complete
+            </div>
+          )}
+          {(stage.config || {}).join_mode === 'any_required' && (
+            <div
+              style={{
+                fontSize: '10px',
+                color: 'var(--color-accent-teal, #0d9488)',
+                fontWeight: 600,
+                marginBottom: 'var(--spacing-sm)',
+              }}
+            >
+              OR join: first predecessor to complete activates this stage
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Stage behavior (review/approval) ──────────────────────────── */}
+      {isReviewable && (
+        <div style={{ marginTop: 'var(--spacing-lg)' }}>
+          <SectionTitle>Stage Behavior</SectionTitle>
+          <Field label="Approval gating">
+            <select
+              className="form-select"
+              value={(stage.config || {}).approval_mode || 'all_must_approve'}
+              onChange={(e) =>
+                patch({ config: { ...stage.config, approval_mode: e.target.value } })
+              }
+            >
+              {APPROVAL_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {(stage.config || {}).approval_mode === 'threshold' && (
+            <Field
+              label="Minimum approvals required"
+              hint={`${(stage.config || {}).approval_threshold || 1} of ${(stage.roles || []).filter((r) => r.is_required !== false).length} roles`}
+            >
+              <input
+                type="number"
+                className="form-input"
+                min={1}
+                value={(stage.config || {}).approval_threshold || 1}
+                onChange={(e) =>
+                  patch({
+                    config: {
+                      ...stage.config,
+                      approval_threshold: parseInt(e.target.value, 10) || 1,
+                    },
+                  })
+                }
+                style={{ width: '80px' }}
+              />
+            </Field>
+          )}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              marginBottom: 'var(--spacing-sm)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={!!(stage.config || {}).auto_advance}
+              onChange={(e) =>
+                patch({ config: { ...stage.config, auto_advance: e.target.checked } })
+              }
+            />
+            Auto-advance when gating rules are met
+          </label>
+        </div>
+      )}
+
+      {/* ── Send-back target (review/approval/ai_analysis) ────────────── */}
+      {showSendBack && (
+        <div style={{ marginTop: isReviewable ? 0 : 'var(--spacing-lg)' }}>
+          {!isReviewable && <SectionTitle>Stage Behavior</SectionTitle>}
+          <Field
+            label="Send back to"
+            hint="Where this stage sends the SoW when requesting revisions"
+          >
+            <select
+              className="form-select"
+              value={(stage.config || {}).send_back_target || 'previous'}
+              onChange={(e) =>
+                patch({ config: { ...stage.config, send_back_target: e.target.value } })
+              }
+            >
+              {SEND_BACK_TARGETS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+              {precedingStages
+                .filter((s) => s.stage_key !== 'draft') // already in SEND_BACK_TARGETS
+                .map((s) => (
+                  <option key={s.stage_key} value={s.stage_key}>
+                    {s.display_name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+        </div>
+      )}
+
+      {/* Failure stage toggle */}
+      <div style={{ marginTop: 'var(--spacing-sm)' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-secondary)',
+            cursor: 'pointer',
+            marginBottom: 'var(--spacing-sm)',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!!(stage.config || {}).is_failure}
+            onChange={(e) => patch({ config: { ...stage.config, is_failure: e.target.checked } })}
+          />
+          Failure / revision stage
+        </label>
+      </div>
+
+      {/* Reviewer instructions */}
+      <Field label="Reviewer instructions" hint="Shown to reviewers on the review page">
+        <textarea
+          className="form-input"
+          rows={3}
+          value={(stage.config || {}).reviewer_instructions || ''}
+          onChange={(e) =>
+            patch({ config: { ...stage.config, reviewer_instructions: e.target.value } })
+          }
+          placeholder="Describe what reviewers should focus on..."
+        />
+      </Field>
+
+      {/* ── Reviewer Roles ─────────────────────────────────────────────── */}
       <div style={{ marginTop: 'var(--spacing-lg)' }}>
         <div
           style={{
@@ -288,7 +789,7 @@ function StageForm({ node, onChange, onDelete }) {
   );
 }
 
-// ── RoleRow — compact editor for a single role on a stage ───────────────────
+// ── RoleRow ───────────────────────────────────────────────────────────────
 
 function RoleRow({ role, onUpdate, onRemove }) {
   const [custom, setCustom] = useState(!!role.role_key && !KNOWN_ROLES.includes(role.role_key));
@@ -431,6 +932,106 @@ function RoleRow({ role, onUpdate, onRemove }) {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Edge form (explicit override edges only) ────────────────────────────
+
+const CONDITION_COLORS = {
+  default: 'var(--color-text-secondary)',
+  on_approve: 'var(--color-success, #22c55e)',
+  on_reject: 'var(--color-error)',
+  on_send_back: 'var(--color-warning)',
+};
+
+function EdgeForm({ edge, onChange, onDelete, nodes }) {
+  const condition = edge.data?.condition || 'default';
+  const sourceNode = nodes.find((n) => n.id === edge.source);
+  const targetNode = nodes.find((n) => n.id === edge.target);
+  const sourceName = sourceNode?.data?.stage?.display_name || edge.source;
+  const targetName = targetNode?.data?.stage?.display_name || edge.target;
+
+  return (
+    <div>
+      {/* Color accent stripe */}
+      <div
+        style={{
+          height: '4px',
+          borderRadius: '2px',
+          backgroundColor: CONDITION_COLORS[condition] || CONDITION_COLORS.default,
+          marginBottom: 'var(--spacing-md)',
+        }}
+      />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 'var(--spacing-md)',
+        }}
+      >
+        <SectionTitle style={{ margin: 0 }}>Override Transition</SectionTitle>
+        <button
+          type="button"
+          onClick={onDelete}
+          title="Delete this transition"
+          style={{
+            background: 'none',
+            border: '1px solid rgba(220,38,38,0.3)',
+            color: 'var(--color-error)',
+            padding: '3px 10px',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--font-size-xs)',
+            cursor: 'pointer',
+          }}
+        >
+          Delete
+        </button>
+      </div>
+
+      {/* Info banner */}
+      <div
+        style={{
+          padding: 'var(--spacing-xs) var(--spacing-sm)',
+          borderRadius: 'var(--radius-sm)',
+          backgroundColor: 'rgba(251,191,36,0.06)',
+          border: '1px solid rgba(251,191,36,0.2)',
+          color: 'var(--color-text-secondary)',
+          fontSize: '10px',
+          lineHeight: 1.4,
+          marginBottom: 'var(--spacing-md)',
+        }}
+      >
+        This is a custom transition that overrides the default pipeline flow. Delete it to restore
+        implicit routing.
+      </div>
+
+      <Field label="From">
+        <input type="text" className="form-input" value={sourceName} disabled />
+      </Field>
+      <Field label="To">
+        <input type="text" className="form-input" value={targetName} disabled />
+      </Field>
+      <Field label="Condition" hint="When this transition is followed">
+        <select
+          className="form-select"
+          value={condition}
+          onChange={(e) => onChange({ condition: e.target.value })}
+        >
+          {TRANSITION_CONDITIONS.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p
+        className="text-xs text-tertiary"
+        style={{ marginTop: 'var(--spacing-xs)', lineHeight: 1.4, fontStyle: 'italic' }}
+      >
+        {TRANSITION_CONDITIONS.find((c) => c.value === condition)?.description || ''}
+      </p>
     </div>
   );
 }
