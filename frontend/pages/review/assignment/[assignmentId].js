@@ -28,6 +28,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../../lib/auth';
+import { roleLabel } from '../../../lib/workflowStages';
 import Spinner from '../../../components/Spinner';
 import ReviewChecklist from '../../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../../components/AISuggestionsPanel';
@@ -35,82 +36,12 @@ import WorkflowProgress from '../../../components/WorkflowProgress';
 import COATracker from '../../../components/COATracker';
 import AttachmentManager from '../../../components/AttachmentManager';
 import ActivityLog from '../../../components/ActivityLog';
+import DecisionModal from '../../../components/review/DecisionModal';
+import SoWContentPanel from '../../../components/sow/SoWContentPanel';
+import useAutoRefreshFetch from '../../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../../lib/format';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-
-const CONTENT_LABELS = {
-  executiveSummary: 'Executive Summary',
-  projectScope: 'Project Scope',
-  scope: 'Project Scope',
-  deliverables: 'Deliverables',
-  assumptions: 'Assumptions',
-  risks: 'Risks',
-  pricing: 'Pricing',
-  teamStructure: 'Team Structure',
-  supportTransition: 'Support & Transition',
-  agileApproach: 'Agile Approach',
-  productBacklog: 'Product Backlog',
-  sureStepMethodology: 'Sure Step Methodology',
-  phasesDeliverables: 'Phases & Deliverables',
-  dataMigration: 'Data Migration',
-  testingStrategy: 'Testing Strategy',
-  supportHypercare: 'Support & Hypercare',
-  waterfallApproach: 'Waterfall Approach',
-  phasesMilestones: 'Phases & Milestones',
-  cloudAdoptionScope: 'Cloud Adoption Scope',
-  migrationStrategy: 'Migration Strategy',
-  workloadAssessment: 'Workload Assessment',
-  securityCompliance: 'Security & Compliance',
-  supportOperations: 'Support & Operations',
-};
-
-const CONTENT_TAB_GROUPS = [
-  { label: 'Overview', keys: ['executiveSummary'] },
-  { label: 'Scope', keys: ['projectScope', 'scope', 'cloudAdoptionScope'] },
-  {
-    label: 'Approach',
-    keys: [
-      'agileApproach',
-      'productBacklog',
-      'sureStepMethodology',
-      'waterfallApproach',
-      'migrationStrategy',
-      'workloadAssessment',
-    ],
-  },
-  {
-    label: 'Deliverables',
-    keys: [
-      'deliverables',
-      'phasesDeliverables',
-      'phasesMilestones',
-      'dataMigration',
-      'testingStrategy',
-    ],
-  },
-  {
-    label: 'Team & Support',
-    keys: [
-      'teamStructure',
-      'supportTransition',
-      'supportHypercare',
-      'supportOperations',
-      'securityCompliance',
-    ],
-  },
-  { label: 'Pricing', keys: ['pricing', 'assumptions', 'risks'] },
-];
-
-const ROLE_LABELS = {
-  consultant: 'Consultant',
-  'solution-architect': 'Solution Architect',
-  'sqa-reviewer': 'SQA Reviewer',
-  cpl: 'Customer Practice Lead',
-  cdp: 'Customer Delivery Partner',
-  'delivery-manager': 'Delivery Manager',
-  'system-admin': 'System Admin',
-};
 
 const TERMINAL_STATUSES_REDIRECT = {
   approved: (id) => `/finalize/${id}`,
@@ -131,329 +62,6 @@ function matchingAssignmentKeys(stage) {
   return keys;
 }
 
-function renderValue(val, depth = 0) {
-  if (val == null) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
-  if (typeof val === 'string') {
-    return (
-      <p
-        style={{
-          margin: '0 0 8px',
-          lineHeight: 'var(--line-height-relaxed)',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
-        {val}
-      </p>
-    );
-  }
-  if (Array.isArray(val)) {
-    if (val.length === 0) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
-    return (
-      <ul style={{ margin: '0 0 8px', paddingLeft: '20px' }}>
-        {val.map((item, i) => (
-          <li key={i} style={{ marginBottom: '4px' }}>
-            {typeof item === 'object' ? renderValue(item, depth + 1) : String(item)}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if (typeof val === 'object') {
-    return (
-      <div style={{ paddingLeft: depth > 0 ? '12px' : '0' }}>
-        {Object.entries(val).map(([k, v]) => (
-          <div key={k} style={{ marginBottom: '8px' }}>
-            <span
-              style={{
-                fontSize: 'var(--font-size-xs)',
-                color: 'var(--color-text-tertiary)',
-                textTransform: 'capitalize',
-                display: 'block',
-                marginBottom: '2px',
-              }}
-            >
-              {k.replace(/([A-Z])/g, ' $1').trim()}
-            </span>
-            {renderValue(v, depth + 1)}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return <span>{String(val)}</span>;
-}
-
-// ─── SoW content panel (read-only, tabbed) ──────────────────────────────────
-
-function SoWContentPanel({ sow, activeTab, onTabChange }) {
-  const content = sow?.content || {};
-  const tabs = CONTENT_TAB_GROUPS.filter((g) => g.keys.some((k) => content[k] != null));
-
-  if (tabs.length === 0) {
-    return (
-      <div style={{ padding: 'var(--spacing-xl)', color: 'var(--color-text-tertiary)' }}>
-        No structured content available for this SoW.
-      </div>
-    );
-  }
-
-  const currentTab = tabs.find((t) => t.label === activeTab) || tabs[0];
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          display: 'flex',
-          gap: '2px',
-          borderBottom: '1px solid var(--color-border-default)',
-          overflowX: 'auto',
-          flexShrink: 0,
-        }}
-      >
-        {tabs.map((tab) => {
-          const active = currentTab.label === tab.label;
-          return (
-            <button
-              key={tab.label}
-              onClick={() => onTabChange(tab.label)}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '8px 14px',
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: active ? 'var(--font-weight-semibold)' : 'normal',
-                color: active
-                  ? 'var(--color-accent-purple, #7c3aed)'
-                  : 'var(--color-text-secondary)',
-                borderBottom: active
-                  ? '2px solid var(--color-accent-purple, #7c3aed)'
-                  : '2px solid transparent',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                marginBottom: '-1px',
-              }}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-xl)' }}>
-        {currentTab.keys
-          .filter((k) => content[k] != null)
-          .map((k) => (
-            <div key={k} style={{ marginBottom: 'var(--spacing-xl)' }}>
-              <h4
-                style={{
-                  margin: '0 0 var(--spacing-sm)',
-                  fontSize: 'var(--font-size-sm)',
-                  fontWeight: 'var(--font-weight-semibold)',
-                  color: 'var(--color-text-primary)',
-                  borderBottom: '1px solid var(--color-border-default)',
-                  paddingBottom: '6px',
-                }}
-              >
-                {CONTENT_LABELS[k] || k}
-              </h4>
-              <div
-                style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}
-              >
-                {renderValue(content[k])}
-              </div>
-            </div>
-          ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Decision modal ─────────────────────────────────────────────────────────
-
-function DecisionModal({ type, onClose, onSubmit, submitting }) {
-  const [comments, setComments] = useState('');
-  const [conditions, setConditions] = useState(['']);
-
-  const isReject = type === 'rejected';
-  const isConditional = type === 'approved-with-conditions';
-  const title = isReject
-    ? 'Reject SoW'
-    : isConditional
-      ? 'Approve with Conditions'
-      : 'Confirm Approval';
-
-  function handleSubmit() {
-    if (isReject && !comments.trim()) return;
-    if (isConditional && conditions.every((c) => !c.trim())) return;
-    onSubmit({
-      comments: comments.trim() || null,
-      conditions: isConditional ? conditions.filter((c) => c.trim()) : null,
-    });
-  }
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-        padding: 'var(--spacing-xl)',
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          backgroundColor: 'var(--color-bg-primary)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 'var(--spacing-2xl)',
-          maxWidth: '480px',
-          width: '100%',
-          boxShadow: 'var(--shadow-xl)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 var(--spacing-md)', fontSize: 'var(--font-size-lg)' }}>
-          {title}
-        </h3>
-
-        <div style={{ marginBottom: 'var(--spacing-md)' }}>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 'var(--font-size-sm)',
-              fontWeight: 'var(--font-weight-semibold)',
-              marginBottom: 'var(--spacing-xs)',
-            }}
-          >
-            {isReject ? 'Reason for rejection *' : 'Comments'}
-          </label>
-          <textarea
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            placeholder={
-              isReject
-                ? 'Describe the issues that need to be addressed…'
-                : 'Optional comments for the author…'
-            }
-            rows={4}
-            style={{
-              width: '100%',
-              padding: 'var(--spacing-sm)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border-default)',
-              backgroundColor: 'var(--color-bg-secondary)',
-              color: 'var(--color-text-primary)',
-              fontSize: 'var(--font-size-sm)',
-              fontFamily: 'inherit',
-              resize: 'vertical',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        {isConditional && (
-          <div style={{ marginBottom: 'var(--spacing-md)' }}>
-            <label
-              style={{
-                display: 'block',
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: 'var(--font-weight-semibold)',
-                marginBottom: 'var(--spacing-xs)',
-              }}
-            >
-              Conditions *
-            </label>
-            {conditions.map((cond, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  gap: 'var(--spacing-xs)',
-                  marginBottom: 'var(--spacing-xs)',
-                }}
-              >
-                <input
-                  type="text"
-                  value={cond}
-                  onChange={(e) =>
-                    setConditions((c) => c.map((x, j) => (j === i ? e.target.value : x)))
-                  }
-                  placeholder={`Condition ${i + 1}`}
-                  style={{
-                    flex: 1,
-                    padding: 'var(--spacing-xs) var(--spacing-sm)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-default)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    fontSize: 'var(--font-size-sm)',
-                    fontFamily: 'inherit',
-                  }}
-                />
-                {conditions.length > 1 && (
-                  <button
-                    onClick={() => setConditions((c) => c.filter((_, j) => j !== i))}
-                    style={{
-                      background: 'none',
-                      border: '1px solid var(--color-border-default)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '4px 8px',
-                      cursor: 'pointer',
-                      color: 'var(--color-error)',
-                      fontSize: 'var(--font-size-xs)',
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              onClick={() => setConditions((c) => [...c, ''])}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '4px 0',
-                cursor: 'pointer',
-                color: 'var(--color-accent-purple, #7c3aed)',
-                fontSize: 'var(--font-size-xs)',
-              }}
-            >
-              + Add condition
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
-          <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            className={`btn btn-sm ${isReject ? 'btn-danger' : 'btn-primary'}`}
-            style={
-              isReject
-                ? { backgroundColor: 'var(--color-error)', color: '#fff', border: 'none' }
-                : {}
-            }
-            onClick={handleSubmit}
-            disabled={
-              submitting ||
-              (isReject && !comments.trim()) ||
-              (isConditional && conditions.every((c) => !c.trim()))
-            }
-          >
-            {submitting ? 'Submitting…' : isReject ? 'Reject' : 'Confirm'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main page ──────────────────────────────────────────────────────────────
 
 export default function AssignmentReviewPage() {
@@ -461,24 +69,17 @@ export default function AssignmentReviewPage() {
   const { assignmentId } = router.query;
   const { user, authFetch } = useAuth();
 
-  // The full checklist response also acts as our "assignment" record — it
-  // carries assignment_id, sow_id, user_id, reviewer_role, stage, status.
-  const [checklist, setChecklist] = useState(null);
-  const [sow, setSow] = useState(null);
-  const [workflow, setWorkflow] = useState(null);
+  // User-mutated state — re-seeded from the loaded payload on every refresh.
   const [responses, setResponses] = useState([]);
-  const [reviewStatus, setReviewStatus] = useState(null);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [comments, setComments] = useState('');
   const [contentTab, setContentTab] = useState('Overview');
 
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runningAI, setRunningAI] = useState(false);
   const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions'
   const [toast, setToast] = useState(null);
-  const [error, setError] = useState(null);
   const [progressRefreshKey, setProgressRefreshKey] = useState(0);
   const [activeReviewTab, setActiveReviewTab] = useState('review');
   const [coaSummary, setCoaSummary] = useState(null);
@@ -488,9 +89,82 @@ export default function AssignmentReviewPage() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
+  // ── Loader: assignment checklist → sow + workflow + status ──────────────
+  // The two-stage shape lives inside the loader so the hook only sees one
+  // function.  The signal is forwarded through every fetch so cancellation
+  // (unmount, refresh, deps change) aborts whichever request is in flight.
+  const load = useCallback(
+    async (signal) => {
+      // Stage 1: assignment-scoped checklist.  Its response carries
+      // sow_id, user_id, reviewer_role, stage, and status — everything we
+      // need to drive the rest of the page.
+      const checklistRes = await authFetch(`/api/review/assignment/${assignmentId}/checklist`, {
+        signal,
+      });
+      if (checklistRes.status === 404) {
+        throw new Error('Assignment not found or you do not have access.');
+      }
+      if (!checklistRes.ok) {
+        throw new Error(`Checklist load failed (${checklistRes.status})`);
+      }
+      const checkData = await checklistRes.json();
+      setResponses(checkData.saved_responses || []);
+
+      const loadedSowId = checkData.sow_id;
+
+      // Stage 2: fan out to the SoW, workflow snapshot, and review status.
+      const [sowRes, workflowRes, statusRes] = await Promise.all([
+        authFetch(`/api/sow/${loadedSowId}`, { signal }),
+        authFetch(`/api/workflow/sow/${loadedSowId}`, { signal }),
+        authFetch(`/api/review/${loadedSowId}/status`, { signal }),
+      ]);
+
+      if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
+      const sowData = await sowRes.json();
+
+      // Terminal-state redirect — the assignment review page only makes
+      // sense while the SoW is mid-pipeline.  Throwing a sentinel here
+      // would muddy error rendering, so route imperatively and return a
+      // null payload that the render path treats as "still loading".
+      const redirect = TERMINAL_STATUSES_REDIRECT[sowData.status];
+      if (redirect) {
+        router.replace(redirect(loadedSowId));
+        return null;
+      }
+
+      const workflowData = workflowRes.ok ? await workflowRes.json() : null;
+      const statusData = statusRes.ok ? await statusRes.json() : null;
+
+      if (sowData.ai_suggestion_id) {
+        const aiRes = await authFetch(`/api/sow/${loadedSowId}/ai-analyze`, { signal });
+        if (aiRes.ok) setAiAnalysis(await aiRes.json());
+      }
+
+      return {
+        checklist: checkData,
+        sow: sowData,
+        workflow: workflowData,
+        reviewStatus: statusData,
+      };
+    },
+    [assignmentId, authFetch, router]
+  );
+
+  const { data, loading, error, refresh, setData } = useAutoRefreshFetch({
+    load,
+    enabled: Boolean(assignmentId && user),
+    deps: [assignmentId, user],
+  });
+
+  const checklist = data?.checklist ?? null;
+  const sow = data?.sow ?? null;
+  const workflow = data?.workflow ?? null;
+  const reviewStatus = data?.reviewStatus ?? null;
   const sowId = checklist?.sow_id;
 
-  // Re-pull SoW + review status without touching checklist state.
+  // Light refresh after a save: re-pull sow + status without re-fetching the
+  // checklist (which would clobber the user's in-flight checklist edits).
+  // Uses the hook's `setData` to splice fresh values into the loaded payload.
   const refreshProgress = useCallback(async () => {
     if (!sowId) return;
     try {
@@ -500,104 +174,41 @@ export default function AssignmentReviewPage() {
       ]);
       if (sowRes.ok) {
         const fresh = await sowRes.json();
-        setSow(fresh);
         const redirect = TERMINAL_STATUSES_REDIRECT[fresh.status];
         if (redirect) {
           router.replace(redirect(sowId));
           return;
         }
+        const freshStatus = statusRes.ok ? await statusRes.json() : null;
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            sow: fresh,
+            // Only overwrite when the status fetch actually returned data;
+            // a transient 5xx shouldn't blank out the visible status pill.
+            ...(freshStatus !== null ? { reviewStatus: freshStatus } : null),
+          };
+        });
       }
-      if (statusRes.ok) setReviewStatus(await statusRes.json());
       setProgressRefreshKey((k) => k + 1);
     } catch {
       // Non-fatal
     }
-  }, [sowId, authFetch, router]);
+  }, [sowId, authFetch, router, setData]);
 
   // ── COA summary for tab badge ──────────────────────────────────────────
   useEffect(() => {
     if (!sowId) return;
-    let cancelled = false;
-    authFetch(`/api/coa/sow/${sowId}/summary`)
+    const ctrl = new AbortController();
+    authFetch(`/api/coa/sow/${sowId}/summary`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled) setCoaSummary(data);
+      .then((d) => {
+        if (!ctrl.signal.aborted) setCoaSummary(d);
       })
       .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [sowId, progressRefreshKey, authFetch]);
-
-  // ── Initial load: checklist (assignment-scoped) → sow + workflow + status ─
-  useEffect(() => {
-    if (!assignmentId || !user) return;
-
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        // Load the assignment-scoped checklist first.  Its response includes
-        // sow_id, user_id, reviewer_role, stage, and status — everything we
-        // need to drive the rest of the page.
-        const checklistRes = await authFetch(`/api/review/assignment/${assignmentId}/checklist`);
-        if (cancelled) return;
-
-        if (checklistRes.status === 404) {
-          throw new Error('Assignment not found or you do not have access.');
-        }
-        if (!checklistRes.ok) {
-          throw new Error(`Checklist load failed (${checklistRes.status})`);
-        }
-        const checkData = await checklistRes.json();
-        setChecklist(checkData);
-        setResponses(checkData.saved_responses || []);
-
-        const loadedSowId = checkData.sow_id;
-
-        // Now fan out to the SoW, workflow snapshot, and review status.
-        const [sowRes, workflowRes, statusRes] = await Promise.all([
-          authFetch(`/api/sow/${loadedSowId}`),
-          authFetch(`/api/workflow/sow/${loadedSowId}`),
-          authFetch(`/api/review/${loadedSowId}/status`),
-        ]);
-        if (cancelled) return;
-
-        if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
-        const sowData = await sowRes.json();
-
-        const redirect = TERMINAL_STATUSES_REDIRECT[sowData.status];
-        if (redirect) {
-          router.replace(redirect(loadedSowId));
-          return;
-        }
-
-        setSow(sowData);
-
-        if (workflowRes.ok) {
-          setWorkflow(await workflowRes.json());
-        }
-        if (statusRes.ok) {
-          setReviewStatus(await statusRes.json());
-        }
-
-        if (sowData.ai_suggestion_id) {
-          const aiRes = await authFetch(`/api/sow/${loadedSowId}/ai-analyze`);
-          if (aiRes.ok) setAiAnalysis(await aiRes.json());
-        }
-      } catch (err) {
-        if (!cancelled) setError(err.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [assignmentId, user, authFetch, router]);
 
   // ── Resolve the current workflow stage from the SoW status ─────────────
   //
@@ -679,8 +290,16 @@ export default function AssignmentReviewPage() {
       setModal(null);
 
       // Mark this assignment as completed locally so the UI immediately
-      // flips to read-only and shows the success card.
-      setChecklist((prev) => (prev ? { ...prev, assignment_status: 'completed', decision } : prev));
+      // flips to read-only and shows the success card.  Optimistic update
+      // through the hook's setData — refreshProgress() below will reconcile.
+      setData((prev) =>
+        prev?.checklist
+          ? {
+              ...prev,
+              checklist: { ...prev.checklist, assignment_status: 'completed', decision },
+            }
+          : prev
+      );
 
       if (resBody.auto_advanced) {
         showToast('Review submitted — automatically advanced to next stage');
@@ -1135,7 +754,7 @@ export default function AssignmentReviewPage() {
                             color: 'var(--color-text-primary)',
                           }}
                         >
-                          {checklist.display_name || ROLE_LABELS[actingRole] || actingRole}
+                          {checklist.display_name || roleLabel(actingRole)}
                           {isSystemAdmin && (
                             <span
                               style={{

@@ -29,7 +29,7 @@
  * `requires_designated_reviewer` is left empty.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../lib/auth';
 
 export default function ReviewerAssignmentPanel({
@@ -48,49 +48,43 @@ export default function ReviewerAssignmentPanel({
   // Cache of role_key → list of users (lazy-loaded per role)
   const [usersByRole, setUsersByRole] = useState({});
   const [usersLoading, setUsersLoading] = useState({});
+  // Roles we've already requested (fetched or in-flight).  Held as a ref so
+  // re-renders don't re-trigger the preload effect after every state update.
+  const requestedRolesRef = useRef(new Set());
 
   // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!sowId) return;
-    let cancelled = false;
+    if (!sowId) return undefined;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setLoading(true);
     setError(null);
-    authFetch(`/api/sow/${sowId}/reviewers`)
+    authFetch(`/api/sow/${sowId}/reviewers`, { signal })
       .then(async (r) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
         if (!r.ok) {
           const text = await r.text().catch(() => '');
           throw new Error(text || `Failed to load reviewers (${r.status})`);
         }
         const data = await r.json();
+        if (signal.aborted) return;
         setSlots(Array.isArray(data) ? data : []);
       })
       .catch((e) => {
-        if (!cancelled) setError(e.message || 'Failed to load reviewers');
+        if (e?.name === 'AbortError' || signal.aborted) return;
+        setError(e.message || 'Failed to load reviewers');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [sowId, authFetch]);
-
-  // ── Eagerly preload the user list for every distinct role on mount ─────
-  // (Small payloads, and the dropdown selected-value lookup is cleaner if
-  //  we have the user list available even before the user opens the menu.)
-  useEffect(() => {
-    if (loading || error) return;
-    const distinctRoles = Array.from(new Set(slots.map((s) => s.role_key)));
-    distinctRoles.forEach((roleKey) => {
-      if (usersByRole[roleKey] || usersLoading[roleKey]) return;
-      loadUsersForRole(roleKey);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, error, slots]);
 
   const loadUsersForRole = useCallback(
     async (roleKey) => {
+      // Mark as requested before kicking off the fetch so concurrent calls
+      // for the same role short-circuit at the ref check below.
+      requestedRolesRef.current.add(roleKey);
       setUsersLoading((m) => ({ ...m, [roleKey]: true }));
       try {
         const r = await authFetch(`/api/users?role=${encodeURIComponent(roleKey)}`);
@@ -99,12 +93,31 @@ export default function ReviewerAssignmentPanel({
         setUsersByRole((m) => ({ ...m, [roleKey]: Array.isArray(list) ? list : [] }));
       } catch {
         setUsersByRole((m) => ({ ...m, [roleKey]: [] }));
+        // Allow a retry on next render if the fetch fails.
+        requestedRolesRef.current.delete(roleKey);
       } finally {
         setUsersLoading((m) => ({ ...m, [roleKey]: false }));
       }
     },
     [authFetch]
   );
+
+  // ── Eagerly preload the user list for every distinct role on mount ─────
+  // (Small payloads, and the dropdown selected-value lookup is cleaner if
+  //  we have the user list available even before the user opens the menu.)
+  //
+  // Dedup against ``requestedRolesRef`` rather than ``usersByRole`` /
+  // ``usersLoading`` so the effect doesn't re-fire every time those state
+  // maps are updated by the in-flight fetches it just kicked off — that
+  // pattern was the reason this previously needed an ``eslint-disable``.
+  useEffect(() => {
+    if (loading || error) return;
+    const distinctRoles = Array.from(new Set(slots.map((s) => s.role_key)));
+    distinctRoles.forEach((roleKey) => {
+      if (requestedRolesRef.current.has(roleKey)) return;
+      loadUsersForRole(roleKey);
+    });
+  }, [loading, error, slots, loadUsersForRole]);
 
   // ── Group slots by stage for rendering ──────────────────────────────────
   const stageGroups = useMemo(() => {

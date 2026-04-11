@@ -60,34 +60,52 @@ export default function COATracker({ sowId, readOnly = false, authFetch, onStatu
   const [waiving, setWaiving] = useState(null); // coa_id being waived
   const [resolutionNote, setResolutionNote] = useState('');
 
-  const load = useCallback(async () => {
-    if (!sowId || !authFetch) return;
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (filterStatus) params.set('status', filterStatus);
-      if (filterCategory) params.set('category', filterCategory);
+  // ``signal`` is optional — when called manually after a mutation we don't
+  // need to cancel.  When invoked from the mount effect we pass the
+  // controller's signal so unmount or filter-change cancels the in-flight
+  // network request and discards stale state writes.
+  const load = useCallback(
+    async (signal) => {
+      if (!sowId || !authFetch) return;
+      try {
+        setLoading(true);
+        const params = new URLSearchParams();
+        if (filterStatus) params.set('status', filterStatus);
+        if (filterCategory) params.set('category', filterCategory);
 
-      const [listRes, summaryRes] = await Promise.all([
-        authFetch(`/api/coa/sow/${sowId}?${params}`),
-        authFetch(`/api/coa/sow/${sowId}/summary`),
-      ]);
+        const [listRes, summaryRes] = await Promise.all([
+          authFetch(`/api/coa/sow/${sowId}?${params}`, { signal }),
+          authFetch(`/api/coa/sow/${sowId}/summary`, { signal }),
+        ]);
 
-      if (listRes.ok) {
-        const data = await listRes.json();
-        data.sort((a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9));
-        setCoas(data);
+        if (signal?.aborted) return;
+        if (listRes.ok) {
+          const data = await listRes.json();
+          data.sort(
+            (a, b) => (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9)
+          );
+          if (signal?.aborted) return;
+          setCoas(data);
+        }
+        if (summaryRes.ok) {
+          const summaryData = await summaryRes.json();
+          if (signal?.aborted) return;
+          setSummary(summaryData);
+        }
+      } catch (e) {
+        if (e?.name === 'AbortError' || signal?.aborted) return;
+        setError(e.message);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
       }
-      if (summaryRes.ok) setSummary(await summaryRes.json());
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [sowId, authFetch, filterStatus, filterCategory]);
+    },
+    [sowId, authFetch, filterStatus, filterCategory]
+  );
 
   useEffect(() => {
-    load();
+    const ctrl = new AbortController();
+    load(ctrl.signal);
+    return () => ctrl.abort();
   }, [load]);
 
   const handleResolve = async (coaId) => {

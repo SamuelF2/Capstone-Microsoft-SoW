@@ -28,27 +28,26 @@ export default function WorkflowReadOnlySummary({ sowId }) {
 
   useEffect(() => {
     if (!sowId) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setState({ loading: true, instance: null, error: null });
-    authFetch(`/api/workflow/sow/${sowId}`)
+    authFetch(`/api/workflow/sow/${sowId}`, { signal })
       .then(async (r) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
         if (r.status === 404) {
           setState({ loading: false, instance: null, error: 'no-instance' });
           return;
         }
         if (!r.ok) throw new Error(`Failed to load workflow (${r.status})`);
         const data = await r.json();
+        if (signal.aborted) return;
         setState({ loading: false, instance: data, error: null });
       })
       .catch((e) => {
-        if (!cancelled) {
-          setState({ loading: false, instance: null, error: e.message || 'Failed to load' });
-        }
+        if (e?.name === 'AbortError' || signal.aborted) return;
+        setState({ loading: false, instance: null, error: e.message || 'Failed to load' });
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [sowId, authFetch]);
 
   if (state.loading) {

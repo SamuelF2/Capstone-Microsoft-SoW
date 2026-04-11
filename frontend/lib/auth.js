@@ -13,14 +13,17 @@ import { getMsalInstance, loginRequest } from './msalConfig';
 
 const AuthContext = createContext(null);
 
-// localStorage key used to persist the testing-only role override.
-// Cleared on logout or via the "Clear override" button in Account settings.
+// sessionStorage key used to persist the testing-only role override.
+// Cleared on logout, when the tab closes, or via the "Clear override"
+// button in Account settings.  We deliberately use sessionStorage rather
+// than localStorage so a stray test override can't bleed across browser
+// sessions or follow a user back into a real review queue weeks later.
 const ROLE_OVERRIDE_KEY = 'role-override';
 
 function readStoredRoleOverride() {
   if (typeof window === 'undefined') return null;
   try {
-    return window.localStorage.getItem(ROLE_OVERRIDE_KEY) || null;
+    return window.sessionStorage.getItem(ROLE_OVERRIDE_KEY) || null;
   } catch {
     return null;
   }
@@ -29,8 +32,8 @@ function readStoredRoleOverride() {
 function writeStoredRoleOverride(role) {
   if (typeof window === 'undefined') return;
   try {
-    if (role) window.localStorage.setItem(ROLE_OVERRIDE_KEY, role);
-    else window.localStorage.removeItem(ROLE_OVERRIDE_KEY);
+    if (role) window.sessionStorage.setItem(ROLE_OVERRIDE_KEY, role);
+    else window.sessionStorage.removeItem(ROLE_OVERRIDE_KEY);
   } catch {
     // Ignore storage errors (private mode, quota, etc.)
   }
@@ -44,6 +47,11 @@ export function AuthProvider({ children }) {
   const roleOverrideRef = useRef(null);
   const msalRef = useRef(getMsalInstance());
   const tokenRef = useRef(null);
+  // Single in-flight token acquisition shared across concurrent callers.
+  // Without this, ten parallel `authFetch()` calls each trigger their own
+  // `acquireTokenSilent` round-trip and (worse) can race to open ten popups
+  // when the silent path falls back to interactive.
+  const tokenPromiseRef = useRef(null);
 
   // Apply the stored role override to a freshly loaded user object.
   const applyRoleOverride = useCallback((rawUser) => {
@@ -56,7 +64,7 @@ export function AuthProvider({ children }) {
   // Uses the ID token (not a custom API access token) for backend auth.
   // The ID token contains all claims the backend needs (oid, name, email, roles)
   // and avoids the need to configure "Expose an API" scopes in the App Registration.
-  const _acquireToken = async (msal) => {
+  const _acquireTokenInner = async (msal) => {
     const account = msal.getActiveAccount();
     if (!account) return tokenRef.current; // fallback to cached token
 
@@ -82,6 +90,18 @@ export function AuthProvider({ children }) {
       }
       return tokenRef.current;
     }
+  };
+
+  // Public, deduplicated token acquisition.  All concurrent callers share
+  // the same in-flight promise; once it resolves, the slot is cleared so the
+  // next request will trigger a fresh acquire.
+  const _acquireToken = (msal) => {
+    if (tokenPromiseRef.current) return tokenPromiseRef.current;
+    const p = _acquireTokenInner(msal).finally(() => {
+      tokenPromiseRef.current = null;
+    });
+    tokenPromiseRef.current = p;
+    return p;
   };
 
   // ── Initialize MSAL and rehydrate session ─────────────────────────────────
@@ -171,17 +191,58 @@ export function AuthProvider({ children }) {
   /**
    * Fetch wrapper that automatically acquires and attaches the Entra
    * ID token as a Bearer header.
+   *
+   * On a 401 we make exactly one attempt to refresh the token and retry the
+   * request — covers the common case of an expired ID token.  If the retry
+   * also returns 401 (or the refresh fails), we drop client state and bounce
+   * the user to the login page so they don't get stuck on a dead screen
+   * spamming failed requests.
    */
   const authFetch = useCallback(
     async (url, options = {}) => {
       const token = await getAccessToken();
-      return fetch(url, {
-        ...options,
-        headers: {
-          ...options.headers,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
+      const doFetch = (t) =>
+        fetch(url, {
+          ...options,
+          headers: {
+            ...options.headers,
+            ...(t ? { Authorization: `Bearer ${t}` } : {}),
+          },
+        });
+
+      let res = await doFetch(token);
+      if (res.status !== 401) return res;
+
+      // First 401 — force a token refresh and retry once.
+      tokenRef.current = null;
+      tokenPromiseRef.current = null;
+      let fresh = null;
+      try {
+        fresh = await getAccessToken();
+      } catch {
+        fresh = null;
+      }
+      if (fresh && fresh !== token) {
+        res = await doFetch(fresh);
+        if (res.status !== 401) return res;
+      }
+
+      // Still 401 → auth is genuinely dead.  Clear local state and redirect.
+      try {
+        tokenRef.current = null;
+        roleOverrideRef.current = null;
+        writeStoredRoleOverride(null);
+        setUser(null);
+      } catch {
+        // ignore
+      }
+      if (typeof window !== 'undefined') {
+        const here = window.location.pathname + window.location.search;
+        if (!here.startsWith('/login')) {
+          window.location.assign(`/login?next=${encodeURIComponent(here)}`);
+        }
+      }
+      return res;
     },
     [getAccessToken]
   );

@@ -521,6 +521,29 @@ def _parse_workflow_data(raw: Any) -> dict:
     return {}
 
 
+def _row_to_sow_workflow_response(row) -> SoWWorkflowResponse:
+    """Map a ``sow_workflow`` row to the public response model.
+
+    Handles JSONB fields (``workflow_data`` and ``parallel_branches``) which
+    asyncpg returns as either a parsed dict or a raw string depending on
+    codec configuration.  Used by every endpoint that reads or writes the
+    sow_workflow table so the JSONB-parsing dance lives in exactly one place.
+    """
+    pb_raw = row.get("parallel_branches")
+    if isinstance(pb_raw, str):
+        pb_raw = json.loads(pb_raw)
+    return SoWWorkflowResponse(
+        id=row["id"],
+        sow_id=row["sow_id"],
+        template_id=row["template_id"],
+        current_stage=row["current_stage"],
+        workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
+        parallel_branches=pb_raw if isinstance(pb_raw, dict) else None,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 @router.get(
     "/sow/{sow_id}",
     response_model=SoWWorkflowResponse,
@@ -536,19 +559,7 @@ async def get_sow_workflow(sow_id: int, current_user: CurrentUser) -> SoWWorkflo
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No workflow instance found for this SoW",
         )
-    pb_raw = row.get("parallel_branches")
-    if isinstance(pb_raw, str):
-        pb_raw = json.loads(pb_raw)
-    return SoWWorkflowResponse(
-        id=row["id"],
-        sow_id=row["sow_id"],
-        template_id=row["template_id"],
-        current_stage=row["current_stage"],
-        workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
-        parallel_branches=pb_raw if isinstance(pb_raw, dict) else None,
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
+    return _row_to_sow_workflow_response(row)
 
 
 @router.post(
@@ -593,19 +604,7 @@ async def create_sow_workflow(
             json.dumps(snapshot),
         )
 
-    pb_raw2 = row.get("parallel_branches")
-    if isinstance(pb_raw2, str):
-        pb_raw2 = json.loads(pb_raw2)
-    return SoWWorkflowResponse(
-        id=row["id"],
-        sow_id=row["sow_id"],
-        template_id=row["template_id"],
-        current_stage=row["current_stage"],
-        workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
-        parallel_branches=pb_raw2 if isinstance(pb_raw2, dict) else None,
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
+    return _row_to_sow_workflow_response(row)
 
 
 @router.put(
@@ -698,16 +697,4 @@ async def update_sow_workflow(
         # Re-fetch in case the recheck above bumped current_stage.
         row = await conn.fetchrow("SELECT * FROM sow_workflow WHERE sow_id = $1", sow_id)
 
-    pb_raw3 = row.get("parallel_branches")
-    if isinstance(pb_raw3, str):
-        pb_raw3 = json.loads(pb_raw3)
-    return SoWWorkflowResponse(
-        id=row["id"],
-        sow_id=row["sow_id"],
-        template_id=row["template_id"],
-        current_stage=row["current_stage"],
-        workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
-        parallel_branches=pb_raw3 if isinstance(pb_raw3, dict) else None,
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-    )
+    return _row_to_sow_workflow_response(row)

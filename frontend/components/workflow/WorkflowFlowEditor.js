@@ -35,6 +35,7 @@ import {
   validateGraph,
   slugifyKey,
   deriveEdgeStyle,
+  uniqueKey,
 } from '../../lib/workflowEditor';
 import {
   ANCHOR_KEYS,
@@ -42,11 +43,27 @@ import {
   isParallelGateway,
   TRANSITION_CONDITIONS,
 } from '../../lib/workflowStages';
+import { EDGE_STYLES } from '../../lib/workflowColors';
 
 const nodeTypes = {
   stage: StageNode,
   parallel_gateway: ParallelGatewayNode,
   rejected_indicator: RejectedIndicatorNode,
+};
+
+// Stable references hoisted out of the render function so React Flow's
+// internal memoization (and any React.memo'd children) don't see fresh
+// object identity on every parent render.  All four of these would otherwise
+// be re-allocated on every keystroke or drag event.
+const FIT_VIEW_OPTIONS = { padding: 0.2 };
+const PRO_OPTIONS = { hideAttribution: true };
+const MINIMAP_STYLE = { backgroundColor: 'var(--color-bg-secondary)' };
+const _miniMapNodeColor = (n) => {
+  if (n.type === 'rejected_indicator') return '#ef4444';
+  const st = n.data?.stage?.stage_type;
+  if (st === 'approval') return '#7c3aed';
+  if (st === 'parallel_gateway') return '#0d9488';
+  return '#64748b';
 };
 
 export default function WorkflowFlowEditor({
@@ -62,6 +79,14 @@ export default function WorkflowFlowEditor({
 
   // Preserved on_condition_met transitions (backend-only, not rendered)
   const preservedTransitionsRef = useRef([]);
+
+  // Mirror ``nodes`` in a ref so callbacks can read the freshest list without
+  // taking ``nodes`` as a useCallback dep — that dep would change identity on
+  // every drag/typing keystroke, invalidating ReactFlow's prop memoization
+  // and causing the canvas to re-bind handlers needlessly.  Updated on every
+  // render so any callback firing after the render sees the latest value.
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   // Initialize from workflow data
   const workflowSignature = `${workflow.id ?? 'new'}:${workflow.loaded_at ?? ''}`;
@@ -130,80 +155,92 @@ export default function WorkflowFlowEditor({
   // New connection — all edges use the single src-default handle.
   // Non-gateway stages are limited to 1 outgoing edge: drawing a new one
   // replaces the existing outgoing edge from that source.
+  //
+  // CRITICAL: this callback reads ``edges`` from the setEdges updater and
+  // ``nodes`` from ``nodesRef.current``, never via useCallback closure.  Both
+  // sources stay fresh on every fire, while the callback's identity stays
+  // stable across renders so React Flow doesn't re-bind canvas handlers on
+  // every drag/keystroke.
   const onConnect = useCallback(
     (params) => {
       if (readOnly) return;
       if (params.source === params.target) return;
       if (params.target === '_rejected_indicator') return;
 
-      const sourceNode = nodes.find((n) => n.id === params.source);
+      const currentNodes = nodesRef.current;
+      const sourceNode = currentNodes.find((n) => n.id === params.source);
       const isGateway = sourceNode?.data?.stage?.stage_type === 'parallel_gateway';
 
-      // Prevent multiple gateway branches from connecting to the same target
-      if (isGateway) {
-        const alreadyConnected = edges.some(
-          (e) => e.source === params.source && e.target === params.target && !e.data?.isGhost
-        );
-        if (alreadyConnected) return;
-      }
+      setEdges((currentEdges) => {
+        // Prevent multiple gateway branches from connecting to the same target
+        if (isGateway) {
+          const alreadyConnected = currentEdges.some(
+            (e) => e.source === params.source && e.target === params.target && !e.data?.isGhost
+          );
+          if (alreadyConnected) return currentEdges;
+        }
 
-      // Enforce parallel branch convergence: if this source node is a branch
-      // of a gateway, all sibling branches must converge to the same join target.
-      if (!isGateway) {
-        const parentGateway = edges.find(
-          (e) =>
-            e.target === params.source &&
-            !e.data?.isGhost &&
-            nodes.find((n) => n.id === e.source)?.data?.stage?.stage_type === 'parallel_gateway'
-        );
-        if (parentGateway) {
-          // Find all sibling branch targets of this gateway
-          const siblingBranches = edges
-            .filter((e) => e.source === parentGateway.source && !e.data?.isGhost)
-            .map((e) => e.target)
-            .filter((t) => t !== params.source);
-          // Check where siblings already route
-          for (const sib of siblingBranches) {
-            const sibOut = edges.find((e) => e.source === sib && !e.data?.isGhost);
-            if (sibOut && sibOut.target !== params.target) return; // block
+        // Enforce parallel branch convergence: if this source node is a branch
+        // of a gateway, all sibling branches must converge to the same join target.
+        if (!isGateway) {
+          const parentGateway = currentEdges.find(
+            (e) =>
+              e.target === params.source &&
+              !e.data?.isGhost &&
+              currentNodes.find((n) => n.id === e.source)?.data?.stage?.stage_type ===
+                'parallel_gateway'
+          );
+          if (parentGateway) {
+            const siblingBranches = currentEdges
+              .filter((e) => e.source === parentGateway.source && !e.data?.isGhost)
+              .map((e) => e.target)
+              .filter((t) => t !== params.source);
+            for (const sib of siblingBranches) {
+              const sibOut = currentEdges.find((e) => e.source === sib && !e.data?.isGhost);
+              if (sibOut && sibOut.target !== params.target) return currentEdges;
+            }
           }
         }
-      }
 
-      const condition = _inferCondition(params.source, params.target, nodes);
+        const condition = _inferCondition(params.source, params.target, currentNodes);
 
-      // For gateways: use the handle the user dragged from, or assign to
-      // the first available branch slot.
-      let sourceHandle = params.sourceHandle || 'src-default';
-      if (isGateway) {
-        sourceHandle = params.sourceHandle || _nextGatewayHandle(params.source, edges);
-      }
+        // For gateways: use the handle the user dragged from, or assign to
+        // the first available branch slot computed from the live edge list.
+        let sourceHandle = params.sourceHandle || 'src-default';
+        if (isGateway) {
+          sourceHandle = params.sourceHandle || _nextGatewayHandle(params.source, currentEdges);
+        }
 
-      const edge = {
-        ...params,
-        id: `e-${params.source}-${params.target}-${Date.now()}`,
-        type: 'smoothstep',
-        sourceHandle,
-        targetHandle: 'tgt-in',
-        data: { condition: isGateway ? 'default' : condition, isGhost: false },
-        label: isGateway ? undefined : _edgeLabelShort(condition) || undefined,
-        style: isGateway ? { stroke: '#0d9488', strokeWidth: 1.5 } : deriveEdgeStyle(condition),
-        animated: !isGateway && condition === 'on_approve',
-        labelStyle: { fontSize: '11px', fill: 'var(--color-text-secondary)' },
-        labelBgStyle: { fill: 'var(--color-bg-secondary)' },
-        markerEnd: { type: MarkerType.ArrowClosed },
-      };
+        const edge = {
+          ...params,
+          // Use crypto.randomUUID() when available so two rapid clicks at the
+          // same Date.now() millisecond can't collide on edge id.
+          id:
+            typeof crypto !== 'undefined' && crypto.randomUUID
+              ? `e-${crypto.randomUUID()}`
+              : `e-${params.source}-${params.target}-${Date.now()}-${Math.random()
+                  .toString(36)
+                  .slice(2, 8)}`,
+          type: 'smoothstep',
+          sourceHandle,
+          targetHandle: 'tgt-in',
+          data: { condition: isGateway ? 'default' : condition, isGhost: false },
+          label: isGateway ? undefined : _edgeLabelShort(condition) || undefined,
+          style: isGateway ? EDGE_STYLES.gateway : deriveEdgeStyle(condition),
+          animated: !isGateway && condition === 'on_approve',
+          labelStyle: { fontSize: '11px', fill: 'var(--color-text-secondary)' },
+          labelBgStyle: { fill: 'var(--color-bg-secondary)' },
+          markerEnd: { type: MarkerType.ArrowClosed },
+        };
 
-      setEdges((es) => {
-        // For non-gateway stages: remove the existing outgoing real edge first
-        let filtered = es;
+        let filtered = currentEdges;
         if (!isGateway) {
-          filtered = es.filter((e) => e.source !== params.source || e.data?.isGhost);
+          filtered = currentEdges.filter((e) => e.source !== params.source || e.data?.isGhost);
         }
         return addEdge(edge, filtered);
       });
     },
-    [readOnly, nodes]
+    [readOnly]
   );
 
   const onNodeClick = useCallback((_event, node) => {
@@ -229,11 +266,25 @@ export default function WorkflowFlowEditor({
     setSelectedEdgeId(null);
   }, []);
 
-  const lastGhostToggleRef = useRef(false);
-
   // ── Ghost edge + rejected pill visibility (tied to node selection) ────────
+  //
   // Ghost lines and the rejected indicator are hidden by default and only
   // appear when the user selects the node they originate from.
+  //
+  // The selected stage's *type* drives which ghost edges become visible —
+  // and that type can change if the user retypes a stage in the side panel
+  // without re-clicking the node.  Reading from the freshest ``nodes`` is
+  // therefore mandatory.  We get freshness two ways:
+  //
+  //   1. ``nodes`` is in the deps so the effect re-runs whenever the node
+  //      list changes (selection, type change, drag, add/remove).
+  //   2. The setter callbacks return the ORIGINAL state object when nothing
+  //      actually changed — React skips the update, so the effect doesn't
+  //      re-fire as a result of its own writes.
+  //
+  // Previous version depended on ``nodes.length`` only, which silently broke
+  // whenever the user switched a stage type via the side panel (length
+  // unchanged → stale closure → ghost lines reflected the old type).
   useEffect(() => {
     // Determine if the selected node is a review/approval type
     const selNode = selectedNodeId ? nodes.find((n) => n.id === selectedNodeId) : null;
@@ -242,30 +293,39 @@ export default function WorkflowFlowEditor({
     const showSendBack =
       selStageType === 'review' || selStageType === 'approval' || selStageType === 'ai_analysis';
 
-    // Toggle ghost edges: show only those originating from the selected node
-    lastGhostToggleRef.current = true;
-    setEdges((es) =>
-      es.map((e) => {
+    // Toggle ghost edges: show only those originating from the selected node.
+    // Bail-out guard: only return a new array if any hidden flag changed.
+    setEdges((es) => {
+      let changed = false;
+      const updated = es.map((e) => {
         if (!e.data?.isGhost) return e;
         const isFromSelected = e.source === selectedNodeId;
+        let nextHidden = e.hidden;
         if (e.data.implicitType === 'implicit_reject') {
-          return { ...e, hidden: !(isFromSelected && showReject) };
+          nextHidden = !(isFromSelected && showReject);
+        } else if (e.data.implicitType === 'implicit_sendback') {
+          nextHidden = !(isFromSelected && showSendBack);
         }
-        if (e.data.implicitType === 'implicit_sendback') {
-          return { ...e, hidden: !(isFromSelected && showSendBack) };
-        }
-        return e;
-      })
-    );
+        if (nextHidden === e.hidden) return e;
+        changed = true;
+        return { ...e, hidden: nextHidden };
+      });
+      return changed ? updated : es;
+    });
 
-    // Toggle rejected indicator pill
-    setNodes((ns) =>
-      ns.map((n) => {
+    // Toggle rejected indicator pill — same bail-out guard.
+    setNodes((ns) => {
+      let changed = false;
+      const updated = ns.map((n) => {
         if (n.id !== '_rejected_indicator') return n;
-        return { ...n, hidden: !showReject };
-      })
-    );
-  }, [selectedNodeId, nodes.length]); // nodes.length avoids stale closure without deep dep
+        const nextHidden = !showReject;
+        if (nextHidden === n.hidden) return n;
+        changed = true;
+        return { ...n, hidden: nextHidden };
+      });
+      return changed ? updated : ns;
+    });
+  }, [selectedNodeId, nodes]);
 
   // ── Stage mutations from the side panel ──────────────────────────────────
 
@@ -303,12 +363,10 @@ export default function WorkflowFlowEditor({
     if (readOnly) return;
     setNodes((ns) => {
       const existingKeys = new Set(ns.map((n) => n.id));
-      let n = ns.filter((x) => !isAnchorStage(x.id) && x.type !== 'rejected_indicator').length + 1;
-      let key = `stage_${n}`;
-      while (existingKeys.has(key)) {
-        n += 1;
-        key = `stage_${n}`;
-      }
+      const baseIdx =
+        ns.filter((x) => !isAnchorStage(x.id) && x.type !== 'rejected_indicator').length + 1;
+      // uniqueKey() guarantees no collision even after duplication / paste.
+      const key = uniqueKey(`stage_${baseIdx}`, existingKeys);
       return [
         ...ns,
         {
@@ -318,7 +376,7 @@ export default function WorkflowFlowEditor({
           data: {
             stage: {
               stage_key: key,
-              display_name: `Stage ${n}`,
+              display_name: `Stage ${baseIdx}`,
               stage_type: 'review',
               stage_order: 0,
               roles: [],
@@ -336,12 +394,8 @@ export default function WorkflowFlowEditor({
     if (readOnly) return;
     setNodes((ns) => {
       const existingKeys = new Set(ns.map((n) => n.id));
-      let n = 1;
-      let key = `parallel_${n}`;
-      while (existingKeys.has(key)) {
-        n += 1;
-        key = `parallel_${n}`;
-      }
+      const baseIdx = ns.filter((x) => x.type === 'parallel_gateway').length + 1;
+      const key = uniqueKey(`parallel_${baseIdx}`, existingKeys);
       return [
         ...ns,
         {
@@ -351,7 +405,7 @@ export default function WorkflowFlowEditor({
           data: {
             stage: {
               stage_key: key,
-              display_name: `Parallel ${n}`,
+              display_name: `Parallel ${baseIdx}`,
               stage_type: 'parallel_gateway',
               stage_order: 0,
               roles: [],
@@ -364,6 +418,35 @@ export default function WorkflowFlowEditor({
       ];
     });
   }, [readOnly]);
+
+  // ── Drag end → recompute stage_order from x positions ────────────────────
+  // graphToWorkflow already derives stage_order from left-to-right position
+  // on save, but the underlying workflow object on the parent stays stale
+  // until then.  Updating stage_order on drag end keeps the visible order
+  // and the saved order in sync at all times.
+  const onNodeDragStop = useCallback(
+    (_event, _node) => {
+      if (readOnly) return;
+      setNodes((ns) => {
+        const middle = ns
+          .filter((n) => !isAnchorStage(n.id) && n.type !== 'rejected_indicator')
+          .slice()
+          .sort((a, b) => (a.position?.x || 0) - (b.position?.x || 0));
+        const orderByKey = new Map();
+        middle.forEach((n, i) => orderByKey.set(n.id, i + 2));
+        return ns.map((n) => {
+          const next = orderByKey.get(n.id);
+          if (next == null) return n;
+          if (n.data?.stage?.stage_order === next) return n;
+          return {
+            ...n,
+            data: { ...n.data, stage: { ...n.data.stage, stage_order: next } },
+          };
+        });
+      });
+    },
+    [readOnly]
+  );
 
   // ── Propagate graph changes back to the parent as workflow_data ──────────
 
@@ -384,15 +467,20 @@ export default function WorkflowFlowEditor({
     getWorkflowDataRef.current = () => latestWorkflowData;
   }
 
-  // Propagate to the parent via onChange (still async to avoid render-during-
-  // render warnings, but the ref above is always up-to-date for Save).
+  // Propagate to the parent via onChange. Debounced so rapid edits (e.g.
+  // typing into a side-panel field, dragging a node) coalesce into a single
+  // parent re-render after the user pauses. Save still sees fresh data via
+  // ``getWorkflowDataRef`` above, which is updated synchronously during render.
   useEffect(() => {
     const prevStages = JSON.stringify(workflow.workflow_data?.stages || []);
     const prevTransitions = JSON.stringify(workflow.workflow_data?.transitions || []);
     const nextStages = JSON.stringify(latestWorkflowData.stages);
     const nextTransitions = JSON.stringify(latestWorkflowData.transitions);
     if (prevStages === nextStages && prevTransitions === nextTransitions) return;
-    onChange({ ...workflow, workflow_data: latestWorkflowData });
+    const timer = setTimeout(() => {
+      onChange({ ...workflow, workflow_data: latestWorkflowData });
+    }, 200);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestWorkflowData]);
 
@@ -463,28 +551,18 @@ export default function WorkflowFlowEditor({
           onNodeClick={onNodeClick}
           onEdgeClick={onEdgeClick}
           onPaneClick={onPaneClick}
+          onNodeDragStop={onNodeDragStop}
           connectionMode={ConnectionMode.Loose}
           nodesDraggable={!readOnly}
           nodesConnectable={!readOnly}
           elementsSelectable
           fitView
-          fitViewOptions={{ padding: 0.2 }}
-          proOptions={{ hideAttribution: true }}
+          fitViewOptions={FIT_VIEW_OPTIONS}
+          proOptions={PRO_OPTIONS}
         >
           <Background gap={16} size={1} color="var(--color-border-subtle)" />
           <Controls showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            nodeColor={(n) => {
-              if (n.type === 'rejected_indicator') return '#ef4444';
-              const st = n.data?.stage?.stage_type;
-              if (st === 'approval') return '#7c3aed';
-              if (st === 'parallel_gateway') return '#0d9488';
-              return '#64748b';
-            }}
-            style={{ backgroundColor: 'var(--color-bg-secondary)' }}
-          />
+          <MiniMap pannable zoomable nodeColor={_miniMapNodeColor} style={MINIMAP_STYLE} />
         </ReactFlow>
 
         {/* Floating toolbar */}

@@ -47,13 +47,26 @@ export function formatBytes(bytes, fallback = '—') {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const ESAP_BADGE_STYLES = {
+/**
+ * Single source of truth for ESAP type → badge color mapping.  Exported so
+ * the ``<EsapBadge>`` component and any tooling can derive consistent
+ * colors without re-inventing the palette.
+ */
+export const ESAP_COLORS = Object.freeze({
   'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
   'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
   'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-};
+});
 
 export function esapBadgeStyle(level) {
   if (!level) return {};
-  return ESAP_BADGE_STYLES[level] || {};
+  return ESAP_COLORS[level] || {};
+}
+
+/**
+ * Human label for an ESAP level.  Mirrors the backend label map.
+ */
+export function formatEsapType(level) {
+  if (!level) return '';
+  return String(level).toUpperCase();
 }

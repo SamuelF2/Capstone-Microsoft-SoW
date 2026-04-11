@@ -73,6 +73,7 @@ from utils.db_helpers import (
     seed_collaboration,
 )
 from utils.esap import compute_esap_level
+from utils.role_labels import humanize_role as _humanize_role
 
 from routers.workflow import build_workflow_snapshot, get_default_template_id
 
@@ -785,6 +786,34 @@ async def update_sow(sow_id: int, payload: SoWUpdate, current_user: CurrentUser)
 
     updates["updated_at"] = datetime.now(UTC)
 
+    # Defensive allowlist for the f-string column interpolation below.
+    # ``updates`` keys are sourced from the ``SoWUpdate`` Pydantic model
+    # (which already rejects extra fields), so any column name landing here
+    # must be one of these.  Re-checking explicitly turns a hidden invariant
+    # into an obvious one — and would catch a refactor that loosens the
+    # model from leaking arbitrary identifiers into the SQL.
+    _UPDATABLE_COLUMNS = frozenset(
+        {
+            "title",
+            "cycle",
+            "status",
+            "methodology",
+            "customer_name",
+            "opportunity_id",
+            "deal_value",
+            "estimated_margin",
+            "content",
+            "metadata",
+            "updated_at",
+        }
+    )
+    unknown_cols = [col for col in updates if col not in _UPDATABLE_COLUMNS]
+    if unknown_cols:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown update field(s): {', '.join(sorted(unknown_cols))}",
+        )
+
     params: list[Any] = list(updates.values()) + [sow_id]
     set_clause = ", ".join(
         f"{col} = ${i + 1}" + ("::jsonb" if col in ("content", "metadata") else "")
@@ -1300,20 +1329,6 @@ async def parse_sow(sow_id: int, current_user: CurrentUser) -> ParseResult:
 # effect immediately (see ``set_sow_reviewers`` for the cancel-and-recreate
 # semantics).
 
-# Display labels for the standard reviewer roles. Custom roles fall back to
-# a humanized version of the role_key.
-_ROLE_DISPLAY_NAMES: dict[str, str] = {
-    "solution-architect": "Solution Architect",
-    "sqa-reviewer": "SQA Reviewer",
-    "cpl": "Customer Practice Lead",
-    "cdp": "Customer Delivery Partner",
-    "delivery-manager": "Delivery Manager",
-}
-
-
-def _humanize_role(role_key: str) -> str:
-    return _ROLE_DISPLAY_NAMES.get(role_key) or role_key.replace("-", " ").title()
-
 
 @router.get(
     "/{sow_id}/reviewers",
@@ -1422,7 +1437,15 @@ async def set_sow_reviewers(
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await require_author(conn, sow_id=sow_id, user_id=current_user.id)
 
-        sow = await conn.fetchrow("SELECT status FROM sow_documents WHERE id = $1", sow_id)
+        # FOR UPDATE row lock so two concurrent reviewer-edits can't both see
+        # status='draft' (or any other consistent snapshot) and then race the
+        # cancel-and-recreate side effects below.  Holding the lock for the
+        # rest of the txn also serializes against ``submit_for_review``,
+        # ``execute_transition``, and any other status-changing path.
+        sow = await conn.fetchrow(
+            "SELECT status FROM sow_documents WHERE id = $1 FOR UPDATE",
+            sow_id,
+        )
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 

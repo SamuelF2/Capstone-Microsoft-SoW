@@ -20,6 +20,7 @@
 import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
 import { isAnchorStage } from '../../lib/workflowStages';
+import { PORT_COLORS, STAGE_TYPE_COLORS } from '../../lib/workflowColors';
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -35,18 +36,11 @@ const TYPE_META = {
   parallel_gateway: { icon: '⑃', hint: 'Parallel' },
 };
 
-const HEADER_BG = {
-  draft: '#475569',
-  ai_analysis: '#2563eb',
-  review: '#d97706',
-  approval: '#7c3aed',
-  terminal: '#059669',
-  parallel_gateway: '#0d9488',
-};
+const HEADER_BG = STAGE_TYPE_COLORS;
 
 const PORT = {
-  in: '#3b82f6',
-  default: '#94a3b8',
+  in: PORT_COLORS.in,
+  default: PORT_COLORS.out,
 };
 
 // ── Handle definitions (single source + single target) ──────────────────────

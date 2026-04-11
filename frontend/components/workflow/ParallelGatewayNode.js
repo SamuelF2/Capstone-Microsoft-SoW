@@ -24,15 +24,16 @@
 
 import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
+import { GATEWAY_ACCENT, PORT_COLORS } from '../../lib/workflowColors';
 
 const NODE_W = 220;
 const DOT = 12;
-const ACCENT = '#0d9488';
+const ACCENT = GATEWAY_ACCENT;
 
 const PORT = {
-  in: '#3b82f6',
-  connected: '#0d9488',
-  available: '#475569',
+  in: PORT_COLORS.in,
+  connected: PORT_COLORS.connected,
+  available: PORT_COLORS.available,
 };
 
 // ── Port dot + invisible Handle ─────────────────────────────────────────────

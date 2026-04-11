@@ -161,30 +161,37 @@ export default function ActivityLog({ sowId }) {
   const [hasMore, setHasMore] = useState(true);
   const LIMIT = 20;
 
-  const loadEntries = async (reset = false) => {
+  const loadEntries = async (reset = false, signal) => {
     if (!sowId || !authFetch) return;
     const currentOffset = reset ? 0 : offset;
     setLoading(true);
     setError(null);
     try {
-      const res = await authFetch(`/api/audit/sow/${sowId}?limit=${LIMIT}&offset=${currentOffset}`);
+      const res = await authFetch(
+        `/api/audit/sow/${sowId}?limit=${LIMIT}&offset=${currentOffset}`,
+        { signal }
+      );
       if (!res.ok) throw new Error(`Failed to load activity (${res.status})`);
       const data = await res.json();
+      if (signal?.aborted) return;
       setEntries((prev) => (reset ? data : [...prev, ...data]));
       setOffset(currentOffset + data.length);
       setHasMore(data.length === LIMIT);
     } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
+    const ctrl = new AbortController();
     setEntries([]);
     setOffset(0);
     setHasMore(true);
-    loadEntries(true);
+    loadEntries(true, ctrl.signal);
+    return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sowId]);
 

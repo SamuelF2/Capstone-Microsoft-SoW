@@ -13,21 +13,28 @@ export default function ReviewHistory() {
   const { getToken } = useAuth();
 
   useEffect(() => {
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     async function load() {
       try {
         const token = await getToken();
+        if (signal.aborted) return;
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sow/review-history`, {
           headers: { Authorization: `Bearer ${token}` },
+          signal,
         });
         if (!res.ok) throw new Error('Failed to load history');
         const data = await res.json();
+        if (signal.aborted) return;
         setReviews(data);
-      } catch {
+      } catch (e) {
+        if (e?.name === 'AbortError' || signal.aborted) return;
         setReviews([]);
       }
     }
     load();
-  }, []);
+    return () => ctrl.abort();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = reviews.filter((r) => {
     const q = search.toLowerCase();

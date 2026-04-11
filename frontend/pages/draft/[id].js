@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -10,368 +10,8 @@ import WorkflowProgress from '../../components/WorkflowProgress';
 import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
 import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPanel';
 import ActivityLog from '../../components/ActivityLog';
-
-// Shared components
-import ExecutiveSummary from '../../components/sow/ExecutiveSummary';
-import ProjectScope from '../../components/sow/ProjectScope';
-import Deliverables from '../../components/sow/Deliverables';
-import AssumptionsRisks from '../../components/sow/AssumptionsRisks';
-import TeamStructure from '../../components/sow/TeamStructure';
-import Pricing from '../../components/sow/Pricing';
-import SupportTransition from '../../components/sow/SupportTransition';
-
-// Agile
-import AgileApproach from '../../components/sow/AgileApproach';
-import ProductBacklog from '../../components/sow/ProductBacklog';
-
-// Sure Step 365
-import SureStepMethodology from '../../components/sow/SureStepMethodology';
-import PhasesDeliverables from '../../components/sow/PhasesDeliverables';
-import DataMigration from '../../components/sow/DataMigration';
-import TestingStrategy from '../../components/sow/TestingStrategy';
-import SupportHypercare from '../../components/sow/SupportHypercare';
-
-// Waterfall
-import WaterfallApproach from '../../components/sow/WaterfallApproach';
-import PhasesMilestones from '../../components/sow/PhasesMilestones';
-
-// Cloud Adoption
-import CloudAdoptionScope from '../../components/sow/CloudAdoptionScope';
-import MigrationStrategy from '../../components/sow/MigrationStrategy';
-import WorkloadAssessment from '../../components/sow/WorkloadAssessment';
-import SecurityCompliance from '../../components/sow/SecurityCompliance';
-import SupportOperations from '../../components/sow/SupportOperations';
-
-// ─── Tab definitions per methodology ─────────────────────────────────────────
-
-function getTabConfig(methodology) {
-  switch (methodology) {
-    case 'Agile Sprint Delivery':
-      return [
-        {
-          label: 'Overview',
-          key: 'overview',
-          render: (data, update) => (
-            <ExecutiveSummary
-              data={data.executiveSummary}
-              onChange={(v) => update('executiveSummary', v)}
-            />
-          ),
-        },
-        {
-          label: 'Scope',
-          key: 'scope',
-          render: (data, update) => (
-            <ProjectScope data={data.projectScope} onChange={(v) => update('projectScope', v)} />
-          ),
-        },
-        {
-          label: 'Approach',
-          key: 'approach',
-          render: (data, update) => (
-            <>
-              <AgileApproach
-                data={data.agileApproach}
-                onChange={(v) => update('agileApproach', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <ProductBacklog
-                  data={data.productBacklog}
-                  onChange={(v) => update('productBacklog', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Deliverables',
-          key: 'deliverables',
-          render: (data, update) => (
-            <Deliverables data={data.deliverables} onChange={(v) => update('deliverables', v)} />
-          ),
-        },
-        {
-          label: 'Team & Responsibilities',
-          key: 'team',
-          render: (data, update) => (
-            <>
-              <TeamStructure
-                data={data.teamStructure}
-                onChange={(v) => update('teamStructure', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <AssumptionsRisks
-                  data={data.assumptionsRisks}
-                  onChange={(v) => update('assumptionsRisks', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Support & Pricing',
-          key: 'support',
-          render: (data, update) => (
-            <>
-              <SupportTransition
-                data={data.supportTransition}
-                onChange={(v) => update('supportTransition', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <Pricing data={data.pricing} onChange={(v) => update('pricing', v)} />
-              </div>
-            </>
-          ),
-        },
-      ];
-
-    case 'Sure Step 365':
-      return [
-        {
-          label: 'Overview',
-          key: 'overview',
-          render: (data, update) => (
-            <ExecutiveSummary
-              data={data.executiveSummary}
-              onChange={(v) => update('executiveSummary', v)}
-            />
-          ),
-        },
-        {
-          label: 'Scope',
-          key: 'scope',
-          render: (data, update) => (
-            <ProjectScope data={data.projectScope} onChange={(v) => update('projectScope', v)} />
-          ),
-        },
-        {
-          label: 'Methodology',
-          key: 'methodology',
-          render: (data, update) => (
-            <>
-              <SureStepMethodology
-                data={data.sureStepMethodology}
-                onChange={(v) => update('sureStepMethodology', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <PhasesDeliverables
-                  data={data.phasesDeliverables}
-                  onChange={(v) => update('phasesDeliverables', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Technical',
-          key: 'technical',
-          render: (data, update) => (
-            <>
-              <DataMigration
-                data={data.dataMigration}
-                onChange={(v) => update('dataMigration', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <TestingStrategy
-                  data={data.testingStrategy}
-                  onChange={(v) => update('testingStrategy', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Responsibilities & Risks',
-          key: 'risks',
-          render: (data, update) => (
-            <AssumptionsRisks
-              data={data.assumptionsRisks}
-              onChange={(v) => update('assumptionsRisks', v)}
-            />
-          ),
-        },
-        {
-          label: 'Support & Pricing',
-          key: 'support',
-          render: (data, update) => (
-            <>
-              <SupportHypercare
-                data={data.supportHypercare}
-                onChange={(v) => update('supportHypercare', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <Pricing data={data.pricing} onChange={(v) => update('pricing', v)} />
-              </div>
-            </>
-          ),
-        },
-      ];
-
-    case 'Waterfall':
-      return [
-        {
-          label: 'Overview',
-          key: 'overview',
-          render: (data, update) => (
-            <ExecutiveSummary
-              data={data.executiveSummary}
-              onChange={(v) => update('executiveSummary', v)}
-            />
-          ),
-        },
-        {
-          label: 'Scope',
-          key: 'scope',
-          render: (data, update) => (
-            <ProjectScope data={data.projectScope} onChange={(v) => update('projectScope', v)} />
-          ),
-        },
-        {
-          label: 'Approach',
-          key: 'approach',
-          render: (data, update) => (
-            <>
-              <WaterfallApproach
-                data={data.waterfallApproach}
-                onChange={(v) => update('waterfallApproach', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <PhasesMilestones
-                  data={data.phasesMilestones}
-                  onChange={(v) => update('phasesMilestones', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Deliverables',
-          key: 'deliverables',
-          render: (data, update) => (
-            <Deliverables data={data.deliverables} onChange={(v) => update('deliverables', v)} />
-          ),
-        },
-        {
-          label: 'Team & Responsibilities',
-          key: 'team',
-          render: (data, update) => (
-            <>
-              <TeamStructure
-                data={data.teamStructure}
-                onChange={(v) => update('teamStructure', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <AssumptionsRisks
-                  data={data.assumptionsRisks}
-                  onChange={(v) => update('assumptionsRisks', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Support & Pricing',
-          key: 'support',
-          render: (data, update) => (
-            <>
-              <SupportTransition
-                data={data.supportTransition}
-                onChange={(v) => update('supportTransition', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <Pricing data={data.pricing} onChange={(v) => update('pricing', v)} />
-              </div>
-            </>
-          ),
-        },
-      ];
-
-    case 'Cloud Adoption':
-      return [
-        {
-          label: 'Overview',
-          key: 'overview',
-          render: (data, update) => (
-            <ExecutiveSummary
-              data={data.executiveSummary}
-              onChange={(v) => update('executiveSummary', v)}
-            />
-          ),
-        },
-        {
-          label: 'Scope',
-          key: 'scope',
-          render: (data, update) => (
-            <CloudAdoptionScope
-              data={data.cloudAdoptionScope}
-              onChange={(v) => update('cloudAdoptionScope', v)}
-            />
-          ),
-        },
-        {
-          label: 'Migration',
-          key: 'migration',
-          render: (data, update) => (
-            <>
-              <MigrationStrategy
-                data={data.migrationStrategy}
-                onChange={(v) => update('migrationStrategy', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <WorkloadAssessment
-                  data={data.workloadAssessment}
-                  onChange={(v) => update('workloadAssessment', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Deliverables & Security',
-          key: 'deliverables',
-          render: (data, update) => (
-            <>
-              <Deliverables data={data.deliverables} onChange={(v) => update('deliverables', v)} />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <SecurityCompliance
-                  data={data.securityCompliance}
-                  onChange={(v) => update('securityCompliance', v)}
-                />
-              </div>
-            </>
-          ),
-        },
-        {
-          label: 'Responsibilities & Risks',
-          key: 'risks',
-          render: (data, update) => (
-            <AssumptionsRisks
-              data={data.assumptionsRisks}
-              onChange={(v) => update('assumptionsRisks', v)}
-            />
-          ),
-        },
-        {
-          label: 'Support & Pricing',
-          key: 'support',
-          render: (data, update) => (
-            <>
-              <SupportOperations
-                data={data.supportOperations}
-                onChange={(v) => update('supportOperations', v)}
-              />
-              <div style={{ marginTop: 'var(--spacing-3xl)' }}>
-                <Pricing data={data.pricing} onChange={(v) => update('pricing', v)} />
-              </div>
-            </>
-          ),
-        },
-      ];
-
-    default:
-      return [];
-  }
-}
+import { getTabConfig } from '../../lib/draftTabs';
+import { STAGE_KEYS } from '../../lib/workflowStages';
 
 // ─── Methodology badge colours ────────────────────────────────────────────────
 
@@ -415,28 +55,94 @@ export default function DraftPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
 
-  // Load SoW from localStorage
-  useEffect(() => {
-    if (!id) return;
-    const raw = localStorage.getItem(`sow-${id}`);
-    if (!raw) {
-      setNotFound(true);
-      return;
-    }
-    try {
-      setSowData(JSON.parse(raw));
-    } catch {
-      setNotFound(true);
-    }
-  }, [id]);
+  // Persistence: load from backend on mount, debounced auto-save on edit.
+  // The previous implementation used localStorage as the primary store,
+  // which silently lost changes on browser switch / tab refresh and made
+  // multi-user editing impossible.  Now we go straight to /api/sow/{id}.
+  //
+  // - lastServerContentRef holds the JSON string of the last content
+  //   value the server is known to hold; the auto-save effect short-
+  //   circuits when sowData matches it (avoiding the load → save echo).
+  // - debounceTimerRef holds the in-flight debounce so handleSubmitForReview
+  //   can cancel it before its own PATCH to prevent a save race.
+  const lastServerContentRef = useRef(null);
+  const debounceTimerRef = useRef(null);
 
-  // Auto-save to localStorage whenever sowData changes
+  // Load SoW from backend
   useEffect(() => {
-    if (!sowData || !id) return;
-    const updated = { ...sowData, updatedAt: new Date().toISOString() };
-    localStorage.setItem(`sow-${id}`, JSON.stringify(updated));
-    setSavedAt(updated.updatedAt);
-  }, [sowData, id]);
+    if (!id || !authFetch) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(`/api/sow/${id}`);
+        if (cancelled) return;
+        if (res.status === 404) {
+          setNotFound(true);
+          return;
+        }
+        if (!res.ok) {
+          // Treat any non-OK as not-found for UI purposes; log so a
+          // developer can distinguish a network error from a 404.
+          console.warn(`Failed to load SoW ${id}: ${res.status}`);
+          setNotFound(true);
+          return;
+        }
+        const data = await res.json();
+        const content = data.content || {};
+        // Snapshot the loaded content so the auto-save effect can detect
+        // that the next sowData change came from the server (not the user)
+        // and skip the redundant PATCH-back.
+        lastServerContentRef.current = JSON.stringify(content);
+        setSowData(content);
+        if (data.updated_at) setSavedAt(data.updated_at);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('Failed to load SoW:', err);
+          setNotFound(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, authFetch]);
+
+  // Debounced auto-save: 750ms after the last edit, PATCH the SoW content
+  // to /api/sow/{id}.  Skips when the current state already matches the
+  // last value the server is known to hold (covers the load → set echo
+  // and any redundant re-renders that don't actually change content).
+  useEffect(() => {
+    if (!sowData || !id || !authFetch) return;
+    const serialized = JSON.stringify(sowData);
+    if (serialized === lastServerContentRef.current) return;
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(async () => {
+      debounceTimerRef.current = null;
+      try {
+        const res = await authFetch(`/api/sow/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: sowData }),
+        });
+        if (res.ok) {
+          lastServerContentRef.current = serialized;
+          setSavedAt(new Date().toISOString());
+        }
+      } catch {
+        // Silent fail — the user can re-trigger by editing again.
+      }
+    }, 750);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, [sowData, id, authFetch]);
 
   // Update a top-level section of the SoW data
   const updateSection = (section, value) => {
@@ -496,6 +202,13 @@ export default function DraftPage() {
   const handleSubmitForReview = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
+    // Cancel any in-flight auto-save debounce so it can't race with the
+    // submit PATCH below (and a stale auto-save can't fire after the SoW
+    // has already transitioned out of draft).
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
     try {
       // First, auto-save current content to backend
       await authFetch(`/api/sow/${id}`, {
@@ -515,7 +228,7 @@ export default function DraftPage() {
       }
 
       const updated = await res.json().catch(() => ({}));
-      if (updated?.status === 'ai_review') {
+      if (updated?.status === STAGE_KEYS.AI_REVIEW) {
         router.push(`/ai-review?sowId=${id}`);
       } else {
         // The workflow doesn't have an AI review immediately after draft —

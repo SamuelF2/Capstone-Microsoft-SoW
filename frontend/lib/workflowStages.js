@@ -22,6 +22,38 @@
  * snapshot and the backend passes it through untouched.
  */
 
+// ── Stage key constants ─────────────────────────────────────────────────────
+
+/**
+ * Canonical map of stage_key string literals.  Use these constants instead
+ * of inline strings like ``'drm-approval'`` so a workflow rename in one
+ * place can't break routing in another.
+ *
+ * Anchor stage keys (draft/approved/finalized/rejected) appear here for
+ * symmetry but are also exported individually via ``ANCHOR_STAGES``.  Legacy
+ * hyphenated assignment-stage keys (``drm-approval``, ``internal-review``)
+ * coexist with the underscore status keys (``drm_review``, ``internal_review``)
+ * — both are needed because review_assignments.stage uses the legacy keys
+ * while sow_documents.status uses the modern ones.
+ */
+export const STAGE_KEYS = Object.freeze({
+  // Anchor (status + assignment.stage are the same)
+  DRAFT: 'draft',
+  APPROVED: 'approved',
+  FINALIZED: 'finalized',
+  REJECTED: 'rejected',
+
+  // Status keys (sow_documents.status, snake_case)
+  AI_REVIEW: 'ai_review',
+  INTERNAL_REVIEW: 'internal_review',
+  DRM_REVIEW: 'drm_review',
+
+  // Assignment stage keys (review_assignments.stage, legacy hyphenated)
+  ASSIGNMENT_INTERNAL_REVIEW: 'internal-review',
+  ASSIGNMENT_DRM_APPROVAL: 'drm-approval',
+  ASSIGNMENT_SQA_REVIEW: 'sqa-review',
+});
+
 // ── Anchor stage definitions ────────────────────────────────────────────────
 
 /**
@@ -352,4 +384,51 @@ const LEGACY_ASSIGNMENT_STAGE_LABELS = {
 export function assignmentStageLabel(assignmentStageKey) {
   if (!assignmentStageKey) return '';
   return LEGACY_ASSIGNMENT_STAGE_LABELS[assignmentStageKey] || prettifyStageKey(assignmentStageKey);
+}
+
+// ── Role display names ─────────────────────────────────────────────────────
+
+/**
+ * Canonical map from role_key → human-readable label, mirroring
+ * `backend/utils/role_labels.py`. Keep these in sync — backend payloads use the
+ * keys; the UI uses these labels.
+ */
+export const ROLE_DISPLAY_NAMES = {
+  'solution-architect': 'Solution Architect',
+  'sqa-reviewer': 'SQA Reviewer',
+  cpl: 'Customer Practice Lead',
+  cdp: 'Customer Delivery Partner',
+  'delivery-manager': 'Delivery Manager',
+  consultant: 'Consultant',
+  'system-admin': 'System Admin',
+};
+
+/**
+ * The reduced set of "reviewer roles" that may be required on a stage. Excludes
+ * `consultant` and `system-admin` because those are not designable as required
+ * stage reviewers in the workflow editor.
+ */
+export const KNOWN_REVIEWER_ROLES = [
+  'solution-architect',
+  'sqa-reviewer',
+  'cpl',
+  'cdp',
+  'delivery-manager',
+];
+
+/**
+ * Friendly label for a role key. Falls back to a Title-Cased version with
+ * hyphens replaced by spaces, so brand-new roles still render reasonably
+ * without code changes.
+ */
+export function roleLabel(roleKey) {
+  if (!roleKey) return '';
+  return (
+    ROLE_DISPLAY_NAMES[roleKey] ||
+    String(roleKey)
+      .split(/[-_]/)
+      .filter(Boolean)
+      .map((w) => w[0].toUpperCase() + w.slice(1))
+      .join(' ')
+  );
 }

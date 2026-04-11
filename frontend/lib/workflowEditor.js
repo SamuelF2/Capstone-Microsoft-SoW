@@ -22,10 +22,12 @@
 import {
   ANCHOR_KEYS,
   ANCHOR_STAGES,
+  JOIN_MODES,
   isAnchorStage,
   isHiddenAnchor,
   isParallelGateway,
 } from './workflowStages';
+import { EDGE_STYLES } from './workflowColors';
 import { MarkerType } from 'reactflow';
 
 // ── Layout constants ────────────────────────────────────────────────────────
@@ -417,16 +419,9 @@ function _edgeLabel(condition) {
 }
 
 export function deriveEdgeStyle(condition) {
-  switch (condition) {
-    case 'on_reject':
-      return { stroke: 'var(--color-error)', strokeDasharray: '4 4' };
-    case 'on_approve':
-      return { stroke: 'var(--color-success, #22c55e)', strokeWidth: 2 };
-    case 'on_send_back':
-      return { stroke: 'var(--color-warning)', strokeDasharray: '6 3' };
-    default:
-      return { stroke: 'var(--color-text-tertiary)', strokeWidth: 1.5 };
-  }
+  // Pulled from frontend/lib/workflowColors.js so the canvas, the live
+  // workflow progress widget, and any future visualisation stay in sync.
+  return EDGE_STYLES[condition] || EDGE_STYLES.default;
 }
 
 // ── React Flow nodes/edges → backend payload ────────────────────────────────
@@ -617,7 +612,91 @@ export function emptyWorkflowData() {
   };
 }
 
+// ── Stage key uniqueness ────────────────────────────────────────────────────
+
+/**
+ * Build a unique key by appending ``-2``, ``-3``, … to ``baseKey`` until it
+ * doesn't collide with anything in ``existingKeys`` (a Set or array).
+ *
+ * Used by stage creation, paste, and duplicate operations so two stages can
+ * never silently overwrite each other in the workflow object.
+ */
+export function uniqueKey(baseKey, existingKeys) {
+  const taken = existingKeys instanceof Set ? existingKeys : new Set(existingKeys || []);
+  if (!taken.has(baseKey)) return baseKey;
+  let suffix = 2;
+  while (taken.has(`${baseKey}-${suffix}`)) suffix += 1;
+  return `${baseKey}-${suffix}`;
+}
+
+/**
+ * Factory for new middle stages.  Returns a workflow-shape object with a
+ * key that is guaranteed unique against ``existingKeys``.  Centralizing this
+ * here means stage creation in WorkflowFlowEditor and any future paste /
+ * duplicate handlers all share the same uniqueness logic.
+ */
+export function createStage(existingKeys, overrides = {}) {
+  const baseKey = overrides.stage_key || 'stage';
+  const stageKey = uniqueKey(baseKey, existingKeys);
+  return {
+    stage_key: stageKey,
+    display_name: overrides.display_name || stageKey,
+    stage_type: overrides.stage_type || 'review',
+    stage_order: overrides.stage_order ?? 0,
+    roles: overrides.roles || [],
+    config: overrides.config || { send_back_target: 'previous' },
+  };
+}
+
 // ── Lightweight graph validation ────────────────────────────────────────────
+
+const VALID_JOIN_MODES = new Set(JOIN_MODES.map((m) => m.value));
+
+/**
+ * DFS-based cycle detection over the real (non-ghost) edge set.  Returns
+ * the list of stage keys that participate in a cycle, or an empty array
+ * when the graph is acyclic.  Cycles that pass through a parallel gateway
+ * are allowed (gateways are designed to converge), so any cycle that
+ * touches a gateway node is filtered out of the result.
+ */
+function findCycles(realNodes, realEdges, gatewayIds) {
+  const adj = new Map();
+  for (const e of realEdges) {
+    if (!adj.has(e.source)) adj.set(e.source, []);
+    adj.get(e.source).push(e.target);
+  }
+
+  const cycles = [];
+  const stackSet = new Set();
+  const visited = new Set();
+  const stack = [];
+
+  function dfs(node) {
+    visited.add(node);
+    stackSet.add(node);
+    stack.push(node);
+    for (const next of adj.get(node) || []) {
+      if (!visited.has(next)) {
+        dfs(next);
+      } else if (stackSet.has(next)) {
+        // Found a back edge → reconstruct the cycle from the stack.
+        const cycleStart = stack.indexOf(next);
+        if (cycleStart >= 0) {
+          const cycle = stack.slice(cycleStart);
+          // Skip cycles that touch a gateway — those are intentional joins.
+          if (!cycle.some((k) => gatewayIds.has(k))) cycles.push(cycle);
+        }
+      }
+    }
+    stack.pop();
+    stackSet.delete(node);
+  }
+
+  for (const n of realNodes) {
+    if (!visited.has(n.id)) dfs(n.id);
+  }
+  return cycles;
+}
 
 export function validateGraph(nodes, edges) {
   const warnings = [];
@@ -768,6 +847,44 @@ export function validateGraph(nodes, edges) {
         );
       }
     }
+  }
+
+  // join_mode value validation — any node with a join_mode set must use one
+  // of the modes from JOIN_MODES.  Catches typos and stale data from a
+  // schema change.
+  for (const n of realNodes) {
+    const jm = n.data?.stage?.config?.join_mode;
+    if (jm && !VALID_JOIN_MODES.has(jm)) {
+      warnings.push(
+        `Stage "${n.data?.stage?.display_name || n.id}" has invalid join_mode "${jm}". Must be one of: ${[...VALID_JOIN_MODES].join(', ')}.`
+      );
+    }
+  }
+
+  // Duplicate stage_key detection.  ``createStage`` / ``uniqueKey`` should
+  // prevent collisions on creation, but a paste or import could re-introduce
+  // them — surface them so the workflow doesn't silently overwrite a stage.
+  const seenStageKeys = new Map();
+  for (const n of realNodes) {
+    const key = n.data?.stage?.stage_key;
+    if (!key) continue;
+    if (seenStageKeys.has(key)) {
+      warnings.push(`Duplicate stage_key "${key}" — stages must have unique keys.`);
+    }
+    seenStageKeys.set(key, true);
+  }
+
+  // Cycle detection.  A workflow author can accidentally create A → B → A
+  // and the engine will then loop forever on advance.  Cycles that pass
+  // through a parallel gateway are allowed because gateways legitimately
+  // converge multiple branches.
+  const cycles = findCycles(realNodes, realEdges, gatewayIds);
+  for (const cycle of cycles) {
+    const labels = cycle.map((id) => {
+      const nd = realNodes.find((n) => n.id === id);
+      return nd?.data?.stage?.display_name || id;
+    });
+    warnings.push(`Cycle detected: ${labels.join(' → ')} → ${labels[0]}.`);
   }
 
   return warnings;

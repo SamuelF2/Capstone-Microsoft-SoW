@@ -69,27 +69,28 @@ export default function CreateNew() {
     if (!form.deliveryMethodology) {
       setTemplates([]);
       setSelectedTemplateId(null);
-      return;
+      return undefined;
     }
-    let cancelled = false;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setTemplatesLoading(true);
-    authFetch(`/api/sow/templates?methodology=${encodeURIComponent(form.deliveryMethodology)}`)
+    authFetch(`/api/sow/templates?methodology=${encodeURIComponent(form.deliveryMethodology)}`, {
+      signal,
+    })
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
-        if (!cancelled) {
-          setTemplates(data);
-          setSelectedTemplateId(null); // reset selection on methodology change
-        }
+        if (signal.aborted) return;
+        setTemplates(data);
+        setSelectedTemplateId(null); // reset selection on methodology change
       })
-      .catch(() => {
-        if (!cancelled) setTemplates([]);
+      .catch((e) => {
+        if (e?.name === 'AbortError' || signal.aborted) return;
+        setTemplates([]);
       })
       .finally(() => {
-        if (!cancelled) setTemplatesLoading(false);
+        if (!signal.aborted) setTemplatesLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [form.deliveryMethodology, authFetch]);
 
   const handlePreview = async (template) => {

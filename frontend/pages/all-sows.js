@@ -16,7 +16,39 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
 import { formatDeal as formatDealValue, formatDate } from '../lib/format';
-import { routeForStage, stageColor } from '../lib/workflowStages';
+import { routeForStage, stageColor, STAGE_KEYS } from '../lib/workflowStages';
+
+/**
+ * Render a Postgres ts_headline() snippet safely.
+ *
+ * ts_headline wraps matched terms in literal <b>…</b> tags but does not
+ * escape the surrounding text — so a user-supplied title containing
+ * "<script>" would otherwise become live HTML when fed to
+ * dangerouslySetInnerHTML.  Splitting on the bold tags and rendering each
+ * piece as a React text node gives us automatic escaping while still
+ * preserving the highlight.
+ */
+function HighlightedSnippet({ html }) {
+  if (!html) return null;
+  // ts_headline only emits <b>…</b>; split on those literal tags.
+  const parts = String(html).split(/(<b>|<\/b>)/g);
+  let bold = false;
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === '<b>') {
+      bold = true;
+      continue;
+    }
+    if (p === '</b>') {
+      bold = false;
+      continue;
+    }
+    if (!p) continue;
+    out.push(bold ? <b key={i}>{p}</b> : <span key={i}>{p}</span>);
+  }
+  return <>{out}</>;
+}
 
 // ── Status-aware action buttons ───────────────────────────────────────────────
 
@@ -26,23 +58,28 @@ import { routeForStage, stageColor } from '../lib/workflowStages';
  * those all land on the unified /review/[id] page.
  */
 function actionLabelForStage(status) {
-  if (status === 'draft' || status === 'rejected') return 'Edit →';
-  if (status === 'ai_review') return 'View AI Results →';
-  if (status === 'approved') return 'Finalize →';
-  if (status === 'finalized') return 'View →';
+  if (status === STAGE_KEYS.DRAFT || status === STAGE_KEYS.REJECTED) return 'Edit →';
+  if (status === STAGE_KEYS.AI_REVIEW) return 'View AI Results →';
+  if (status === STAGE_KEYS.APPROVED) return 'Finalize →';
+  if (status === STAGE_KEYS.FINALIZED) return 'View →';
   // All user-defined review/approval stages route to the unified review page.
   return 'Review →';
 }
 
 function actionVariantForStage(status) {
-  return status === 'approved' ? 'primary' : 'secondary';
+  return status === STAGE_KEYS.APPROVED ? 'primary' : 'secondary';
 }
 
 // Stages where the manage page is meaningful: any non-terminal stage past
 // draft. Drafts already have an inline reviewer panel + workflow editor on
 // the draft page, and terminal SoWs (approved/finalized/rejected) shouldn't
 // be edited.
-const MANAGE_HIDDEN_STATUSES = new Set(['draft', 'approved', 'finalized', 'rejected']);
+const MANAGE_HIDDEN_STATUSES = new Set([
+  STAGE_KEYS.DRAFT,
+  STAGE_KEYS.APPROVED,
+  STAGE_KEYS.FINALIZED,
+  STAGE_KEYS.REJECTED,
+]);
 
 function SoWActions({ sow, router }) {
   const { status, id, is_author: isAuthor } = sow;
@@ -390,11 +427,9 @@ export default function AllSoWs() {
                           {sow.title}
                         </p>
                         {sow.snippet && (
-                          <p
-                            className="text-xs text-tertiary"
-                            style={{ marginTop: '2px' }}
-                            dangerouslySetInnerHTML={{ __html: sow.snippet }}
-                          />
+                          <p className="text-xs text-tertiary" style={{ marginTop: '2px' }}>
+                            <HighlightedSnippet html={sow.snippet} />
+                          </p>
                         )}
                         {sow.opportunity_id && (
                           <p className="text-xs text-tertiary">{sow.opportunity_id}</p>

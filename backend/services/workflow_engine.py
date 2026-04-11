@@ -305,15 +305,6 @@ async def check_gating_rules(
 # ── Stage assignment creation ──────────────────────────────────────────────
 
 
-_ROLE_DISPLAY_NAMES = {
-    "solution-architect": "Solution Architect",
-    "sqa-reviewer": "SQA Reviewer",
-    "cpl": "Customer Practice Lead",
-    "cdp": "Customer Delivery Partner",
-    "delivery-manager": "Delivery Manager",
-}
-
-
 async def create_stage_assignments(
     conn,
     sow_id: int,
@@ -377,55 +368,85 @@ async def create_stage_assignments(
     )
     author_ids = [r["id"] for r in author_rows]
 
-    assigned: list[str] = []
+    # Pre-flight: figure out which roles we'll actually process so we can
+    # batch the per-role lookups and avoid an N+1.  Filter out non-required
+    # roles and ESAP-excluded roles up front.
+    role_specs: list[dict] = []
     for role in target_stage.get("roles", []):
         if not role.get("is_required", True):
             continue
         esap_filter = role.get("esap_levels")
         if esap_filter and esap_level not in esap_filter:
             continue
+        role_specs.append(role)
+    role_keys = [r["role_key"] for r in role_specs]
 
-        role_key = role["role_key"]
-        slot_assigned = False
-
-        # 1. Pre-designated reviewer (author's choice on the SoW page)
-        designated = await conn.fetchrow(
+    # Batch the designated-reviewer lookup: one round trip for the whole
+    # stage instead of one per role.  Returns ``role_key → user_id``.
+    designated_by_role: dict[str, int] = {}
+    if role_keys:
+        designated_rows = await conn.fetch(
             """
-            SELECT u.id
+            SELECT sra.role_key, u.id AS user_id
             FROM   sow_reviewer_assignments sra
             JOIN   users u ON u.id = sra.user_id
-            WHERE  sra.sow_id = $1 AND sra.stage_key = $2 AND sra.role_key = $3
+            WHERE  sra.sow_id = $1
+              AND  sra.stage_key = $2
+              AND  sra.role_key = ANY($3::text[])
               AND  u.is_active = TRUE
             """,
             sow_id,
             stage_key,
-            role_key,
+            role_keys,
         )
-        if designated:
+        designated_by_role = {r["role_key"]: r["user_id"] for r in designated_rows}
+
+    # Batch the defensive-fallback lookup: only for the role keys that did
+    # NOT get a designated reviewer above.  DISTINCT ON (role) keeps a single
+    # candidate per role to mirror the original ``LIMIT 1`` behaviour.
+    fallback_role_keys = [rk for rk in role_keys if rk not in designated_by_role]
+    fallback_by_role: dict[str, int] = {}
+    if fallback_role_keys:
+        fallback_rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (role) role, id
+            FROM   users
+            WHERE  role = ANY($1::text[]) AND is_active = TRUE
+            ORDER  BY role, id
+            """,
+            fallback_role_keys,
+        )
+        fallback_by_role = {r["role"]: r["id"] for r in fallback_rows}
+
+    assigned: list[str] = []
+    for role in role_specs:
+        role_key = role["role_key"]
+        slot_assigned = False
+
+        # 1. Pre-designated reviewer (author's choice on the SoW page)
+        designated_user_id = designated_by_role.get(role_key)
+        if designated_user_id is not None:
             await create_assignment_with_prior(
                 conn,
                 sow_id=sow_id,
-                user_id=designated["id"],
+                user_id=designated_user_id,
                 reviewer_role=role_key,
                 stage=assignment_stage,
             )
-            await seed_collaboration(conn, sow_id, designated["id"], "approver")
+            await seed_collaboration(conn, sow_id, designated_user_id, "approver")
             slot_assigned = True
         else:
             # 2. Defensive fallback: first active user with matching role.
-            reviewer = await conn.fetchrow(
-                "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
-                role_key,
-            )
-            if reviewer:
+            fallback_user_id = fallback_by_role.get(role_key)
+            if fallback_user_id is not None:
                 await create_assignment_with_prior(
                     conn,
                     sow_id=sow_id,
-                    user_id=reviewer["id"],
+                    user_id=fallback_user_id,
                     reviewer_role=role_key,
                     stage=assignment_stage,
                 )
-                await seed_collaboration(conn, sow_id, reviewer["id"], "approver")
+                await seed_collaboration(conn, sow_id, fallback_user_id, "approver")
                 slot_assigned = True
 
         # 3. Always assign every SoW author so they see their own SoW in

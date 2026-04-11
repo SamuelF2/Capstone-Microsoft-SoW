@@ -16,6 +16,8 @@ import {
   JOIN_MODES,
   isParallelGateway,
   SEND_BACK_TARGETS,
+  KNOWN_REVIEWER_ROLES,
+  roleLabel,
 } from '../../lib/workflowStages';
 
 const MIDDLE_STAGE_TYPES = [
@@ -31,8 +33,6 @@ const APPROVAL_MODES = [
   { value: 'majority', label: 'Majority vote' },
   { value: 'threshold', label: 'Custom threshold' },
 ];
-
-const KNOWN_ROLES = ['solution-architect', 'sqa-reviewer', 'cpl', 'cdp', 'delivery-manager'];
 
 const ESAP_LEVELS = [
   { key: 'type-1', color: '#ef4444' },
@@ -831,7 +831,9 @@ function StageForm({ node, onChange, onDelete, nodes, edges }) {
 // ── RoleRow ───────────────────────────────────────────────────────────────
 
 function RoleRow({ role, onUpdate, onRemove }) {
-  const [custom, setCustom] = useState(!!role.role_key && !KNOWN_ROLES.includes(role.role_key));
+  const [custom, setCustom] = useState(
+    !!role.role_key && !KNOWN_REVIEWER_ROLES.includes(role.role_key)
+  );
 
   return (
     <div
@@ -861,9 +863,9 @@ function RoleRow({ role, onUpdate, onRemove }) {
             style={{ flex: 1, fontSize: 'var(--font-size-xs)' }}
           >
             <option value="">Select role…</option>
-            {KNOWN_ROLES.map((k) => (
+            {KNOWN_REVIEWER_ROLES.map((k) => (
               <option key={k} value={k}>
-                {k.replace(/-/g, ' ')}
+                {roleLabel(k)}
               </option>
             ))}
             <option value="__custom__">Custom role…</option>

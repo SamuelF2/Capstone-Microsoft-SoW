@@ -21,97 +21,32 @@
  *   onSaved  (workflow)=>void  — fired after a successful PUT
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { useAuth } from '../../lib/auth';
+import useWorkflowEditorState from '../../lib/hooks/useWorkflowEditorState';
 import WorkflowFlowEditor from '../workflow/WorkflowFlowEditor';
-
-function stageTransitionSignature(workflow) {
-  if (!workflow?.workflow_data) return '';
-  return JSON.stringify({
-    stages: workflow.workflow_data.stages || [],
-    transitions: workflow.workflow_data.transitions || [],
-  });
-}
 
 export default function LiveWorkflowEditor({ sowId, onSaved }) {
   const { authFetch } = useAuth();
 
-  const [workflow, setWorkflow] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [savedAt, setSavedAt] = useState(null);
-
-  // Snapshot of the last loaded/saved server state — used to detect dirty.
-  const baselineRef = useRef('');
-  // Synchronous accessor for the freshest graph state from the editor.
-  const getWorkflowDataRef = useRef(null);
-
-  // ── Load on mount / sowId change ────────────────────────────────────────
-  useEffect(() => {
-    if (!sowId) return;
-    let cancelled = false;
-
-    setLoading(true);
-    setLoadError(null);
-    authFetch(`/api/workflow/sow/${sowId}`)
-      .then(async (r) => {
-        if (cancelled) return;
-        if (!r.ok) {
-          const text = await r.text().catch(() => '');
-          throw new Error(text || `Failed to load workflow (${r.status})`);
-        }
-        const data = await r.json();
-        const wrapped = {
-          ...data,
-          // WorkflowFlowEditor uses `loaded_at` as part of its signature to
-          // know when to reset internal graph state.  Setting it once on
-          // load (and again after each successful save) prevents the editor
-          // from blowing away in-progress edits on every parent re-render.
-          loaded_at: Date.now(),
-        };
-        if (!cancelled) {
-          setWorkflow(wrapped);
-          baselineRef.current = stageTransitionSignature(wrapped);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setLoadError(e.message || 'Failed to load workflow');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  // Stable loader/persist refs — useCallback so they only change when sowId
+  // does, which is what drives a re-load.
+  const loader = useCallback(async () => {
+    if (!sowId) return null;
+    const r = await authFetch(`/api/workflow/sow/${sowId}`);
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(text || `Failed to load workflow (${r.status})`);
+    }
+    return r.json();
   }, [sowId, authFetch]);
 
-  // ── Dirty detection ─────────────────────────────────────────────────────
-  // The editor calls `onChange` on every graph mutation, which updates
-  // `workflow` here.  We compare its current signature against the baseline
-  // to derive `hasChanges` without an extra effect.
-  const hasChanges = useMemo(() => {
-    if (!workflow) return false;
-    return stageTransitionSignature(workflow) !== baselineRef.current;
-  }, [workflow]);
-
-  // ── Save ────────────────────────────────────────────────────────────────
-  const handleSave = useCallback(async () => {
-    if (!workflow || !sowId) return;
-    setSaveError(null);
-
-    // Read the freshest graph state directly from the editor — the async
-    // onChange propagation may not have flushed yet.
-    const freshData = getWorkflowDataRef.current?.() ?? workflow.workflow_data;
-    const payload = {
-      stages: freshData.stages || [],
-      transitions: freshData.transitions || [],
-    };
-
-    setSaving(true);
-    try {
+  const persist = useCallback(
+    async ({ workflowData }) => {
+      const payload = {
+        stages: workflowData.stages || [],
+        transitions: workflowData.transitions || [],
+      };
       const res = await authFetch(`/api/workflow/sow/${sowId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -128,18 +63,29 @@ export default function LiveWorkflowEditor({ sowId, onSaved }) {
         }
         throw new Error(detail);
       }
-      const updated = await res.json();
-      const wrapped = { ...updated, loaded_at: Date.now() };
-      setWorkflow(wrapped);
-      baselineRef.current = stageTransitionSignature(wrapped);
-      setSavedAt(new Date());
-      if (typeof onSaved === 'function') onSaved(updated);
-    } catch (e) {
-      setSaveError(e.message || 'Save failed');
-    } finally {
-      setSaving(false);
-    }
-  }, [workflow, sowId, authFetch, onSaved]);
+      return res.json();
+    },
+    [sowId, authFetch]
+  );
+
+  const {
+    workflow,
+    setWorkflow,
+    loading,
+    loadError,
+    saving,
+    saveError,
+    setSaveError,
+    savedAt,
+    hasChanges,
+    getWorkflowDataRef,
+    save,
+  } = useWorkflowEditorState({ loader, persist, deps: [sowId] });
+
+  const handleSave = useCallback(async () => {
+    const updated = await save();
+    if (updated && typeof onSaved === 'function') onSaved(updated);
+  }, [save, onSaved]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   if (loading) {

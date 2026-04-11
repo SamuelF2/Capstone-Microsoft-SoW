@@ -12,8 +12,31 @@ share a transaction with the caller's query.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException, status
+
+_MISSING = object()
+
+
+def safe_json(value: Any, default: Any = _MISSING) -> Any:
+    """Parse a value that may already be a dict/list or a JSON string.
+
+    Returns ``None`` if ``value`` is ``None`` and no ``default`` is provided.
+    If ``default`` is supplied, it is returned for both ``None`` and unparseable
+    inputs (instead of falling through to the raw value). This consolidates the
+    three subtly different ``_safe_json`` implementations that previously lived
+    in ``sow.py``, ``review.py``, and ``finalize.py``.
+    """
+    if value is None:
+        return default if default is not _MISSING else None
+    if isinstance(value, dict | list):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default if default is not _MISSING else value
 
 
 async def require_collaborator(conn, sow_id: int, user_id: int) -> None:
@@ -167,4 +190,153 @@ async def require_author(conn, sow_id: int, user_id: int) -> None:
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Only the SoW author can perform this action",
+    )
+
+
+# ── Higher-level helpers ──────────────────────────────────────────────────
+
+
+async def load_sow_with_auth(
+    conn,
+    sow_id: int,
+    current_user,
+    *,
+    action: str = "read",
+    columns: str = "*",
+    for_update: bool = False,
+):
+    """Load a SoW row and verify the caller may act on it.
+
+    The pattern ``SELECT ... FROM sow_documents WHERE id = $1`` → ``404 if
+    missing`` → collaborator/author check repeats 18+ times across the SoW
+    routers.  This helper collapses those three steps into a single call.
+
+    Parameters
+    ----------
+    action: ``"read"`` and ``"approve"`` use ``require_collaborator`` (any
+        collaborator may read or approve via the review pipeline).  ``"write"``
+        uses ``require_author`` (only the SoW author or an admin may directly
+        edit the document).  Unknown actions fall through to ``read`` semantics.
+    columns: Column projection to fetch.  Defaults to ``*``; callers that only
+        need a few fields can pass ``"id, status"`` etc.
+    for_update: When ``True``, appends ``FOR UPDATE`` to the SELECT so the row
+        is row-locked for the duration of the caller's transaction.  Use this
+        when reading state that you intend to write back to (e.g. status
+        transitions, finalize lock) to prevent TOCTOU races.
+
+    Returns the asyncpg ``Record`` for the SoW row.  Raises 404 if the SoW
+    does not exist or the caller is not authorized (collaborator check uses
+    404 to avoid leaking SoW existence).
+    """
+    if action == "write":
+        await require_author(conn, sow_id=sow_id, user_id=current_user.id)
+    else:
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+    query = f"SELECT {columns} FROM sow_documents WHERE id = $1"  # noqa: S608
+    if for_update:
+        query += " FOR UPDATE"
+    row = await conn.fetchrow(query, sow_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+    return row
+
+
+# ── Audit history ─────────────────────────────────────────────────────────
+
+
+def build_diff(
+    before: dict | None, after: dict | None, changed_keys: list[str] | None = None
+) -> dict:
+    """Build the canonical history diff shape ``{before, after, changed_keys}``.
+
+    Previously the codebase wrote at least six different diff shapes — some
+    nested ``{old, new}`` per field, some flat dictionaries with arbitrary keys.
+    Frontends had to handle every variant.  New writes should always go
+    through this helper so the audit history has a consistent structure.
+    """
+    if changed_keys is None:
+        before_keys = set((before or {}).keys())
+        after_keys = set((after or {}).keys())
+        all_keys = before_keys | after_keys
+        changed_keys = sorted(k for k in all_keys if (before or {}).get(k) != (after or {}).get(k))
+    return {
+        "before": before or {},
+        "after": after or {},
+        "changed_keys": changed_keys,
+    }
+
+
+async def record_history(
+    conn,
+    sow_id: int,
+    user_id: int,
+    change_type: str,
+    *,
+    before: dict | None = None,
+    after: dict | None = None,
+    changed_keys: list[str] | None = None,
+) -> None:
+    """Record an audit history entry using the canonical diff shape.
+
+    Thin wrapper over ``insert_history`` that funnels every write through
+    ``build_diff`` so callers can't accidentally invent new diff shapes.
+    """
+    await insert_history(
+        conn,
+        sow_id,
+        user_id,
+        change_type,
+        build_diff(before, after, changed_keys),
+    )
+
+
+# ── Review results ────────────────────────────────────────────────────────
+
+
+async def record_review_result(
+    conn,
+    *,
+    sow_id: int,
+    reviewer_email: str,
+    reviewer_user_id: int,
+    review_stage: str,
+    decision: str,
+    comments: str | None = None,
+    action_items: list | None = None,
+    checklist_responses: list | None = None,
+    conditions: list | None = None,
+    score: float | None = None,
+) -> None:
+    """Insert an audit row into ``review_results``.
+
+    Consolidates the two near-identical ``INSERT INTO review_results`` calls
+    that previously lived in ``review.py`` (one for normal decisions, one for
+    send-back).  ``action_items`` is folded into the ``findings`` payload
+    alongside ``comments`` so the historical column shape is preserved.
+    """
+    findings: dict[str, Any] = {}
+    if comments is not None:
+        findings["comments"] = comments
+    if action_items is not None:
+        findings["action_items"] = action_items
+
+    await conn.execute(
+        """
+        INSERT INTO review_results
+            (sow_id, reviewer, score, findings, reviewed_at,
+             reviewer_user_id, review_stage, checklist_responses, decision, conditions)
+        VALUES
+            ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10::jsonb)
+        """,
+        sow_id,
+        reviewer_email,
+        score,
+        json.dumps(findings),
+        datetime.now(UTC),
+        reviewer_user_id,
+        review_stage,
+        json.dumps(checklist_responses if checklist_responses is not None else []),
+        decision,
+        json.dumps(conditions) if conditions else None,
     )

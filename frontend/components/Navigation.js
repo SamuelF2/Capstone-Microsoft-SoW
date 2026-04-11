@@ -3,6 +3,11 @@ import { useRouter } from 'next/router';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+import { roleLabel as fullRoleLabel } from '../lib/workflowStages';
+
+// CPL/CDP get a nav-compact alias; everything else uses the canonical label.
+// This is the only place in the app that prefers the abbreviated forms.
+const NAV_COMPACT_OVERRIDES = { cpl: 'CPL', cdp: 'CDP' };
 
 export default function Navigation() {
   const router = useRouter();
@@ -25,16 +30,9 @@ export default function Navigation() {
   ];
 
   // Human-readable label for the current (possibly-overridden) role.
-  const ROLE_LABELS = {
-    consultant: 'Consultant',
-    'solution-architect': 'Solution Architect',
-    'sqa-reviewer': 'SQA Reviewer',
-    cpl: 'CPL',
-    cdp: 'CDP',
-    'delivery-manager': 'Delivery Manager',
-    'system-admin': 'System Admin',
-  };
-  const roleLabel = user?.role ? ROLE_LABELS[user.role] || user.role : null;
+  const roleLabel = user?.role
+    ? NAV_COMPACT_OVERRIDES[user.role] || fullRoleLabel(user.role)
+    : null;
   const roleIsOverridden = !!user?._baseRole && user._baseRole !== user.role;
 
   const navLinkStyle = (path) => ({

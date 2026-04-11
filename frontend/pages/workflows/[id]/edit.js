@@ -17,12 +17,13 @@
  *     the user can clone them into their own template via "Save as copy".
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../../lib/auth';
 import Spinner from '../../../components/Spinner';
 import WorkflowFlowEditor from '../../../components/workflow/WorkflowFlowEditor';
+import useWorkflowEditorState from '../../../lib/hooks/useWorkflowEditorState';
 import { emptyWorkflowData } from '../../../lib/workflowEditor';
 
 export default function WorkflowEditPage() {
@@ -30,89 +31,42 @@ export default function WorkflowEditPage() {
   const { id } = router.query;
   const { user, authFetch } = useAuth();
 
-  const [workflow, setWorkflow] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // Ref to synchronously read the freshest workflow_data from the editor,
-  // bypassing the async useEffect propagation that can lag behind user edits.
-  const getWorkflowDataRef = useRef(null);
-  const [loadError, setLoadError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [savedAt, setSavedAt] = useState(null);
-
-  // Load the template (or initialize a blank one for "new"). We set a stable
-  // `loaded_at` so the editor only resets its internal graph state on the
-  // initial load, not on every re-render.
-  useEffect(() => {
-    if (!id || !user) return;
+  // ── Loader: handles "new" template + numeric template id ─────────────────
+  const loader = useCallback(async () => {
+    if (!id || !user) return null;
     if (id === 'new') {
-      setWorkflow({
+      return {
         id: null,
         name: '',
         description: '',
         is_system: false,
         created_by: user.id,
         workflow_data: emptyWorkflowData(),
-        loaded_at: Date.now(),
-      });
-      setLoading(false);
-      return;
+      };
     }
-
     const numericId = Number(id);
-    if (!Number.isFinite(numericId)) {
-      setLoadError('Invalid workflow id.');
-      setLoading(false);
-      return;
+    if (!Number.isFinite(numericId)) throw new Error('Invalid workflow id.');
+    const r = await authFetch(`/api/workflow/templates/${numericId}`);
+    if (!r.ok) {
+      throw new Error(
+        r.status === 404 ? 'Workflow not found.' : `Failed to load workflow (${r.status})`
+      );
     }
-
-    authFetch(`/api/workflow/templates/${numericId}`)
-      .then(async (r) => {
-        if (!r.ok) {
-          throw new Error(
-            r.status === 404 ? 'Workflow not found.' : `Failed to load workflow (${r.status})`
-          );
-        }
-        const data = await r.json();
-        setWorkflow({ ...data, loaded_at: Date.now() });
-        setLoading(false);
-      })
-      .catch((e) => {
-        setLoadError(e.message || 'Failed to load workflow.');
-        setLoading(false);
-      });
+    return r.json();
   }, [id, user, authFetch]);
 
-  // ── Permission derivation ─────────────────────────────────────────────────
-  // Backend enforces is_system; ownership mismatch is surfaced client-side
-  // as a "view only — save as copy" hint until the backend grows per-user ACLs.
-
-  const isSystem = !!workflow?.is_system;
-  const isOwnTemplate =
-    workflow &&
-    (workflow.id == null || workflow.created_by == null || workflow.created_by === user?.id);
-  const readOnly = isSystem || !isOwnTemplate;
-
-  // ── Save / Save as copy ───────────────────────────────────────────────────
-
-  const save = async ({ asCopy = false } = {}) => {
-    if (!workflow) return;
-    setSaveError(null);
-    if (!workflow.name?.trim()) {
-      setSaveError('Workflow name is required.');
-      return;
-    }
-    // Read the freshest graph state directly from the editor ref to avoid
-    // stale workflow_data when the async propagation effect hasn't fired yet.
-    const freshData = getWorkflowDataRef.current?.() ?? workflow.workflow_data;
-    const payload = {
-      name: asCopy ? `${workflow.name} (copy)` : workflow.name.trim(),
-      description: workflow.description?.trim() || null,
-      workflow_data: freshData,
-    };
-    setSaving(true);
-    try {
+  // ── Persist: POST /templates for new, PUT /templates/{id} for existing ──
+  const persist = useCallback(
+    async ({ workflowData, workflow, options }) => {
+      if (!workflow.name?.trim()) {
+        throw new Error('Workflow name is required.');
+      }
+      const asCopy = !!options?.asCopy;
+      const payload = {
+        name: asCopy ? `${workflow.name} (copy)` : workflow.name.trim(),
+        description: workflow.description?.trim() || null,
+        workflow_data: workflowData,
+      };
       const isNew = workflow.id == null || asCopy;
       const url = isNew ? '/api/workflow/templates' : `/api/workflow/templates/${workflow.id}`;
       const res = await authFetch(url, {
@@ -125,20 +79,43 @@ export default function WorkflowEditPage() {
         throw new Error(body.detail || `Save failed (${res.status})`);
       }
       const saved = await res.json();
-      // Preserve loaded_at so the editor's internal state doesn't reset on
-      // the post-save refresh.
-      setWorkflow({ ...saved, loaded_at: workflow.loaded_at });
-      setSavedAt(new Date());
       if (isNew) {
         // Route to the canonical URL once we have an id.
         router.replace(`/workflows/${saved.id}/edit`, undefined, { shallow: true });
       }
-    } catch (e) {
-      setSaveError(e.message || 'Save failed');
-    } finally {
-      setSaving(false);
-    }
-  };
+      return saved;
+    },
+    [authFetch, router]
+  );
+
+  const {
+    workflow,
+    setWorkflow,
+    loading,
+    loadError,
+    saving,
+    saveError,
+    savedAt,
+    getWorkflowDataRef,
+    save: saveWorkflow,
+  } = useWorkflowEditorState({ loader, persist, deps: [id, user] });
+
+  // ── Permission derivation ─────────────────────────────────────────────────
+  // Backend enforces is_system; ownership mismatch is surfaced client-side
+  // as a "view only — save as copy" hint until the backend grows per-user ACLs.
+
+  const isSystem = !!workflow?.is_system;
+  const isOwnTemplate =
+    workflow &&
+    (workflow.id == null || workflow.created_by == null || workflow.created_by === user?.id);
+  const readOnly = isSystem || !isOwnTemplate;
+
+  // ── Save / Save as copy ───────────────────────────────────────────────────
+  // Both reuse the shared hook's save() with options forwarded through.
+  const save = useCallback(
+    ({ asCopy = false } = {}) => saveWorkflow({ asCopy, preserveLoadedAt: true }),
+    [saveWorkflow]
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 

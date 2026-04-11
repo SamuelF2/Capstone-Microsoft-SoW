@@ -96,33 +96,47 @@ export default function AttachmentManager({
 
   // ── Load attachments & requirements ────────────────────────────────────
 
-  const load = useCallback(async () => {
-    if (!sowId || !authFetch) return;
-    try {
-      setLoading(true);
-      const fetches = [authFetch(`/api/attachments/sow/${sowId}`)];
-      if (showRequirements) {
-        fetches.push(authFetch(`/api/attachments/sow/${sowId}/requirements`));
-      }
+  // ``signal`` is optional — passed by the mount effect for cancellation,
+  // omitted by manual refresh callers (after upload/delete) where we want
+  // the new state regardless.
+  const load = useCallback(
+    async (signal) => {
+      if (!sowId || !authFetch) return;
+      try {
+        setLoading(true);
+        const fetches = [authFetch(`/api/attachments/sow/${sowId}`, { signal })];
+        if (showRequirements) {
+          fetches.push(authFetch(`/api/attachments/sow/${sowId}/requirements`, { signal }));
+        }
 
-      const results = await Promise.all(fetches);
+        const results = await Promise.all(fetches);
+        if (signal?.aborted) return;
 
-      if (results[0].ok) {
-        setAttachments(await results[0].json());
+        if (results[0].ok) {
+          const data = await results[0].json();
+          if (signal?.aborted) return;
+          setAttachments(data);
+        }
+        if (showRequirements && results[1] && results[1].ok) {
+          const reqs = await results[1].json();
+          if (signal?.aborted) return;
+          setRequirements(reqs);
+        }
+        setError(null);
+      } catch (err) {
+        if (err?.name === 'AbortError' || signal?.aborted) return;
+        setError('Failed to load attachments');
+      } finally {
+        if (!signal?.aborted) setLoading(false);
       }
-      if (showRequirements && results[1] && results[1].ok) {
-        setRequirements(await results[1].json());
-      }
-      setError(null);
-    } catch (err) {
-      setError('Failed to load attachments');
-    } finally {
-      setLoading(false);
-    }
-  }, [sowId, authFetch, showRequirements]);
+    },
+    [sowId, authFetch, showRequirements]
+  );
 
   useEffect(() => {
-    load();
+    const ctrl = new AbortController();
+    load(ctrl.signal);
+    return () => ctrl.abort();
   }, [load]);
 
   // ── Upload handler ─────────────────────────────────────────────────────

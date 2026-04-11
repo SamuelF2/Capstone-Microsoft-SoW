@@ -20,11 +20,12 @@ export default function WorkflowTemplateSelector({ selectedTemplateId, onSelect,
   const [defaultId, setDefaultId] = useState(null);
 
   useEffect(() => {
-    let cancelled = false;
-    authFetch('/api/workflow/templates')
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
+    authFetch('/api/workflow/templates', { signal })
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => {
-        if (cancelled) return;
+        if (signal.aborted) return;
         setTemplates(data);
         // Auto-select the system default template on first load
         const def = data.find((t) => t.is_system);
@@ -36,12 +37,11 @@ export default function WorkflowTemplateSelector({ selectedTemplateId, onSelect,
         }
         setLoading(false);
       })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
+      .catch((e) => {
+        if (e?.name === 'AbortError') return;
+        setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [authFetch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build a short stage preview string like "6 stages: Draft → AI Review → …"

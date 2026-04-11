@@ -11,7 +11,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
 import { formatDate, formatDeal, esapBadgeStyle } from '../lib/format';
-import { assignmentStageLabel } from '../lib/workflowStages';
+import { assignmentStageLabel, roleLabel } from '../lib/workflowStages';
 
 const ASSIGNMENT_STATUS_STYLES = {
   pending: {
@@ -35,14 +35,6 @@ const ASSIGNMENT_STATUS_STYLES = {
     dot: 'var(--color-success)',
     label: 'Completed',
   },
-};
-
-const ROLE_DISPLAY = {
-  'solution-architect': 'Solution Architect',
-  'sqa-reviewer': 'SQA Reviewer',
-  cpl: 'Customer Practice Lead',
-  cdp: 'Customer Delivery Partner',
-  'delivery-manager': 'Delivery Manager',
 };
 
 // ── ReviewCard ────────────────────────────────────────────────────────────────
@@ -154,7 +146,7 @@ function ReviewCard({ assignment }) {
           )}
           <span className="text-sm text-secondary">
             <strong style={{ color: 'var(--color-text-primary)' }}>Your Role:</strong>{' '}
-            {ROLE_DISPLAY[assignment.reviewer_role] || assignment.reviewer_role}
+            {roleLabel(assignment.reviewer_role)}
           </span>
           <span className="text-sm text-secondary">
             <strong style={{ color: 'var(--color-text-primary)' }}>Stage:</strong>{' '}
@@ -206,15 +198,18 @@ export default function MyReviews() {
   const [activeTab, setActiveTab] = useState('pending');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setLoading(true);
     setError(null);
-    authFetch('/api/review/assigned')
+    authFetch('/api/review/assigned', { signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load reviews (${res.status})`);
         return res.json();
       })
       .then((data) => {
+        if (signal.aborted) return;
         // The backend keys this list off ``ra.user_id`` only — every row
         // belongs to the current user — so we trust it without re-filtering.
         // (We used to narrow by ``user.role`` to simulate a role-override
@@ -225,9 +220,11 @@ export default function MyReviews() {
         setLoading(false);
       })
       .catch((err) => {
+        if (err?.name === 'AbortError' || signal.aborted) return;
         setError(err.message);
         setLoading(false);
       });
+    return () => ctrl.abort();
   }, [user, authFetch]);
 
   const pending = assignments.filter((a) => a.status === 'pending');

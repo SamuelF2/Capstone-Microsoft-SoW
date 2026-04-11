@@ -56,35 +56,43 @@ export default function WorkflowProgress({
 
   useEffect(() => {
     if (!sowId) return;
-    let cancelled = false;
+    // AbortController cancels the in-flight HTTP requests on unmount or
+    // re-run, not just the setState.  ``authFetch`` forwards ``signal`` into
+    // the underlying fetch() call, so the network request itself terminates
+    // when this controller aborts.
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
 
-    authFetch(`/api/workflow/sow/${sowId}`)
+    authFetch(`/api/workflow/sow/${sowId}`, { signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && data) {
-          setWorkflowData(data.workflow_data);
-          setParallelBranches(data.parallel_branches || null);
+        if (signal.aborted || !data) return;
+        setWorkflowData(data.workflow_data);
+        setParallelBranches(data.parallel_branches || null);
+      })
+      .catch((e) => {
+        if (e?.name !== 'AbortError') {
+          // swallow non-abort errors silently — banner is rendered elsewhere
         }
-      })
-      .catch(() => {});
+      });
 
-    authFetch(`/api/coa/sow/${sowId}/summary`)
+    authFetch(`/api/coa/sow/${sowId}/summary`, { signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled) setCoaSummary(data);
+        if (signal.aborted) return;
+        setCoaSummary(data);
       })
       .catch(() => {});
 
-    authFetch(`/api/attachments/sow/${sowId}/requirements`)
+    authFetch(`/api/attachments/sow/${sowId}/requirements`, { signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled) setAttachmentReqs(data);
+        if (signal.aborted) return;
+        setAttachmentReqs(data);
       })
       .catch(() => {});
 
-    return () => {
-      cancelled = true;
-    };
+    return () => ctrl.abort();
   }, [sowId, currentStage, refreshKey, authFetch]);
 
   useEffect(() => {
