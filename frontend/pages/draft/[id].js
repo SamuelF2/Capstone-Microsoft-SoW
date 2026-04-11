@@ -8,6 +8,7 @@ import Spinner from '../../components/Spinner';
 import AttachmentManager from '../../components/AttachmentManager';
 import WorkflowProgress from '../../components/WorkflowProgress';
 import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
+import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPanel';
 import ActivityLog from '../../components/ActivityLog';
 
 // Shared components
@@ -485,7 +486,13 @@ export default function DraftPage() {
 
   const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
-  // Submit the SoW for review — calls submit-for-review then redirects to AI review
+  // Submit the SoW for review.  The backend resolves the SoW's workflow to
+  // figure out which stage actually follows draft (it isn't always
+  // ai_review — custom workflows may skip the AI review entirely), so we
+  // inspect the returned status here to decide where to send the user.
+  // Routing to /ai-review for a SoW that's already past ai_review breaks
+  // that page, so we only go there when the backend says we landed in
+  // ai_review.
   const handleSubmitForReview = async () => {
     setIsSubmitting(true);
     setSubmitError(null);
@@ -507,7 +514,16 @@ export default function DraftPage() {
         throw new Error(detail?.detail || `Server error ${res.status}`);
       }
 
-      router.push(`/ai-review?sowId=${id}`);
+      const updated = await res.json().catch(() => ({}));
+      if (updated?.status === 'ai_review') {
+        router.push(`/ai-review?sowId=${id}`);
+      } else {
+        // The workflow doesn't have an AI review immediately after draft —
+        // the SoW is now sitting in whatever stage the workflow points at
+        // (e.g. an internal review). Drop the author at the SoW management
+        // page so they can see the new stage and any reviewer assignments.
+        router.push(`/sow/${id}/manage`);
+      }
     } catch (err) {
       setSubmitError(err.message);
     } finally {
@@ -712,6 +728,14 @@ export default function DraftPage() {
                 }}
               >
                 <SaveIndicator savedAt={savedAt} />
+                {sowData.status && sowData.status !== 'draft' && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => router.push(`/sow/${id}/manage`)}
+                  >
+                    Manage workflow
+                  </button>
+                )}
                 <button className="btn btn-secondary" onClick={() => router.push('/all-sows')}>
                   All SoWs
                 </button>
@@ -736,6 +760,38 @@ export default function DraftPage() {
             />
             <div style={{ marginTop: 'var(--spacing-sm)' }}>
               <WorkflowReadOnlySummary sowId={id} />
+            </div>
+            <div style={{ marginTop: 'var(--spacing-md)' }}>
+              <ReviewerAssignmentPanel
+                sowId={id}
+                readOnly={(sowData.status || 'draft') !== 'draft'}
+              />
+              {sowData.status && sowData.status !== 'draft' && (
+                <div
+                  style={{
+                    marginTop: 'var(--spacing-xs)',
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-secondary)',
+                    fontStyle: 'italic',
+                  }}
+                >
+                  Live edits available on{' '}
+                  <a
+                    href={`/sow/${id}/manage`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      router.push(`/sow/${id}/manage`);
+                    }}
+                    style={{
+                      color: 'var(--color-accent-blue)',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    /sow/{id}/manage
+                  </a>
+                  .
+                </div>
+              )}
             </div>
           </div>
         </div>

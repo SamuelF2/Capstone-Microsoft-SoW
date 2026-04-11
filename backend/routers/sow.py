@@ -55,6 +55,8 @@ from models import (
     ContentTemplateResponse,
     HistoryEntryResponse,
     ParseResult,
+    ReviewerSelectionPayload,
+    ReviewerSlot,
     SectionResult,
     SoWCreate,
     SoWResponse,
@@ -66,6 +68,7 @@ from services.ai import analyze_sow
 from utils.db_helpers import (
     create_assignment_with_prior,
     insert_history,
+    require_author,
     require_collaborator,
     seed_collaboration,
 )
@@ -206,8 +209,13 @@ async def list_sows(
     where = "WHERE " + " AND ".join(conditions)
     params.extend([limit, offset])
 
+    # ``is_author`` is computed by an EXISTS so it's correct even when a
+    # user has multiple collaboration rows on the same SoW (e.g. author +
+    # approver). Using DISTINCT below collapses any duplicate rows the
+    # collaboration JOIN might produce for the same reason.
     query = f"""
-        SELECT  s.id, s.title, s.status, s.cycle, s.methodology,
+        SELECT  DISTINCT
+                s.id, s.title, s.status, s.cycle, s.methodology,
                 s.customer_name, s.opportunity_id, s.deal_value,
                 s.esap_level, s.estimated_margin,
                 s.client_id, s.updated_at,
@@ -216,7 +224,14 @@ async def list_sows(
                     FROM   jsonb_array_elements(sw.workflow_data->'stages') elem
                     WHERE  elem->>'stage_key' = sw.current_stage
                     LIMIT  1
-                ) AS stage_display_name
+                ) AS stage_display_name,
+                EXISTS (
+                    SELECT 1
+                    FROM   collaboration c2
+                    WHERE  c2.sow_id = s.id
+                      AND  c2.user_id = $1
+                      AND  c2.role = 'author'
+                ) AS is_author
         FROM    sow_documents s
         JOIN    collaboration c ON c.sow_id = s.id
         LEFT JOIN sow_workflow sw ON sw.sow_id = s.id
@@ -456,6 +471,22 @@ async def upload_sow(
         # Audit trail
         await insert_history(conn, sow_id=sow_id, user_id=current_user.id, change_type="created")
 
+        # Create workflow instance (mirrors create_sow lines 352-364) so
+        # downstream stage transitions (proceed_to_review) can locate the
+        # per-SoW snapshot instead of 409-ing on missing workflow data.
+        _template_id = await get_default_template_id(conn)
+        if _template_id is not None:
+            snapshot = await build_workflow_snapshot(conn, _template_id)
+            await conn.execute(
+                """
+                INSERT INTO sow_workflow (sow_id, template_id, current_stage, workflow_data)
+                VALUES ($1, $2, 'draft', $3::jsonb)
+                """,
+                sow_id,
+                _template_id,
+                json.dumps(snapshot),
+            )
+
     # ── Save file to disk (UUID name prevents directory traversal) ──────
     safe_filename = f"{sow_id}_{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(UPLOAD_DIR, safe_filename)
@@ -675,6 +706,35 @@ async def get_sow(sow_id: int, current_user: CurrentUser) -> SoWResponse:
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
     return _row_to_response(dict(row))
+
+
+# ── Current user's collaboration role on a SoW ───────────────────────────────
+
+
+@router.get(
+    "/{sow_id}/my-role",
+    summary="Return the current user's collaboration role on a SoW",
+)
+async def get_my_collaboration_role(sow_id: int, current_user: CurrentUser) -> dict:
+    """Return the current user's collaboration role on this SoW.
+
+    Used by the ``/sow/[id]/manage`` page to gate access client-side.
+    A real ``system-admin`` with no explicit collaboration row is treated
+    as ``"admin"`` so they can administer any SoW.
+
+    Returns ``{"role": "<role>"}`` or 404 if the user has no access.
+    """
+    async with database.pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT role FROM collaboration WHERE sow_id = $1 AND user_id = $2",
+            sow_id,
+            current_user.id,
+        )
+    if row:
+        return {"role": row["role"]}
+    if (current_user.role or "").lower() == "system-admin":
+        return {"role": "admin"}
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
 
 # ── Partial update (auto-save) ────────────────────────────────────────────────
@@ -1229,22 +1289,319 @@ async def parse_sow(sow_id: int, current_user: CurrentUser) -> ParseResult:
     )
 
 
+# ── Reviewer Designation ─────────────────────────────────────────────────────
+#
+# Lets the SoW author pick which user will fill each required reviewer role
+# at each review/approval stage.  Persisted in ``sow_reviewer_assignments``
+# and consumed by ``create_stage_assignments`` (workflow_engine.py) at
+# transition time.  Designations may be edited at any non-terminal status —
+# while in ``draft`` the picks are dormant; once past ``draft`` the
+# PUT endpoint also rewrites live ``review_assignments`` rows so swaps take
+# effect immediately (see ``set_sow_reviewers`` for the cancel-and-recreate
+# semantics).
+
+# Display labels for the standard reviewer roles. Custom roles fall back to
+# a humanized version of the role_key.
+_ROLE_DISPLAY_NAMES: dict[str, str] = {
+    "solution-architect": "Solution Architect",
+    "sqa-reviewer": "SQA Reviewer",
+    "cpl": "Customer Practice Lead",
+    "cdp": "Customer Delivery Partner",
+    "delivery-manager": "Delivery Manager",
+}
+
+
+def _humanize_role(role_key: str) -> str:
+    return _ROLE_DISPLAY_NAMES.get(role_key) or role_key.replace("-", " ").title()
+
+
+@router.get(
+    "/{sow_id}/reviewers",
+    response_model=list[ReviewerSlot],
+    summary="List required reviewer slots and current designations for a SoW",
+)
+async def get_sow_reviewers(sow_id: int, current_user: CurrentUser) -> list[ReviewerSlot]:
+    """Return one slot per (stage, required role) for every review/approval
+    stage in the SoW's workflow snapshot, joined with the currently designated
+    user (if any).
+
+    Stages with ``stage_type`` ``review`` or ``approval`` are included.
+    Stages without ``requires_designated_reviewer = True`` in their config are
+    still listed so the author can optionally designate, but submit-for-review
+    only blocks on the flagged stages.
+
+    Available at any status (any collaborator may read), and is the data
+    source for both the draft-page reviewer panel and the post-draft
+    ``/sow/{id}/manage`` live-edit dashboard.
+    """
+    from services.workflow_engine import _load_workflow_data
+
+    async with database.pg_pool.acquire() as conn:
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        wd = await _load_workflow_data(conn, sow_id)
+
+        existing_rows = await conn.fetch(
+            """
+            SELECT sra.stage_key, sra.role_key, sra.user_id,
+                   u.email, u.full_name
+            FROM   sow_reviewer_assignments sra
+            JOIN   users u ON u.id = sra.user_id
+            WHERE  sra.sow_id = $1
+            """,
+            sow_id,
+        )
+
+    designated: dict[tuple[str, str], dict] = {
+        (r["stage_key"], r["role_key"]): {
+            "user_id": r["user_id"],
+            "email": r["email"],
+            "full_name": r["full_name"],
+        }
+        for r in existing_rows
+    }
+
+    slots: list[ReviewerSlot] = []
+    for stage in wd.get("stages", []):
+        if stage.get("stage_type") not in ("review", "approval"):
+            continue
+        for role in stage.get("roles", []):
+            if not role.get("is_required", True):
+                continue
+            key = (stage["stage_key"], role["role_key"])
+            cur = designated.get(key)
+            slots.append(
+                ReviewerSlot(
+                    stage_key=stage["stage_key"],
+                    stage_display_name=stage.get("display_name", stage["stage_key"]),
+                    role_key=role["role_key"],
+                    role_display_name=_humanize_role(role["role_key"]),
+                    user_id=cur["user_id"] if cur else None,
+                    user_email=cur["email"] if cur else None,
+                    user_full_name=cur["full_name"] if cur else None,
+                )
+            )
+    return slots
+
+
+@router.put(
+    "/{sow_id}/reviewers",
+    response_model=list[ReviewerSlot],
+    summary="Set the designated reviewer for one or more (stage, role) slots",
+)
+async def set_sow_reviewers(
+    sow_id: int,
+    payload: ReviewerSelectionPayload,
+    current_user: CurrentUser,
+) -> list[ReviewerSlot]:
+    """Upsert designated reviewers for a SoW.
+
+    Each selection is a ``(stage_key, role_key, user_id)`` tuple; a null
+    ``user_id`` clears the slot. Accepted at any non-terminal status so the
+    author can swap reviewers mid-review (the old "draft-only" gate was
+    removed in Phase 2):
+
+    - In ``draft``: only ``sow_reviewer_assignments`` is updated. Actual
+      ``review_assignments`` rows are created later by
+      ``create_stage_assignments`` when the SoW first transitions into a
+      review stage.
+    - Past ``draft``: any swapped or removed reviewer's pending /
+      in_progress ``review_assignments`` rows are canceled, and any newly
+      assigned reviewer gets a fresh row with ``carry_prior=False`` so
+      they start with a clean checklist. Gating rules are then re-evaluated
+      and the SoW auto-advances if newly satisfied (typically a no-op for
+      pure swaps, since fresh rows contribute nothing to gating).
+
+    Authorization: only the SoW author (or a system-admin) may call this —
+    enforced by ``require_author``.
+    """
+    from services.workflow_engine import (
+        _load_workflow_data,
+        recheck_and_maybe_advance,
+    )
+
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await require_author(conn, sow_id=sow_id, user_id=current_user.id)
+
+        sow = await conn.fetchrow("SELECT status FROM sow_documents WHERE id = $1", sow_id)
+        if not sow:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        wd = await _load_workflow_data(conn, sow_id)
+
+        def _runtime_stage_keys(stage_key: str) -> list[str]:
+            """Resolve a workflow ``stage_key`` to its runtime
+            ``review_assignments.stage`` keys.
+
+            Mirrors :func:`check_gating_rules`: read from
+            ``config.assignment_stage_keys``, fall back to swapping ``_``
+            for ``-``.
+            """
+            for stg in wd.get("stages", []):
+                if stg.get("stage_key") == stage_key:
+                    keys = (stg.get("config") or {}).get("assignment_stage_keys") or []
+                    return list(keys) if keys else [stage_key.replace("_", "-")]
+            return [stage_key.replace("_", "-")]
+
+        # Snapshot the current designations so we can classify each
+        # selection (added | removed | swapped | unchanged).
+        before_rows = await conn.fetch(
+            "SELECT stage_key, role_key, user_id FROM sow_reviewer_assignments WHERE sow_id = $1",
+            sow_id,
+        )
+        before: dict[tuple[str, str], int] = {
+            (r["stage_key"], r["role_key"]): r["user_id"] for r in before_rows
+        }
+
+        # Apply the upsert/delete loop to ``sow_reviewer_assignments``.
+        for sel in payload.selections:
+            if sel.user_id is None:
+                await conn.execute(
+                    """
+                    DELETE FROM sow_reviewer_assignments
+                    WHERE  sow_id = $1 AND stage_key = $2 AND role_key = $3
+                    """,
+                    sow_id,
+                    sel.stage_key,
+                    sel.role_key,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO sow_reviewer_assignments
+                        (sow_id, stage_key, role_key, user_id, assigned_by)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (sow_id, stage_key, role_key) DO UPDATE SET
+                        user_id     = EXCLUDED.user_id,
+                        assigned_by = EXCLUDED.assigned_by,
+                        assigned_at = NOW()
+                    """,
+                    sow_id,
+                    sel.stage_key,
+                    sel.role_key,
+                    sel.user_id,
+                    current_user.id,
+                )
+
+        # Classify each selection in the payload.
+        changes: list[dict] = []
+        for sel in payload.selections:
+            key = (sel.stage_key, sel.role_key)
+            old_user_id = before.get(key)
+            new_user_id = sel.user_id
+            if old_user_id == new_user_id:
+                continue
+            if new_user_id is None:
+                change_type = "removed"
+            elif old_user_id is None:
+                change_type = "added"
+            else:
+                change_type = "swapped"
+            changes.append(
+                {
+                    "stage_key": sel.stage_key,
+                    "role_key": sel.role_key,
+                    "old_user_id": old_user_id,
+                    "new_user_id": new_user_id,
+                    "type": change_type,
+                }
+            )
+
+        # Past-draft side effects: keep ``review_assignments`` in sync so
+        # the new reviewer can act and the prior reviewer can't keep an
+        # in-flight review for a slot they no longer own.
+        if sow["status"] != "draft":
+            for change in changes:
+                runtime_keys = _runtime_stage_keys(change["stage_key"])
+                if not runtime_keys:
+                    continue
+
+                # Cancel the prior reviewer's active rows for this slot.
+                # Targeting only pending/in_progress means a just-completed
+                # row is left alone — approvals are immutable.
+                if change["type"] in ("removed", "swapped") and change["old_user_id"] is not None:
+                    placeholders = ", ".join(f"${i + 4}" for i in range(len(runtime_keys)))
+                    await conn.execute(
+                        f"""
+                        UPDATE review_assignments
+                        SET    status = 'canceled'
+                        WHERE  sow_id  = $1
+                          AND  user_id = $2
+                          AND  reviewer_role = $3
+                          AND  stage IN ({placeholders})
+                          AND  status IN ('pending', 'in_progress')
+                        """,
+                        sow_id,
+                        change["old_user_id"],
+                        change["role_key"],
+                        *runtime_keys,
+                    )
+
+                # Create a fresh assignment for the new reviewer with
+                # NULL checklist responses (no inheritance from any prior
+                # cycle). ``create_assignment_with_prior`` dedups against
+                # any active row that already exists for this user/role.
+                if change["type"] in ("added", "swapped") and change["new_user_id"] is not None:
+                    await create_assignment_with_prior(
+                        conn,
+                        sow_id=sow_id,
+                        user_id=change["new_user_id"],
+                        reviewer_role=change["role_key"],
+                        stage=runtime_keys[0],
+                        carry_prior=False,
+                    )
+                    await seed_collaboration(conn, sow_id, change["new_user_id"], "approver")
+
+        # Audit trail: one history entry per actual change.
+        for change in changes:
+            await insert_history(
+                conn,
+                sow_id=sow_id,
+                user_id=current_user.id,
+                change_type="reviewer_swap",
+                diff={
+                    "stage_key": change["stage_key"],
+                    "role_key": change["role_key"],
+                    "old_user_id": change["old_user_id"],
+                    "new_user_id": change["new_user_id"],
+                    "swap_type": change["type"],
+                },
+            )
+
+        # Re-check gating rules. A pure swap can lower gating but not
+        # raise it (the cancel only targets non-completed rows, so prior
+        # approvals still count), so this rarely triggers an advance —
+        # but stays consistent with the helper used by
+        # submit_assignment_review and the workflow editor, and is the
+        # right hook for any edge case where a side effect freed the gate.
+        if changes:
+            await recheck_and_maybe_advance(conn, sow_id, current_user.id)
+
+    # Return the updated slot list so the frontend can refresh its state.
+    return await get_sow_reviewers(sow_id, current_user)
+
+
 # ── Submit for Review ────────────────────────────────────────────────────────
 
 
 @router.post(
     "/{sow_id}/submit-for-review",
     response_model=SoWResponse,
-    summary="Submit a draft SoW for AI review",
+    summary="Submit a draft SoW for the next workflow stage",
 )
 async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWResponse:
-    """Validate exit criteria, compute ESAP level, and transition to ``ai_review``.
+    """Validate exit criteria, compute ESAP level, and advance the SoW.
 
-    Both entry paths (template draft and upload) pass through this endpoint.
-    After AI review, the user calls ``proceed-to-review`` to advance to
-    ``internal_review``.
+    The destination is *not* hardcoded to ``ai_review`` — we ask the per-SoW
+    workflow snapshot for the first transition out of ``draft`` (preferring
+    ``default``, then ``on_approve``, then any). For the default ESAP
+    workflow that resolves to ``ai_review``; workflows that omit the AI
+    review stage entirely will route directly to whatever stage actually
+    follows draft (e.g. an internal review or approval). The frontend
+    inspects the returned ``status`` to decide whether to send the user to
+    the AI review screen or to a generic post-submit page.
 
-    Raises **409** if the SoW is not in ``draft`` status.
+    Raises **409** if the SoW is not in ``draft`` status, or if the
+    workflow has no outgoing transition from ``draft``.
     Raises **422** if required exit criteria are not met.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
@@ -1301,31 +1658,97 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                     detail=f"Missing required sections: {', '.join(missing)}",
                 )
 
-        # Compute ESAP level
+        # Validate every stage flagged 'requires_designated_reviewer' has a
+        # designated reviewer for each of its required roles.  Stages without
+        # this flag (e.g. ai_review, draft, terminal) are skipped.
+        from services.workflow_engine import _load_workflow_data
+
+        wd = await _load_workflow_data(conn, sow_id)
+        designated_rows = await conn.fetch(
+            "SELECT stage_key, role_key FROM sow_reviewer_assignments WHERE sow_id = $1",
+            sow_id,
+        )
+        designated_set = {(r["stage_key"], r["role_key"]) for r in designated_rows}
+
+        unfilled: list[str] = []
+        for stage in wd.get("stages", []):
+            cfg = stage.get("config") or {}
+            if not cfg.get("requires_designated_reviewer"):
+                continue
+            for role in stage.get("roles", []):
+                if not role.get("is_required", True):
+                    continue
+                if (stage["stage_key"], role["role_key"]) not in designated_set:
+                    unfilled.append(
+                        f"{stage.get('display_name', stage['stage_key'])} → {_humanize_role(role['role_key'])}"
+                    )
+
+        if unfilled:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Missing designated reviewers: {', '.join(unfilled)}",
+            )
+
+        # Compute ESAP level and stamp it on the row before transitioning,
+        # since execute_transition / create_stage_assignments consult the
+        # row's esap_level (and the value passed in) to filter required
+        # roles in the next stage.
         esap = compute_esap_level(
             deal_value=float(row["deal_value"]) if row["deal_value"] else None,
             margin=float(row["estimated_margin"]) if row["estimated_margin"] else None,
         )
-
-        # Update SoW: set ESAP level, transition to ai_review
-        updated = await conn.fetchrow(
-            """
-            UPDATE sow_documents
-            SET esap_level = $1, status = 'ai_review', updated_at = NOW()
-            WHERE id = $2
-            RETURNING *
-            """,
+        await conn.execute(
+            "UPDATE sow_documents SET esap_level = $1, updated_at = NOW() WHERE id = $2",
             esap,
             sow_id,
         )
 
+        # Resolve the next stage from the per-SoW workflow snapshot.  Prefer
+        # a "default" edge (the canonical forward path out of draft) and
+        # fall back to "on_approve" for workflows that gate the draft on
+        # explicit approval.  Custom workflows can replace, rename, or
+        # entirely skip the legacy ai_review stage and submit-for-review
+        # will still advance correctly.
+        from services.workflow_engine import execute_transition, resolve_transition
+
+        target = await resolve_transition(conn, sow_id, "draft", "default")
+        if not target:
+            target = await resolve_transition(conn, sow_id, "draft", "on_approve")
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Workflow has no outgoing transition from 'draft'. "
+                    "Edit the workflow on /sow/{id}/manage to add a "
+                    "default or on_approve edge before submitting."
+                ),
+            )
+
+        await execute_transition(
+            conn,
+            sow_id,
+            target["stage_key"],
+            current_user.id,
+            esap,
+            reason="Submitted for review",
+        )
+
+        # Preserve the legacy ``submitted_for_review`` audit entry alongside
+        # execute_transition's own ``stage_transition`` row, since downstream
+        # filters / dashboards key off this change_type.
         await insert_history(
             conn,
             sow_id=sow_id,
             user_id=current_user.id,
             change_type="submitted_for_review",
-            diff={"esap_level": esap, "old_status": "draft", "new_status": "ai_review"},
+            diff={
+                "esap_level": esap,
+                "old_status": "draft",
+                "new_status": target["stage_key"],
+            },
         )
+
+        updated = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
 
     return _row_to_response(dict(updated))
 
@@ -1460,20 +1883,31 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
     return result
 
 
-# ── Proceed to Internal Review ───────────────────────────────────────────────
+# ── Proceed past AI Review ───────────────────────────────────────────────────
 
 
 @router.post(
     "/{sow_id}/proceed-to-review",
     response_model=SoWResponse,
-    summary="Advance from AI review to internal review",
+    summary="Advance from AI review to whatever stage the workflow points at next",
 )
 async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWResponse:
-    """Assign internal-review reviewers and transition to ``internal_review``.
+    """Resolve the workflow's next stage after ``ai_review`` and transition.
 
-    Requires the SoW to be in ``ai_review`` status. Assigns one user per
-    required reviewer role for the ``internal-review`` stage based on the
-    ESAP level.
+    Requires the SoW to be in ``ai_review`` status. The destination is *not*
+    hardcoded — we ask the per-SoW workflow snapshot for the first transition
+    out of ``ai_review`` (preferring ``on_approve`` over ``default``) and use
+    that stage_key. This lets custom workflows rename, replace, or completely
+    skip the legacy ``internal_review`` stage and still have the AI-review
+    "Proceed" button advance correctly.
+
+    The actual transition is delegated to
+    :func:`services.workflow_engine.execute_transition`, which handles
+    canceling stale assignments, updating ``sow_documents`` and
+    ``sow_workflow``, creating per-role assignments via
+    ``create_stage_assignments`` (with pre-designation honoring, role-match
+    fallback, author auto-assignment, and system-admin auto-assignment), and
+    writing the audit-trail history entry.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
@@ -1490,75 +1924,34 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
 
         esap = row["esap_level"] or "type-3"
 
-        # Load required approvers from ESAP rules
-        esap_path = os.path.join(RULES_DIR, "workflow", "esap-workflow.json")
-        required_roles: list[str] = []
-        if os.path.isfile(esap_path):
-            with open(esap_path) as f:
-                esap_rules = json.load(f)
-            level_rules = esap_rules.get("esapLevels", {}).get(esap, {})
-            for approver in level_rules.get("requiredApprovers", []):
-                if approver.get("stage") == "internal-review" and approver.get("required"):
-                    required_roles.append(approver["role"])
+        from services.workflow_engine import execute_transition, resolve_transition
 
-        # Fallback: always require SA
-        if not required_roles:
-            required_roles = ["solution-architect"]
-
-        # Assign one user per required role, carrying over any prior responses
-        for role in required_roles:
-            reviewer = await conn.fetchrow(
-                "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
-                role,
-            )
-            if reviewer:
-                await create_assignment_with_prior(
-                    conn,
-                    sow_id=sow_id,
-                    user_id=reviewer["id"],
-                    reviewer_role=role,
-                    stage="internal-review",
-                )
-                # Add to collaboration if not already present
-                await seed_collaboration(
-                    conn, sow_id=sow_id, user_id=reviewer["id"], role="reviewer"
-                )
-
-        # TESTING: Also assign the author as every required reviewer role so
-        # they can walk through the full pipeline solo.  Remove this block
-        # once proper role assignment is in place.
-        # (create_assignment_with_prior already skips if a pending assignment
-        #  exists, so no extra existence check needed here.)
-        for role in required_roles:
-            await create_assignment_with_prior(
-                conn,
-                sow_id=sow_id,
-                user_id=current_user.id,
-                reviewer_role=role,
-                stage="internal-review",
+        # Resolve the next stage from the workflow snapshot. Prefer
+        # on_approve (the canonical "happy-path" exit from a review-style
+        # stage) and fall back to default (used by linear pipelines that
+        # don't gate AI review on approval).
+        target = await resolve_transition(conn, sow_id, "ai_review", "on_approve")
+        if not target:
+            target = await resolve_transition(conn, sow_id, "ai_review", "default")
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Workflow has no outgoing transition from 'ai_review'. "
+                    "Edit the workflow on /sow/{id}/manage to add an "
+                    "on_approve or default edge before proceeding."
+                ),
             )
 
-        # Transition to internal_review
-        updated = await conn.fetchrow(
-            """
-            UPDATE sow_documents
-            SET status = 'internal_review', updated_at = NOW()
-            WHERE id = $1
-            RETURNING *
-            """,
-            sow_id,
-        )
-
-        await insert_history(
+        await execute_transition(
             conn,
-            sow_id=sow_id,
-            user_id=current_user.id,
-            change_type="proceeded_to_review",
-            diff={
-                "old_status": "ai_review",
-                "new_status": "internal_review",
-                "assigned_roles": required_roles,
-            },
+            sow_id,
+            target["stage_key"],
+            current_user.id,
+            esap,
+            reason="Proceeded from AI review",
         )
+
+        updated = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
 
     return _row_to_response(dict(updated))

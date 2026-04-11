@@ -30,6 +30,20 @@ from models import (
     WorkflowTemplateResponse,
     WorkflowTemplateSummary,
 )
+from services.workflow_engine import (
+    _find_stage,
+    _load_workflow_data,
+    _validate_workflow_snapshot_change,
+    compute_workflow_diff,
+    create_stage_assignments,
+    recheck_and_maybe_advance,
+    required_role_keys,
+)
+from utils.db_helpers import (
+    insert_history,
+    require_author,
+    require_collaborator,
+)
 
 router = APIRouter(prefix="/api/workflow", tags=["workflow"])
 
@@ -153,6 +167,40 @@ def _validate_workflow_data(wd: WorkflowData) -> None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Transition references unknown stage '{t.to_stage}'",
+            )
+
+    # AI analysis stages may only be entered via a forward edge (default
+    # or on_approve) from a draft stage.  Placing an AI review later in the
+    # pipeline (e.g. after a human review, or as a non-draft forward edge)
+    # breaks the assumption that the SoW content has just been authored and
+    # never been reviewed by a human, and produces confusing UX where
+    # reviewers re-enter an "AI is analyzing" screen.
+    #
+    # Send-back edges into ai_analysis (e.g. an old "internal_review →
+    # ai_review on_send_back") are intentionally tolerated: they don't
+    # change the meaning of "what stage comes immediately after draft",
+    # and existing deployments may still carry such edges from earlier
+    # seed versions.  The new default seed no longer creates them, but the
+    # validator must not retroactively reject snapshots that already do.
+    forward_conditions = {"default", "on_approve"}
+    for t in wd.transitions:
+        if t.condition not in forward_conditions:
+            continue
+        target = stage_map.get(t.to_stage)
+        if not target or target.stage_type != "ai_analysis":
+            continue
+        source = stage_map.get(t.from_stage)
+        source_type = source.stage_type if source else None
+        if source_type != "draft":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"AI Analysis stage '{t.to_stage}' may only be reached "
+                    f"by a forward transition from a Draft stage; found a "
+                    f"'{t.condition}' edge from '{t.from_stage}' (type "
+                    f"'{source_type or 'unknown'}'). Move the AI review "
+                    "immediately after a draft stage, or remove this edge."
+                ),
             )
 
     # Review/approval stages should have at least one on_approve or default
@@ -480,18 +528,24 @@ def _parse_workflow_data(raw: Any) -> dict:
 )
 async def get_sow_workflow(sow_id: int, current_user: CurrentUser) -> SoWWorkflowResponse:
     async with database.pg_pool.acquire() as conn:
+        # Any collaborator can read the workflow snapshot; outsiders see 404.
+        await require_collaborator(conn, sow_id, current_user.id)
         row = await conn.fetchrow("SELECT * FROM sow_workflow WHERE sow_id = $1", sow_id)
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No workflow instance found for this SoW",
         )
+    pb_raw = row.get("parallel_branches")
+    if isinstance(pb_raw, str):
+        pb_raw = json.loads(pb_raw)
     return SoWWorkflowResponse(
         id=row["id"],
         sow_id=row["sow_id"],
         template_id=row["template_id"],
         current_stage=row["current_stage"],
         workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
+        parallel_branches=pb_raw if isinstance(pb_raw, dict) else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -539,12 +593,16 @@ async def create_sow_workflow(
             json.dumps(snapshot),
         )
 
+    pb_raw2 = row.get("parallel_branches")
+    if isinstance(pb_raw2, str):
+        pb_raw2 = json.loads(pb_raw2)
     return SoWWorkflowResponse(
         id=row["id"],
         sow_id=row["sow_id"],
         template_id=row["template_id"],
         current_stage=row["current_stage"],
         workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
+        parallel_branches=pb_raw2 if isinstance(pb_raw2, dict) else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -558,33 +616,98 @@ async def create_sow_workflow(
 async def update_sow_workflow(
     sow_id: int, payload: WorkflowData, current_user: CurrentUser
 ) -> SoWWorkflowResponse:
-    """Allow the author to modify their SoW's workflow mid-lifecycle."""
+    """Allow the author to modify their SoW's workflow snapshot mid-lifecycle.
+
+    Validates the new snapshot for structural well-formedness AND for runtime
+    safety against the SoW's current stage. After persisting, rechecks gating
+    rules — adding/removing required roles or changing ``approval_mode`` may
+    immediately auto-advance the SoW.
+
+    Authorization: only the SoW author (or a ``system-admin``) may call this.
+    Enforced by :func:`utils.db_helpers.require_author`, which raises **403**
+    on any non-author / non-admin caller. The same helper guards
+    ``PUT /api/sow/{id}/reviewers``, so reviewer designation and live
+    workflow editing share the same author-only contract.
+    """
+    # Structural well-formedness — fail fast before opening a connection.
+    _validate_workflow_data(payload)
+
     async with database.pg_pool.acquire() as conn, conn.transaction():
-        existing = await conn.fetchrow("SELECT * FROM sow_workflow WHERE sow_id = $1", sow_id)
-        if not existing:
+        await require_author(conn, sow_id, current_user.id)
+
+        existing_row = await conn.fetchrow("SELECT id FROM sow_workflow WHERE sow_id = $1", sow_id)
+        if not existing_row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No workflow instance found for this SoW",
             )
 
-        snapshot = payload.model_dump(mode="json")
-        row = await conn.fetchrow(
+        sow_row = await conn.fetchrow(
+            "SELECT status, esap_level FROM sow_documents WHERE id = $1", sow_id
+        )
+        if not sow_row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="SoW not found",
+            )
+        current_stage = sow_row["status"]
+        esap_level = sow_row["esap_level"] or "type-3"
+
+        existing_snapshot = await _load_workflow_data(conn, sow_id)
+        new_snapshot = payload.model_dump(mode="json")
+
+        # Runtime safety: SoW's current stage must remain in the new snapshot.
+        _validate_workflow_snapshot_change(existing_snapshot, new_snapshot, current_stage)
+
+        # Persist the new snapshot.
+        await conn.execute(
             """
             UPDATE sow_workflow
             SET    workflow_data = $1::jsonb, updated_at = NOW()
             WHERE  sow_id = $2
-            RETURNING *
             """,
-            json.dumps(snapshot),
+            json.dumps(new_snapshot),
             sow_id,
         )
 
+        # If a required role was added to the (review/approval) current stage,
+        # create assignments for the newly-required roles. ``create_stage_assignments``
+        # is idempotent via dedup in ``create_assignment_with_prior``, so existing
+        # assignments are left alone.
+        new_current_cfg = _find_stage(new_snapshot, current_stage)
+        existing_current_cfg = _find_stage(existing_snapshot, current_stage)
+        if (
+            new_current_cfg
+            and new_current_cfg.get("stage_type") in ("review", "approval")
+            and (
+                required_role_keys(new_current_cfg, esap_level)
+                - required_role_keys(existing_current_cfg, esap_level)
+            )
+        ):
+            await create_stage_assignments(
+                conn, sow_id, new_current_cfg, esap_level, current_user.id
+            )
+
+        # Re-evaluate gating rules; may execute a transition.
+        await recheck_and_maybe_advance(conn, sow_id, current_user.id)
+
+        # Audit-trail entry — minimal diff so the activity log is readable.
+        diff = compute_workflow_diff(existing_snapshot, new_snapshot)
+        await insert_history(conn, sow_id, current_user.id, "workflow_edited", diff)
+
+        # Re-fetch in case the recheck above bumped current_stage.
+        row = await conn.fetchrow("SELECT * FROM sow_workflow WHERE sow_id = $1", sow_id)
+
+    pb_raw3 = row.get("parallel_branches")
+    if isinstance(pb_raw3, str):
+        pb_raw3 = json.loads(pb_raw3)
     return SoWWorkflowResponse(
         id=row["id"],
         sow_id=row["sow_id"],
         template_id=row["template_id"],
         current_stage=row["current_stage"],
         workflow_data=WorkflowData(**_parse_workflow_data(row["workflow_data"])),
+        parallel_branches=pb_raw3 if isinstance(pb_raw3, dict) else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

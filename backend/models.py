@@ -193,6 +193,11 @@ class SoWSummary(BaseModel):
     client_id: str | None = None
     updated_at: datetime
     stage_display_name: str | None = None
+    # True when the requesting user has an ``author`` row in collaboration
+    # for this SoW. Lets the listing UI surface author-only entry points
+    # (e.g. the "Manage" button on /all-sows). Defaults to False so legacy
+    # callers and non-collaboration responses don't accidentally elevate.
+    is_author: bool = False
 
 
 # ── History / Collaboration  (PDF §2.4, §2.5) ────────────────────────────────
@@ -398,6 +403,68 @@ class ReviewAssignmentStatusSummary(BaseModel):
     completed_at: datetime | None = None
 
 
+class AssignmentChecklistResponse(ReviewChecklistResponse):
+    """Checklist response scoped to a specific assignment id.
+
+    Extends ReviewChecklistResponse with the surrounding context the
+    assignment-scoped review page needs (sow_id, assignment metadata) so
+    the frontend can fetch SoW + workflow data after loading the checklist.
+    """
+
+    assignment_id: int
+    sow_id: int
+    user_id: int
+    stage: str
+    assignment_status: str
+    decision: str | None = None
+
+
+# ── SoW Reviewer Designation ────────────────────────────────────────────────
+
+
+class ReviewerSlot(BaseModel):
+    """One required (stage, role) slot on a SoW with the currently designated user.
+
+    Returned by GET /api/sow/{sow_id}/reviewers — one slot per required role
+    on every review/approval stage in the SoW's workflow snapshot.  ``user_id``
+    is null when nobody has been designated yet.
+    """
+
+    stage_key: str
+    stage_display_name: str
+    role_key: str
+    role_display_name: str
+    user_id: int | None = None
+    user_email: str | None = None
+    user_full_name: str | None = None
+
+
+class ReviewerSelection(BaseModel):
+    """One author-supplied (stage, role) → user designation."""
+
+    stage_key: str
+    role_key: str
+    user_id: int | None = None  # null clears the slot
+
+
+class ReviewerSelectionPayload(BaseModel):
+    """Bulk-update payload for PUT /api/sow/{sow_id}/reviewers."""
+
+    selections: list[ReviewerSelection]
+
+
+# ── User Listing  (for the reviewer picker) ─────────────────────────────────
+
+
+class UserListEntry(BaseModel):
+    """Minimal user representation for picker dropdowns."""
+
+    id: int
+    email: str
+    full_name: str | None = None
+    role: str
+
+
 class ReviewStatus(BaseModel):
     """Aggregated review status for a SoW."""
 
@@ -546,6 +613,7 @@ class SoWWorkflowResponse(BaseModel):
     template_id: int | None = None
     current_stage: str
     workflow_data: WorkflowData
+    parallel_branches: dict[str, str] | None = None
     created_at: datetime
     updated_at: datetime
 

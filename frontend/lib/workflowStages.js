@@ -220,6 +220,125 @@ export function routeForStage(stageKey, sowId) {
   return `/review/${sowId}`;
 }
 
+// ── Parallel group detection for WorkflowProgress ─────────────────────────
+
+/**
+ * A stage is a failure branch if explicitly flagged or if it's a terminal
+ * stage with stage_order <= 0. Matches the logic in WorkflowProgress.
+ */
+function _isFailureBranch(stage) {
+  if (!stage) return false;
+  if (stage.config?.is_failure === true) return true;
+  if (stage.stage_type === 'terminal' && (stage.stage_order ?? 1) <= 0) return true;
+  return false;
+}
+
+/**
+ * Analyze workflow_data and return an ordered "display timeline" where
+ * parallel gateway + branch stages are collapsed into group objects.
+ *
+ * Returns: Array of items, each either:
+ *   { type: 'stage', stage: {...} }
+ *   { type: 'parallel_group', gateway: {...},
+ *     branches: [{ stage: {...} }], joinTarget: string|null }
+ *
+ * For linear workflows (no gateways), every item is type: 'stage' — zero
+ * regressions from the old flat rendering.
+ */
+export function buildTimelineWithGroups(workflowData) {
+  if (!workflowData) return [];
+  const stages = [...(workflowData.stages || [])].sort(
+    (a, b) => (a.stage_order || 0) - (b.stage_order || 0)
+  );
+  const transitions = workflowData.transitions || [];
+
+  // Filter to non-failure stages for the main timeline.
+  const timelineStages = stages.filter((s) => !_isFailureBranch(s));
+
+  // Detect gateway → branch-target mappings (same pattern as workflowEditor.js:180-194).
+  const gatewayTargetsMap = new Map(); // gateway_key → [target_key, ...]
+  const branchTargetSet = new Set();
+
+  for (const t of transitions) {
+    const fromStage = stages.find((s) => s.stage_key === t.from_stage);
+    if (fromStage && isParallelGateway(fromStage.stage_type)) {
+      // Only explicit forward transitions (not reject/send-back/condition_met)
+      const cond = t.condition || 'default';
+      if (cond === 'default' || cond === 'on_approve') {
+        if (!gatewayTargetsMap.has(t.from_stage)) gatewayTargetsMap.set(t.from_stage, []);
+        gatewayTargetsMap.get(t.from_stage).push(t.to_stage);
+        branchTargetSet.add(t.to_stage);
+      }
+    }
+  }
+
+  // Detect join target for each gateway group: the common outgoing target of all branch stages.
+  const gatewayJoinMap = new Map(); // gateway_key → join_target_key | null
+  for (const [gatewayKey, branchKeys] of gatewayTargetsMap) {
+    const joinTargets = new Set();
+    for (const bk of branchKeys) {
+      for (const t of transitions) {
+        if (t.from_stage === bk) {
+          const cond = t.condition || 'default';
+          if (cond === 'default' || cond === 'on_approve') {
+            joinTargets.add(t.to_stage);
+          }
+        }
+      }
+    }
+    // All branches should converge to the same target (enforced by editor validation).
+    gatewayJoinMap.set(gatewayKey, joinTargets.size === 1 ? [...joinTargets][0] : null);
+  }
+
+  // Build the timeline array.
+  const timeline = [];
+  for (const stage of timelineStages) {
+    // Skip stages consumed as branch targets of a gateway.
+    if (branchTargetSet.has(stage.stage_key)) continue;
+
+    if (isParallelGateway(stage.stage_type) && gatewayTargetsMap.has(stage.stage_key)) {
+      const branchKeys = gatewayTargetsMap.get(stage.stage_key);
+      const branches = branchKeys
+        .map((bk) => {
+          const branchStage = stages.find((s) => s.stage_key === bk);
+          return branchStage ? { stage: branchStage } : null;
+        })
+        .filter(Boolean);
+
+      timeline.push({
+        type: 'parallel_group',
+        gateway: stage,
+        branches,
+        joinTarget: gatewayJoinMap.get(stage.stage_key) || null,
+      });
+    } else {
+      timeline.push({ type: 'stage', stage });
+    }
+  }
+
+  return timeline;
+}
+
+/**
+ * Returns true if a stage_key appears in any parallel group (as gateway or branch).
+ */
+export function isInParallelGroup(stageKey, timeline) {
+  return !!findParallelGroupForStage(stageKey, timeline);
+}
+
+/**
+ * Find the parallel_group item that contains a given stage_key.
+ */
+export function findParallelGroupForStage(stageKey, timeline) {
+  if (!timeline) return null;
+  for (const item of timeline) {
+    if (item.type !== 'parallel_group') continue;
+    if (item.gateway.stage_key === stageKey) return item;
+    if (item.branches.some((b) => b.stage.stage_key === stageKey)) return item;
+  }
+  return null;
+}
+
 /**
  * Legacy display overrides for `review_assignments.stage` values (hyphenated
  * keys from the old default workflow). Used only as a prettier fallback when

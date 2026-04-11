@@ -876,6 +876,11 @@ export default function AIReview() {
   const [isProceeding, setIsProceeding] = useState(false);
   const [aiUnavailable, setAiUnavailable] = useState(false);
   const [similarSows, setSimilarSows] = useState([]);
+  // Display name of the stage that follows ai_review in this SoW's workflow
+  // snapshot.  Hardcoding "Internal Review" was wrong for any custom workflow
+  // that renames or replaces that stage — we now look it up live so the
+  // "Proceed" button label matches whatever the workflow actually does.
+  const [nextStageLabel, setNextStageLabel] = useState(null);
 
   // If arriving from draft submit-for-review (Path A), auto-trigger AI analysis
   useEffect(() => {
@@ -936,7 +941,35 @@ export default function AIReview() {
       });
   }, [sowId, authFetch]);
 
-  // Proceed to Internal Review (after AI review)
+  // Resolve the *actual* next stage out of ai_review from this SoW's
+  // workflow snapshot so we can render an accurate button label.  Prefers
+  // an on_approve transition (the "happy path" out of AI review) and falls
+  // back to a default transition.  Silent on failure — the button just
+  // shows a generic "Next Stage" label.
+  useEffect(() => {
+    if (!currentSowId || !authFetch) return;
+    let cancelled = false;
+    authFetch(`/api/workflow/sow/${currentSowId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.workflow_data) return;
+        const { stages = [], transitions = [] } = data.workflow_data;
+        const out = transitions.filter((t) => t.from_stage === 'ai_review');
+        const picked =
+          out.find((t) => t.condition === 'on_approve') ||
+          out.find((t) => t.condition === 'default') ||
+          out[0];
+        if (!picked) return;
+        const target = stages.find((s) => s.stage_key === picked.to_stage);
+        if (target?.display_name) setNextStageLabel(target.display_name);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSowId, authFetch]);
+
+  // Proceed to next stage (after AI review)
   const handleProceedToReview = async () => {
     const id = currentSowId;
     if (!id) return;
@@ -1383,7 +1416,7 @@ export default function AIReview() {
               <ChecklistSection checklist={recommendations.checklist} />
               {similarSows.length > 0 && <SimilarSowsSection similarSows={similarSows} />}
 
-              {/* Action Bar — Proceed to Internal Review */}
+              {/* Action Bar — Proceed to next workflow stage */}
               {currentSowId && (
                 <div
                   className="card"
@@ -1421,7 +1454,9 @@ export default function AIReview() {
                       disabled={isProceeding}
                       style={{ opacity: isProceeding ? 0.6 : 1 }}
                     >
-                      {isProceeding ? 'Proceeding…' : 'Proceed to Internal Review →'}
+                      {isProceeding
+                        ? 'Proceeding…'
+                        : `Proceed to ${nextStageLabel || 'Next Stage'} →`}
                     </button>
                   </div>
                 </div>

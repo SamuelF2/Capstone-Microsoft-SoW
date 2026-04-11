@@ -70,14 +70,25 @@ async def insert_history(
 
 
 async def create_assignment_with_prior(
-    conn, *, sow_id: int, user_id: int, reviewer_role: str, stage: str
+    conn,
+    *,
+    sow_id: int,
+    user_id: int,
+    reviewer_role: str,
+    stage: str,
+    carry_prior: bool = True,
 ) -> None:
-    """Create a review assignment, carrying over checklist_responses and comments
-    from the most recent prior assignment for the same sow/role/stage (if any).
+    """Create a review assignment, optionally carrying over checklist_responses
+    and comments from the most recent prior assignment for the same
+    sow/role/stage.
 
-    This lets reviewers see and edit their previous responses when a SoW is
-    resubmitted after rejection.  Skips creation if the user already has a
-    pending/in-progress assignment for this sow + role + stage.
+    When ``carry_prior=True`` (default), reviewers see and edit their previous
+    responses when a SoW is resubmitted after rejection.  When
+    ``carry_prior=False`` (Phase 2 reviewer-swap), the new row starts with
+    NULL responses so the new reviewer has a clean slate.
+
+    Skips creation if the user already has a pending/in-progress assignment
+    for this sow + role + stage, regardless of ``carry_prior``.
     """
     existing = await conn.fetchval(
         """
@@ -93,19 +104,26 @@ async def create_assignment_with_prior(
     if existing:
         return  # already has an active assignment for this role
 
-    prior = await conn.fetchrow(
-        """
-        SELECT checklist_responses, comments FROM review_assignments
-        WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3 AND stage = $4
-          AND status IN ('completed', 'canceled')
-        ORDER BY COALESCE(completed_at, assigned_at) DESC
-        LIMIT 1
-        """,
-        sow_id,
-        user_id,
-        reviewer_role,
-        stage,
-    )
+    prior_checklist = None
+    prior_comments = None
+    if carry_prior:
+        prior = await conn.fetchrow(
+            """
+            SELECT checklist_responses, comments FROM review_assignments
+            WHERE sow_id = $1 AND user_id = $2 AND reviewer_role = $3 AND stage = $4
+              AND status IN ('completed', 'canceled')
+            ORDER BY COALESCE(completed_at, assigned_at) DESC
+            LIMIT 1
+            """,
+            sow_id,
+            user_id,
+            reviewer_role,
+            stage,
+        )
+        if prior:
+            prior_checklist = prior["checklist_responses"]
+            prior_comments = prior["comments"]
+
     await conn.execute(
         """
         INSERT INTO review_assignments
@@ -116,6 +134,37 @@ async def create_assignment_with_prior(
         user_id,
         reviewer_role,
         stage,
-        prior["checklist_responses"] if prior else None,
-        prior["comments"] if prior else None,
+        prior_checklist,
+        prior_comments,
+    )
+
+
+async def require_author(conn, sow_id: int, user_id: int) -> None:
+    """Raise 403 unless the caller is the SoW's author or a system-admin.
+
+    Used by live-edit endpoints that only the author (or an admin) may call.
+
+    Note: ``collaboration`` has no UNIQUE(sow_id, user_id) constraint, so a
+    user may have multiple rows. We filter on ``role = 'author'`` in SQL
+    rather than fetching whatever row comes first.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT 1 FROM collaboration
+        WHERE  sow_id = $1 AND user_id = $2 AND role = 'author'
+        LIMIT  1
+        """,
+        sow_id,
+        user_id,
+    )
+    if row is not None:
+        return
+
+    user_row = await conn.fetchrow("SELECT role FROM users WHERE id = $1", user_id)
+    if user_row and (user_row["role"] or "").lower() == "system-admin":
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only the SoW author can perform this action",
     )

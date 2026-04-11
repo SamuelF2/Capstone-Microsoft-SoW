@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from fastapi import HTTPException, status
 from utils.db_helpers import (
     create_assignment_with_prior,
     insert_history,
@@ -41,6 +42,74 @@ def _find_stage(workflow_data: dict, stage_key: str) -> dict | None:
         if s.get("stage_key") == stage_key:
             return s
     return None
+
+
+def _stage_key_from_assignment_stage(workflow_data: dict, assignment_stage: str) -> str | None:
+    """Reverse-lookup: given a ``review_assignments.stage`` value, find the
+    workflow stage whose assignments use that key.
+
+    Handles both the explicit ``config.assignment_stage_keys`` list and
+    the default ``stage_key.replace("_", "-")`` mapping used by
+    :func:`create_stage_assignments`. Needed to resolve the *effective*
+    review stage when a SoW is sitting on a parallel gateway — the
+    assignment's stage points at a branch, not the gateway.
+    """
+    if not assignment_stage:
+        return None
+    for s in workflow_data.get("stages", []):
+        skey = s.get("stage_key", "")
+        cfg = s.get("config") or {}
+        explicit = cfg.get("assignment_stage_keys") or []
+        if assignment_stage in explicit:
+            return skey
+        if not explicit and skey.replace("_", "-") == assignment_stage:
+            return skey
+    return None
+
+
+async def _load_parallel_branches(conn, sow_id: int) -> dict | None:
+    """Fetch the ``sow_workflow.parallel_branches`` JSONB for a SoW.
+
+    Returns the decoded dict (e.g. ``{"engineering_review": "active", ...}``)
+    or ``None`` when the SoW is not currently in a parallel group.
+    """
+    row = await conn.fetchrow(
+        "SELECT parallel_branches FROM sow_workflow WHERE sow_id = $1",
+        sow_id,
+    )
+    raw = row["parallel_branches"] if row and row["parallel_branches"] else None
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    return raw if isinstance(raw, dict) and raw else None
+
+
+async def resolve_effective_review_stage(
+    conn,
+    sow_id: int,
+    assignment_stage: str,
+    sow_status: str,
+) -> tuple[str, dict | None]:
+    """Return the workflow stage_key and config that a reviewer is actually
+    reviewing at for an assignment on the given SoW.
+
+    * If the SoW is sitting on a ``parallel_gateway`` and the assignment's
+      stage maps to one of the active branches, return the **branch**
+      stage_key (the reviewable one), not the gateway.
+    * Otherwise return ``sow_status`` as-is.
+
+    Callers use this to decide whether a review submission is allowed at
+    the *correct* stage (the branch) rather than at the parent gateway
+    (which is a parallel_gateway, not a review/approval stage).
+    """
+    wd = await _load_workflow_data(conn, sow_id)
+    sow_cfg = _find_stage(wd, sow_status)
+    if sow_cfg and sow_cfg.get("stage_type") == "parallel_gateway":
+        branches = await _load_parallel_branches(conn, sow_id)
+        if branches:
+            branch_key = _stage_key_from_assignment_stage(wd, assignment_stage)
+            if branch_key and branch_key in branches:
+                return branch_key, _find_stage(wd, branch_key)
+    return sow_status, sow_cfg
 
 
 # ── Transition resolution ──────────────────────────────────────────────────
@@ -254,13 +323,59 @@ async def create_stage_assignments(
 ) -> list[str]:
     """Create review assignments for *target_stage* based on its roles config.
 
-    Returns a list of role keys for which assignments were created.
+    For each required role on the target stage:
+      1. Look up the pre-designated user from ``sow_reviewer_assignments``
+         (the author's selection on the SoW page) and create their assignment.
+      2. If no pre-designation exists, fall back to the first active user
+         with the matching ``users.role`` value (defensive — the
+         ``submit-for-review`` validator should prevent this for any stage
+         flagged ``requires_designated_reviewer``).
+
+    After the per-role loop, the SoW's author (looked up from collaboration)
+    and every active ``system-admin`` user are also assigned to every required
+    role for this stage.  This guarantees:
+
+    - The author always sees their own SoW in /my-reviews so they can track
+      progress and (in dev/test environments lacking real reviewers) walk it
+      through the pipeline themselves.
+    - Admins can simulate the full review pipeline solo.
+
+    ``create_assignment_with_prior`` deduplicates, so a user who appears in
+    multiple roles (e.g. an admin who is also the designated reviewer or the
+    SoW author) still only gets one row per (sow, role, stage).
+
+    Returns a list of role keys for which at least one assignment was created.
     """
+    stage_key = target_stage["stage_key"]
     config = target_stage.get("config") or {}
     assignment_stage_keys = config.get("assignment_stage_keys", [])
     if not assignment_stage_keys:
-        assignment_stage_keys = [target_stage["stage_key"].replace("_", "-")]
+        assignment_stage_keys = [stage_key.replace("_", "-")]
     assignment_stage = assignment_stage_keys[0]
+
+    # Pull every system-admin user once — they get assigned to every role.
+    admin_rows = await conn.fetch(
+        "SELECT id FROM users WHERE role = 'system-admin' AND is_active = TRUE",
+    )
+    admin_ids = [r["id"] for r in admin_rows]
+
+    # Look up the SoW author(s) from collaboration so we can guarantee them
+    # a row in /my-reviews on every required role. Authors need visibility
+    # into their own SoW's review progress, and in dev/test environments
+    # where no real reviewers are seeded they often need to walk the SoW
+    # through review themselves. SoWs may have more than one author row in
+    # ``collaboration`` (no UNIQUE constraint) — we assign every distinct
+    # active author so co-authors don't get hidden from the review list.
+    author_rows = await conn.fetch(
+        """
+        SELECT DISTINCT u.id
+        FROM   collaboration c
+        JOIN   users u ON u.id = c.user_id
+        WHERE  c.sow_id = $1 AND c.role = 'author' AND u.is_active = TRUE
+        """,
+        sow_id,
+    )
+    author_ids = [r["id"] for r in author_rows]
 
     assigned: list[str] = []
     for role in target_stage.get("roles", []):
@@ -271,32 +386,78 @@ async def create_stage_assignments(
             continue
 
         role_key = role["role_key"]
+        slot_assigned = False
 
-        # Find a user with this role
-        reviewer = await conn.fetchrow(
-            "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
+        # 1. Pre-designated reviewer (author's choice on the SoW page)
+        designated = await conn.fetchrow(
+            """
+            SELECT u.id
+            FROM   sow_reviewer_assignments sra
+            JOIN   users u ON u.id = sra.user_id
+            WHERE  sra.sow_id = $1 AND sra.stage_key = $2 AND sra.role_key = $3
+              AND  u.is_active = TRUE
+            """,
+            sow_id,
+            stage_key,
             role_key,
         )
-        if reviewer:
+        if designated:
             await create_assignment_with_prior(
                 conn,
                 sow_id=sow_id,
-                user_id=reviewer["id"],
+                user_id=designated["id"],
                 reviewer_role=role_key,
                 stage=assignment_stage,
             )
-            await seed_collaboration(conn, sow_id, reviewer["id"], "approver")
-            assigned.append(role_key)
+            await seed_collaboration(conn, sow_id, designated["id"], "approver")
+            slot_assigned = True
+        else:
+            # 2. Defensive fallback: first active user with matching role.
+            reviewer = await conn.fetchrow(
+                "SELECT id FROM users WHERE role = $1 AND is_active = TRUE LIMIT 1",
+                role_key,
+            )
+            if reviewer:
+                await create_assignment_with_prior(
+                    conn,
+                    sow_id=sow_id,
+                    user_id=reviewer["id"],
+                    reviewer_role=role_key,
+                    stage=assignment_stage,
+                )
+                await seed_collaboration(conn, sow_id, reviewer["id"], "approver")
+                slot_assigned = True
 
-        # TESTING: Also assign the actor so they can walk through the full
-        # pipeline solo.  Remove once proper role-based assignment is live.
-        await create_assignment_with_prior(
-            conn,
-            sow_id=sow_id,
-            user_id=actor_user_id,
-            reviewer_role=role_key,
-            stage=assignment_stage,
-        )
+        # 3. Always assign every SoW author so they see their own SoW in
+        # /my-reviews and can walk it through review when no real reviewers
+        # are configured. Production deployments can replace the author with
+        # an explicit reviewer via the live-edit reviewer panel.
+        for author_id in author_ids:
+            await create_assignment_with_prior(
+                conn,
+                sow_id=sow_id,
+                user_id=author_id,
+                reviewer_role=role_key,
+                stage=assignment_stage,
+            )
+            slot_assigned = True
+
+        # 4. Always also assign every system-admin user.  Replaces the prior
+        # "assign the actor to every role" testing hack — admins explicitly
+        # opt into review duties by holding the system-admin role.
+        for admin_id in admin_ids:
+            await create_assignment_with_prior(
+                conn,
+                sow_id=sow_id,
+                user_id=admin_id,
+                reviewer_role=role_key,
+                stage=assignment_stage,
+            )
+            await seed_collaboration(conn, sow_id, admin_id, "approver")
+            slot_assigned = True
+
+        if slot_assigned:
+            assigned.append(role_key)
 
     return assigned
 
@@ -634,3 +795,264 @@ async def complete_parallel_branch(
             return result
 
     return None
+
+
+# ── Re-evaluate and (maybe) auto-advance ──────────────────────────────────
+
+
+async def recheck_and_maybe_advance(
+    conn,
+    sow_id: int,
+    actor_user_id: int,
+) -> dict:
+    """Re-evaluate gating rules at the SoW's current stage and auto-advance
+    if they're now satisfied.
+
+    Single source of truth for "did this change unlock the next stage?" —
+    called by every endpoint that mutates state which could affect gating
+    outcomes:
+
+    - ``POST /api/review/assignment/{id}/submit`` (after a review decision)
+    - ``PUT  /api/sow/{id}/reviewers``           (after a reviewer swap)
+    - ``PUT  /api/workflow/sow/{id}``            (after a workflow snapshot edit)
+
+    The same code path used to be inlined in ``submit_assignment_review``;
+    extracting it here ensures all three caller sites share identical
+    gating + parallel-branch + auto_advance-opt-out semantics.
+
+    Idempotent: a call with no eligible state change is a no-op. Calling it
+    twice in a row only advances on the first call (if at all).
+
+    Returns
+    -------
+    dict
+        ``gating_met``                — Are required approvals in place at the
+                                        SoW's current stage?
+        ``advanced``                  — Did this call execute a transition?
+        ``new_status``                — The new SoW status, if advanced.
+        ``outstanding_roles``         — Roles still pending at the current stage.
+        ``assigned_roles``            — Roles assigned at the new stage,
+                                        if advanced.
+        ``parallel_branch_completed`` — True when a parallel branch finished
+                                        but the join is still waiting on
+                                        sibling branches.
+        ``branch_stage``              — The completed branch stage key, if
+                                        applicable.
+    """
+    result: dict[str, Any] = {
+        "gating_met": False,
+        "advanced": False,
+        "new_status": None,
+        "outstanding_roles": [],
+        "assigned_roles": [],
+        "parallel_branch_completed": False,
+        "branch_stage": None,
+    }
+
+    sow_row = await conn.fetchrow(
+        "SELECT status, esap_level FROM sow_documents WHERE id = $1",
+        sow_id,
+    )
+    if not sow_row:
+        return result
+
+    current = sow_row["status"]
+    esap = sow_row["esap_level"] or "type-3"
+
+    wd = await _load_workflow_data(conn, sow_id)
+    stage_cfg = _find_stage(wd, current)
+    if not stage_cfg:
+        return result
+
+    stage_type = stage_cfg.get("stage_type", "")
+
+    # ── Parallel gateway branch: re-evaluate every active branch ───────────
+    #
+    # While branches are running concurrently, ``sow_documents.status``
+    # stays pinned at the parent gateway (which is NOT a review/approval
+    # stage), so the legacy "only review/approval stages can advance"
+    # guard used to fire too early and skip the whole parallel subtree.
+    # Instead, detect the gateway here, walk each still-active branch,
+    # check its own gating, and call ``complete_parallel_branch`` for any
+    # branch that just met its gate.  The first branch that triggers a
+    # join wins and returns early; the rest stay "active" until their
+    # own reviewers submit.
+    if stage_type == "parallel_gateway":
+        parallel_branches = await _load_parallel_branches(conn, sow_id)
+        if not parallel_branches:
+            return result
+
+        active_branches = [k for k, v in parallel_branches.items() if v != "completed"]
+        any_branch_met = False
+        for branch_key in active_branches:
+            branch_cfg = _find_stage(wd, branch_key)
+            if not branch_cfg:
+                continue
+            if branch_cfg.get("stage_type") not in ("review", "approval"):
+                continue
+            branch_met, branch_outstanding = await check_gating_rules(
+                conn, sow_id, branch_key, esap
+            )
+            if not branch_met:
+                result["outstanding_roles"].extend(branch_outstanding)
+                continue
+            any_branch_met = True
+            # Honor per-branch auto_advance opt-out.
+            branch_config = branch_cfg.get("config") or {}
+            if not branch_config.get("auto_advance", True):
+                continue
+            join_result = await complete_parallel_branch(
+                conn, sow_id, branch_key, actor_user_id, esap
+            )
+            if join_result:
+                result["advanced"] = True
+                result["new_status"] = join_result["new_status"]
+                result["assigned_roles"] = join_result.get("assigned_roles", [])
+                result["gating_met"] = True
+                return result
+            # Branch was marked complete but the join is still waiting on
+            # sibling branches — record it and keep scanning (sibling
+            # branches might also be ready).
+            result["parallel_branch_completed"] = True
+            result["branch_stage"] = branch_key
+        result["gating_met"] = any_branch_met
+        return result
+
+    # Only review/approval stages can auto-advance via gating rules.
+    if stage_type not in ("review", "approval"):
+        return result
+
+    met, outstanding = await check_gating_rules(conn, sow_id, current, esap)
+    result["gating_met"] = met
+    result["outstanding_roles"] = outstanding
+    if not met:
+        return result
+
+    # Honor explicit auto_advance opt-out (default: ON for review/approval).
+    config = stage_cfg.get("config") or {}
+    if not config.get("auto_advance", True):
+        return result
+
+    # Regular advance: prefer on_approve, fall back to default.
+    target = await resolve_transition(conn, sow_id, current, "on_approve")
+    if not target:
+        target = await resolve_transition(conn, sow_id, current, "default")
+    if not target:
+        return result
+
+    advance_result = await execute_transition(
+        conn,
+        sow_id,
+        target["stage_key"],
+        actor_user_id,
+        esap,
+    )
+    result["advanced"] = True
+    result["new_status"] = advance_result.get("new_status")
+    result["assigned_roles"] = advance_result.get("assigned_roles", [])
+    return result
+
+
+# ── Snapshot validation & diff helpers (Phase 3 live workflow editing) ─────
+
+
+def _validate_workflow_snapshot_change(
+    existing: dict,
+    new: dict,
+    current_stage: str,
+) -> None:
+    """Raise 409 if the snapshot change would strand the in-flight SoW.
+
+    Currently enforces:
+      - The SoW's current stage must be present in ``new.stages``.
+
+    The ``existing`` parameter is unused today but kept in the signature so
+    future rules (e.g. "you can't remove a stage with active branches") can
+    diff old vs new without changing callers.
+    """
+    stage_keys = {s.get("stage_key") for s in new.get("stages", [])}
+    if current_stage not in stage_keys:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot remove stage '{current_stage}' — "
+                "the SoW is currently sitting in this stage."
+            ),
+        )
+
+
+def required_role_keys(stage: dict | None, esap_level: str) -> set[str]:
+    """Return the set of role_keys required at *stage* for *esap_level*.
+
+    Mirrors the filtering used by :func:`check_gating_rules` and
+    :func:`create_stage_assignments`: a role counts only when it is marked
+    required AND its ``esap_levels`` filter (if any) includes the SoW's
+    ESAP level.
+    """
+    if not stage:
+        return set()
+    result: set[str] = set()
+    for role in stage.get("roles", []):
+        if not role.get("is_required", True):
+            continue
+        esap_filter = role.get("esap_levels")
+        if esap_filter and esap_level not in esap_filter:
+            continue
+        key = role.get("role_key")
+        if key:
+            result.add(key)
+    return result
+
+
+def compute_workflow_diff(existing: dict, new: dict) -> dict:
+    """Return a minimal diff describing the changes between two snapshots.
+
+    Captures added/removed stages and transitions plus per-stage
+    ``approval_mode`` changes — enough for the ``workflow_edited`` audit
+    entry without dumping the full snapshot into the history table.
+    """
+    existing_stages = {s["stage_key"]: s for s in existing.get("stages", [])}
+    new_stages = {s["stage_key"]: s for s in new.get("stages", [])}
+
+    added_stages = sorted(set(new_stages) - set(existing_stages))
+    removed_stages = sorted(set(existing_stages) - set(new_stages))
+
+    def transition_key(t: dict) -> tuple[str, str, str]:
+        return (
+            t.get("from_stage", ""),
+            t.get("to_stage", ""),
+            t.get("condition", "default"),
+        )
+
+    existing_transitions = {transition_key(t) for t in existing.get("transitions", [])}
+    new_transitions = {transition_key(t) for t in new.get("transitions", [])}
+
+    added_transitions = [
+        {"from_stage": k[0], "to_stage": k[1], "condition": k[2]}
+        for k in sorted(new_transitions - existing_transitions)
+    ]
+    removed_transitions = [
+        {"from_stage": k[0], "to_stage": k[1], "condition": k[2]}
+        for k in sorted(existing_transitions - new_transitions)
+    ]
+
+    approval_mode_changes: list[dict] = []
+    for stage_key in sorted(set(existing_stages) & set(new_stages)):
+        old_mode = (existing_stages[stage_key].get("config") or {}).get("approval_mode")
+        new_mode = (new_stages[stage_key].get("config") or {}).get("approval_mode")
+        if old_mode != new_mode:
+            approval_mode_changes.append({"stage_key": stage_key, "old": old_mode, "new": new_mode})
+
+    diff: dict[str, Any] = {}
+    if added_stages:
+        diff["added_stages"] = added_stages
+    if removed_stages:
+        diff["removed_stages"] = removed_stages
+    if added_transitions:
+        diff["added_transitions"] = added_transitions
+    if removed_transitions:
+        diff["removed_transitions"] = removed_transitions
+    if approval_mode_changes:
+        diff["approval_mode_changes"] = approval_mode_changes
+
+    return diff

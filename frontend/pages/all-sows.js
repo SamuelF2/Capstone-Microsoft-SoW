@@ -38,14 +38,34 @@ function actionVariantForStage(status) {
   return status === 'approved' ? 'primary' : 'secondary';
 }
 
+// Stages where the manage page is meaningful: any non-terminal stage past
+// draft. Drafts already have an inline reviewer panel + workflow editor on
+// the draft page, and terminal SoWs (approved/finalized/rejected) shouldn't
+// be edited.
+const MANAGE_HIDDEN_STATUSES = new Set(['draft', 'approved', 'finalized', 'rejected']);
+
 function SoWActions({ sow, router }) {
-  const { status, id } = sow;
+  const { status, id, is_author: isAuthor } = sow;
   const href = routeForStage(status, id);
   const label = actionLabelForStage(status);
   const variant = actionVariantForStage(status);
+  const showManage = isAuthor && status && !MANAGE_HIDDEN_STATUSES.has(status);
 
   return (
     <div style={{ display: 'flex', gap: '6px' }}>
+      {showManage && (
+        <button
+          className="btn btn-secondary btn-sm"
+          style={{ whiteSpace: 'nowrap' }}
+          title="Live-edit reviewers, stage config, or workflow structure"
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/sow/${id}/manage`);
+          }}
+        >
+          Manage →
+        </button>
+      )}
       <button
         className={`btn btn-${variant} btn-sm`}
         style={{ whiteSpace: 'nowrap' }}

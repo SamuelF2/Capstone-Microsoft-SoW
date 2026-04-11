@@ -52,10 +52,14 @@ function ReviewCard({ assignment }) {
   const style = ASSIGNMENT_STATUS_STYLES[assignment.status] || ASSIGNMENT_STATUS_STYLES.pending;
   const esapStyle = esapBadgeStyle(assignment.esap_level);
   const deal = formatDeal(assignment.deal_value, null);
-  // All review stages — internal, DRM, and any custom workflow phases — flow
-  // through the unified /review/[id] page, which resolves the active stage from
-  // the SoW's workflow snapshot and renders a role-aware UI.
-  const reviewPath = `/review/${assignment.sow_id}`;
+  // Each card links by assignment id (not SoW id) so a user holding multiple
+  // role assignments on the same SoW gets independent review surfaces — one
+  // URL per (sow, role, stage) tuple — and submitting one doesn't lock the
+  // others.  Falls back to the legacy SoW-scoped path if the assignment id
+  // is missing for any reason.
+  const reviewPath = assignment.id
+    ? `/review/assignment/${assignment.id}`
+    : `/review/${assignment.sow_id}`;
 
   return (
     <div
@@ -211,6 +215,12 @@ export default function MyReviews() {
         return res.json();
       })
       .then((data) => {
+        // The backend keys this list off ``ra.user_id`` only — every row
+        // belongs to the current user — so we trust it without re-filtering.
+        // (We used to narrow by ``user.role`` to simulate a role-override
+        // experience, but that hid legitimate cross-role self-designations
+        // and the SoW-author auto-assignment that the workflow engine seeds
+        // on every required role.)
         setAssignments(data);
         setLoading(false);
       })

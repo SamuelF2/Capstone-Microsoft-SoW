@@ -664,12 +664,51 @@ function StageForm({ node, onChange, onDelete, nodes, edges }) {
           >
             <input
               type="checkbox"
-              checked={!!(stage.config || {}).auto_advance}
+              checked={(stage.config || {}).auto_advance !== false}
               onChange={(e) =>
                 patch({ config: { ...stage.config, auto_advance: e.target.checked } })
               }
             />
-            Auto-advance when gating rules are met
+            Auto-advance when gating rules are met (on by default)
+          </label>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '6px',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              marginBottom: 'var(--spacing-sm)',
+              lineHeight: 1.4,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={(stage.config || {}).requires_designated_reviewer !== false}
+              onChange={(e) =>
+                patch({
+                  config: {
+                    ...stage.config,
+                    requires_designated_reviewer: e.target.checked,
+                  },
+                })
+              }
+              style={{ marginTop: '2px' }}
+            />
+            <span>
+              Requires designated reviewer
+              <span
+                style={{
+                  display: 'block',
+                  fontSize: '10px',
+                  color: 'var(--color-text-tertiary)',
+                  marginTop: '2px',
+                }}
+              >
+                Block submission until each required role has a reviewer chosen on the SoW.
+              </span>
+            </span>
           </label>
         </div>
       )}

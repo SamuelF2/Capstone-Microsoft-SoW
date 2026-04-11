@@ -27,6 +27,7 @@ from auth import CurrentUser
 from config import RULES_DIR
 from fastapi import APIRouter, HTTPException, Query, status
 from models import (
+    AssignmentChecklistResponse,
     ChecklistItemModel,
     ReviewAssignmentStatusSummary,
     ReviewAssignmentSummary,
@@ -376,7 +377,16 @@ async def get_assigned_reviews(
         description="Filter by assignment status: pending, in_progress, completed",
     ),
 ) -> list[ReviewAssignmentSummary]:
-    """Return all review assignments for the current user, joined with SoW summary data."""
+    """Return all review assignments for the current user, joined with SoW summary data.
+
+    The only mandatory predicate is ``ra.user_id = current_user.id`` — if a
+    row exists with the caller as the assignee, they see it regardless of
+    their stored ``users.role``. The reviewer panel explicitly supports
+    self-designation across roles (a consultant author can designate
+    themselves as a Solution Architect for their own SoW), so filtering by
+    ``users.role`` would mask those legitimate assignments. Optional
+    ``stage`` / ``status`` query params still narrow further.
+    """
     conditions: list[str] = ["ra.user_id = $1"]
     params: list[Any] = [current_user.id]
 
@@ -575,10 +585,26 @@ async def submit_review(
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
-        if sow["status"] not in ("internal_review", "drm_review"):
+        # Verify the SoW is in a reviewable stage.  When the SoW is sitting
+        # on a parallel gateway, ``sow.status`` is the gateway key (not a
+        # review/approval type), so resolve the effective stage from the
+        # assignment's ``stage`` field via the per-SoW workflow snapshot.
+        from services.workflow_engine import (
+            resolve_effective_review_stage,
+        )
+
+        effective_stage_key, current_stage_cfg = await resolve_effective_review_stage(
+            conn, sow_id, assignment["stage"], sow["status"]
+        )
+        reviewable_types = ("review", "approval")
+        if not current_stage_cfg or current_stage_cfg.get("stage_type") not in reviewable_types:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"SoW is in '{sow['status']}' status — cannot submit a review",
+                detail=(
+                    f"SoW is in '{sow['status']}' status — cannot submit a review "
+                    f"(assignment stage '{assignment['stage']}' does not map to an "
+                    "active reviewable branch)."
+                ),
             )
 
         # For approval decisions: all required checklist items must be checked
@@ -652,28 +678,51 @@ async def submit_review(
 
         # Rejection: route to the on_reject target defined in the workflow
         # template.  Falls back to 'draft' for backward compatibility.
+        # When the SoW is on a parallel gateway, the effective stage for
+        # the reject transition is the branch (not the gateway), and we
+        # need to cancel every active branch's assignments plus clear the
+        # parallel_branches tracking before execute_transition runs.
         if payload.decision == "rejected":
             from services.workflow_engine import execute_transition, resolve_transition
 
-            target = await resolve_transition(conn, sow_id, sow["status"], "on_reject")
+            target = await resolve_transition(conn, sow_id, effective_stage_key, "on_reject")
             target_key = target["stage_key"] if target else "draft"
 
-            # Cancel other pending assignments at the current stage before
-            # transitioning (the submitter's own assignment was already marked
-            # completed above).
-            await conn.execute(
-                """
-                UPDATE review_assignments
-                SET    status = 'canceled'
-                WHERE  sow_id  = $1
-                  AND  id     != $2
-                  AND  status IN ('pending', 'in_progress')
-                  AND  stage   = $3
-                """,
-                sow_id,
-                assignment["id"],
-                assignment["stage"],
-            )
+            is_parallel = effective_stage_key != sow["status"]
+            if is_parallel:
+                await conn.execute(
+                    """
+                    UPDATE review_assignments
+                    SET    status = 'canceled'
+                    WHERE  sow_id  = $1
+                      AND  id     != $2
+                      AND  status IN ('pending', 'in_progress')
+                    """,
+                    sow_id,
+                    assignment["id"],
+                )
+                await conn.execute(
+                    """
+                    UPDATE sow_workflow
+                    SET    parallel_branches = NULL, updated_at = NOW()
+                    WHERE  sow_id = $1
+                    """,
+                    sow_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE review_assignments
+                    SET    status = 'canceled'
+                    WHERE  sow_id  = $1
+                      AND  id     != $2
+                      AND  status IN ('pending', 'in_progress')
+                      AND  stage   = $3
+                    """,
+                    sow_id,
+                    assignment["id"],
+                    assignment["stage"],
+                )
 
             esap = sow["esap_level"] or "type-3"
             await execute_transition(
@@ -707,75 +756,380 @@ async def submit_review(
 
     result = {"decision": payload.decision, "sow_id": sow_id}
 
-    # Auto-advance: if the stage has auto_advance enabled and the approval
-    # decision just satisfied all gating rules, automatically advance.
-    # For parallel branches, use complete_parallel_branch instead.
+    # Auto-advance: delegate to the shared ``recheck_and_maybe_advance``
+    # helper instead of re-implementing the gating + parallel-branch dance
+    # inline.  The helper:
+    #   - Handles normal review/approval stages.
+    #   - Detects parallel_gateway stages and walks every active branch,
+    #     calling complete_parallel_branch on any that just met their gate.
+    #   - Honors the per-stage ``auto_advance`` opt-out flag.
     if payload.decision in ("approved", "approved-with-conditions"):
-        from services.workflow_engine import (
-            _find_stage,
-            _load_workflow_data,
-            check_gating_rules,
-            complete_parallel_branch,
-            execute_transition,
-            resolve_transition,
+        from services.workflow_engine import recheck_and_maybe_advance
+
+        async with database.pg_pool.acquire() as conn2, conn2.transaction():
+            advance = await recheck_and_maybe_advance(conn2, sow_id, current_user.id)
+
+        if advance["advanced"]:
+            result["auto_advanced"] = True
+            result["new_status"] = advance["new_status"]
+            result["assigned_roles"] = advance["assigned_roles"]
+        elif advance["parallel_branch_completed"]:
+            result["parallel_branch_completed"] = True
+            result["branch_stage"] = advance["branch_stage"]
+
+    return result
+
+
+# ── Assignment-id-scoped review endpoints ───────────────────────────────────
+#
+# These endpoints key off ``review_assignments.id`` instead of
+# ``(sow_id, user_id)`` so that a user holding multiple roles on the same SoW
+# can open and submit each assignment independently.  The legacy
+# ``/{sow_id}/...`` endpoints above remain for backward compatibility.
+
+
+async def _load_authorized_assignment(conn, assignment_id: int, current_user) -> dict:
+    """Fetch an assignment row and verify the caller is allowed to act on it.
+
+    Authorization: the assignment must belong to the current user OR the
+    current user must hold the ``system-admin`` role.  Raises 404 (not 403)
+    so unauthorized callers can't probe for assignment ids.
+    """
+    assignment = await conn.fetchrow(
+        "SELECT * FROM review_assignments WHERE id = $1",
+        assignment_id,
+    )
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assignment not found",
+        )
+    is_admin = (current_user.role or "").lower() == "system-admin"
+    if assignment["user_id"] != current_user.id and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assignment not found",
+        )
+    return dict(assignment)
+
+
+@router.get(
+    "/assignment/{assignment_id}/checklist",
+    response_model=AssignmentChecklistResponse,
+    summary="Get the role-specific checklist for a specific assignment",
+)
+async def get_assignment_checklist(
+    assignment_id: int,
+    current_user: CurrentUser,
+) -> AssignmentChecklistResponse:
+    """Return the checklist + saved responses for one assignment id.
+
+    Unlike the legacy ``/{sow_id}/checklist`` endpoint, this scopes by
+    assignment id so a user holding multiple roles on the same SoW can open
+    each one independently.
+    """
+    async with database.pg_pool.acquire() as conn:
+        assignment = await _load_authorized_assignment(conn, assignment_id, current_user)
+
+    role = assignment["reviewer_role"]
+    checklist_data = _load_checklist(role)
+    items = [ChecklistItemModel(**item) for item in checklist_data.get("items", [])]
+
+    saved = assignment["checklist_responses"]
+    if isinstance(saved, str):
+        saved = json.loads(saved)
+
+    return AssignmentChecklistResponse(
+        reviewer_role=role,
+        display_name=checklist_data.get("displayName", _ROLE_DISPLAY_NAMES.get(role, role)),
+        focus_areas=checklist_data.get("focusAreas", []),
+        items=items,
+        saved_responses=saved,
+        assignment_id=assignment["id"],
+        sow_id=assignment["sow_id"],
+        user_id=assignment["user_id"],
+        stage=assignment["stage"],
+        assignment_status=assignment["status"],
+        decision=assignment["decision"],
+    )
+
+
+@router.post(
+    "/assignment/{assignment_id}/save-progress",
+    summary="Save partial checklist progress for a specific assignment",
+)
+async def save_assignment_progress(
+    assignment_id: int,
+    payload: ReviewProgressPayload,
+    current_user: CurrentUser,
+) -> dict:
+    """Persist checklist + comments without finalizing.  Pending → in_progress."""
+    async with database.pg_pool.acquire() as conn:
+        assignment = await _load_authorized_assignment(conn, assignment_id, current_user)
+        new_status = "in_progress" if assignment["status"] == "pending" else assignment["status"]
+        await conn.execute(
+            """
+            UPDATE review_assignments
+            SET    checklist_responses = $1::jsonb,
+                   comments            = $2,
+                   status              = $3
+            WHERE  id = $4
+            """,
+            json.dumps(payload.checklist_responses),
+            payload.comments,
+            new_status,
+            assignment_id,
+        )
+    return {"saved": True}
+
+
+@router.post(
+    "/assignment/{assignment_id}/submit",
+    summary="Submit a final review decision for a specific assignment",
+)
+async def submit_assignment_review(
+    assignment_id: int,
+    payload: ReviewSubmitPayload,
+    current_user: CurrentUser,
+) -> dict:
+    """Submit a decision (``approved``, ``rejected``, ``approved-with-conditions``)
+    for one assignment.  Mirrors the legacy ``/{sow_id}/submit`` flow but
+    keys off the assignment id, so each role's review can be submitted
+    independently even when one user holds multiple roles on the same SoW.
+    """
+    valid_decisions = {"approved", "rejected", "approved-with-conditions"}
+    if payload.decision not in valid_decisions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid decision. Must be one of: {sorted(valid_decisions)}",
+        )
+    if payload.decision == "rejected" and not payload.comments:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Comments are required when rejecting",
+        )
+    if payload.decision == "approved-with-conditions" and not payload.conditions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Conditions list is required for 'approved-with-conditions'",
         )
 
-        async with database.pg_pool.acquire() as conn2:
-            sow_now = await conn2.fetchrow(
-                "SELECT status, esap_level FROM sow_documents WHERE id = $1", sow_id
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        assignment = await _load_authorized_assignment(conn, assignment_id, current_user)
+
+        if assignment["status"] == "completed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This assignment has already been submitted",
             )
-        if sow_now:
-            current = sow_now["status"]
-            esap = sow_now["esap_level"] or "type-3"
-            async with database.pg_pool.acquire() as conn2:
-                wd = await _load_workflow_data(conn2, sow_id)
-                # Check if this stage is part of a parallel group
-                pb_row = await conn2.fetchrow(
-                    "SELECT parallel_branches FROM sow_workflow WHERE sow_id = $1",
-                    sow_id,
-                )
-            parallel_branches = (
-                pb_row["parallel_branches"] if pb_row and pb_row["parallel_branches"] else None
-            )
-            is_parallel_branch = (
-                parallel_branches
-                and isinstance(parallel_branches, dict)
-                and current in parallel_branches
+        if assignment["status"] == "canceled":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This assignment was canceled and cannot be submitted",
             )
 
-            stage_cfg = _find_stage(wd, current)
-            if stage_cfg and (stage_cfg.get("config") or {}).get("auto_advance"):
-                async with database.pg_pool.acquire() as conn2, conn2.transaction():
-                    met, _ = await check_gating_rules(conn2, sow_id, current, esap)
-                    if met:
-                        if is_parallel_branch:
-                            # This is a parallel branch — check if the join can proceed
-                            join_result = await complete_parallel_branch(
-                                conn2, sow_id, current, current_user.id, esap
-                            )
-                            if join_result:
-                                result["auto_advanced"] = True
-                                result["new_status"] = join_result["new_status"]
-                                result["assigned_roles"] = join_result.get("assigned_roles", [])
-                            else:
-                                # Branch complete but join not ready yet
-                                result["parallel_branch_completed"] = True
-                                result["branch_stage"] = current
-                        else:
-                            target = await resolve_transition(conn2, sow_id, current, "on_approve")
-                            if not target:
-                                target = await resolve_transition(conn2, sow_id, current, "default")
-                            if target:
-                                advance_result = await execute_transition(
-                                    conn2,
-                                    sow_id,
-                                    target["stage_key"],
-                                    current_user.id,
-                                    esap,
-                                )
-                                result["auto_advanced"] = True
-                                result["new_status"] = advance_result["new_status"]
-                                result["assigned_roles"] = advance_result.get("assigned_roles", [])
+        sow_id = assignment["sow_id"]
+        sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not sow:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        # Verify the SoW is in a reviewable stage.  When the SoW is sitting
+        # on a parallel gateway, ``sow.status`` is the gateway key (which
+        # is NOT a review/approval type), but the reviewer is legitimately
+        # acting on one of the active branches; resolve the branch stage
+        # via the assignment's ``stage`` field so the type-check passes.
+        from services.workflow_engine import (
+            resolve_effective_review_stage,
+        )
+
+        effective_stage_key, current_stage_cfg = await resolve_effective_review_stage(
+            conn, sow_id, assignment["stage"], sow["status"]
+        )
+        reviewable_types = ("review", "approval")
+        if not current_stage_cfg or current_stage_cfg.get("stage_type") not in reviewable_types:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"SoW is in '{sow['status']}' status — cannot submit a review "
+                    f"(assignment stage '{assignment['stage']}' does not map to an "
+                    "active reviewable branch)."
+                ),
+            )
+
+        # Required-checklist validation for approving decisions.
+        if payload.decision in ("approved", "approved-with-conditions"):
+            checklist_data = _load_checklist(assignment["reviewer_role"])
+            required_ids = {
+                item["id"] for item in checklist_data.get("items", []) if item.get("required")
+            }
+            checked_ids = {r["id"] for r in payload.checklist_responses if r.get("checked")}
+            missing = required_ids - checked_ids
+            if missing:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"All required checklist items must be checked before approving. Missing: {sorted(missing)}",
+                )
+
+        now = datetime.now(UTC)
+
+        await conn.execute(
+            """
+            UPDATE review_assignments
+            SET    status              = 'completed',
+                   decision            = $1,
+                   comments            = $2,
+                   conditions          = $3::jsonb,
+                   checklist_responses = $4::jsonb,
+                   completed_at        = $5
+            WHERE  id = $6
+            """,
+            payload.decision,
+            payload.comments,
+            json.dumps(payload.conditions) if payload.conditions else None,
+            json.dumps(payload.checklist_responses),
+            now,
+            assignment_id,
+        )
+
+        # Audit trail row in review_results.  ``reviewer_user_id`` records
+        # the actor; for system-admins acting on someone else's assignment
+        # this is the admin (not the assigned user).
+        await conn.execute(
+            """
+            INSERT INTO review_results
+                (sow_id, reviewer, score, findings, reviewed_at,
+                 reviewer_user_id, review_stage, checklist_responses, decision, conditions)
+            VALUES
+                ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9, $10::jsonb)
+            """,
+            sow_id,
+            current_user.email,
+            None,
+            json.dumps({"comments": payload.comments}),
+            now,
+            current_user.id,
+            assignment["stage"],
+            json.dumps(payload.checklist_responses),
+            payload.decision,
+            json.dumps(payload.conditions) if payload.conditions else None,
+        )
+
+        await insert_history(
+            conn,
+            sow_id,
+            current_user.id,
+            "review_submitted",
+            {
+                "decision": payload.decision,
+                "reviewer_role": assignment["reviewer_role"],
+                "stage": assignment["stage"],
+                "assignment_id": assignment_id,
+            },
+        )
+
+        # Rejection: route to the on_reject target and cancel sibling
+        # assignments.  When the SoW is on a parallel gateway, the reject
+        # semantically terminates the *whole* parallel group (not just the
+        # current branch), so:
+        #   - resolve on_reject from the effective branch stage (the
+        #     reviewer's real stage), not the gateway.
+        #   - cancel pending assignments across ALL active branches so
+        #     sibling reviewers can't keep working on a rejected SoW.
+        #   - clear sow_workflow.parallel_branches so the next transition
+        #     doesn't try to join a dead group.
+        if payload.decision == "rejected":
+            from services.workflow_engine import execute_transition, resolve_transition
+
+            target = await resolve_transition(conn, sow_id, effective_stage_key, "on_reject")
+            target_key = target["stage_key"] if target else "draft"
+
+            is_parallel = effective_stage_key != sow["status"]
+            if is_parallel:
+                # Cancel every pending/in_progress assignment on this SoW
+                # (any branch), not just the current one.
+                await conn.execute(
+                    """
+                    UPDATE review_assignments
+                    SET    status = 'canceled'
+                    WHERE  sow_id  = $1
+                      AND  id     != $2
+                      AND  status IN ('pending', 'in_progress')
+                    """,
+                    sow_id,
+                    assignment_id,
+                )
+                # Drop the parallel tracking state so the SoW leaves the
+                # group cleanly before execute_transition runs.
+                await conn.execute(
+                    """
+                    UPDATE sow_workflow
+                    SET    parallel_branches = NULL, updated_at = NOW()
+                    WHERE  sow_id = $1
+                    """,
+                    sow_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE review_assignments
+                    SET    status = 'canceled'
+                    WHERE  sow_id  = $1
+                      AND  id     != $2
+                      AND  status IN ('pending', 'in_progress')
+                      AND  stage   = $3
+                    """,
+                    sow_id,
+                    assignment_id,
+                    assignment["stage"],
+                )
+
+            esap = sow["esap_level"] or "type-3"
+            await execute_transition(
+                conn, sow_id, target_key, current_user.id, esap, payload.comments
+            )
+
+        # Auto-create COA rows for approved-with-conditions decisions.
+        if payload.decision == "approved-with-conditions" and payload.conditions:
+            for condition_item in payload.conditions:
+                if isinstance(condition_item, str):
+                    condition_text = condition_item
+                    category = "general"
+                else:
+                    condition_text = condition_item.get("text", "")
+                    category = condition_item.get("category", "general")
+                if condition_text:
+                    await conn.execute(
+                        """
+                        INSERT INTO conditions_of_approval
+                            (sow_id, review_assignment_id, condition_text, category, created_by)
+                        VALUES ($1, $2, $3, $4, $5)
+                        """,
+                        sow_id,
+                        assignment_id,
+                        condition_text,
+                        category,
+                        current_user.id,
+                    )
+
+    result: dict = {"decision": payload.decision, "sow_id": sow_id, "assignment_id": assignment_id}
+
+    # Auto-advance: re-evaluate gating after this approval. The shared
+    # ``recheck_and_maybe_advance`` helper handles normal stages, parallel
+    # branches, and the auto_advance opt-out flag — same code path used by
+    # the live reviewer-swap and workflow-edit endpoints.
+    if payload.decision in ("approved", "approved-with-conditions"):
+        from services.workflow_engine import recheck_and_maybe_advance
+
+        async with database.pg_pool.acquire() as conn2, conn2.transaction():
+            advance = await recheck_and_maybe_advance(conn2, sow_id, current_user.id)
+
+        if advance["advanced"]:
+            result["auto_advanced"] = True
+            result["new_status"] = advance["new_status"]
+            result["assigned_roles"] = advance["assigned_roles"]
+        elif advance["parallel_branch_completed"]:
+            result["parallel_branch_completed"] = True
+            result["branch_stage"] = advance["branch_stage"]
 
     return result
 
@@ -795,7 +1149,26 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
     Only the most recent assignment per (user, reviewer_role, stage) is
     returned.  This prevents stale rows from prior reject/resubmit cycles from
     polluting the status view or incorrectly satisfying gating rules.
+
+    Parallel gateways
+    -----------------
+    When the SoW sits on a ``parallel_gateway``, gating is aggregated across
+    every still-active branch:
+
+    * ``gating_rules_met`` is ``True`` iff **every** active branch has met
+      its own gating rules (conservative "all_required" semantics — the
+      actual join decision happens on the next submit/advance call which
+      can honor non-default ``join_mode`` via :func:`check_join_requirements`).
+    * ``outstanding_requirements`` is the union of outstanding roles across
+      every active branch so the UI can list them all at once.
     """
+    from services.workflow_engine import (
+        _find_stage,
+        _load_parallel_branches,
+        _load_workflow_data,
+        check_gating_rules,
+    )
+
     async with database.pg_pool.acquire() as conn:
         sow = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
@@ -816,13 +1189,42 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
         esap = sow["esap_level"] or "type-3"
         current_stage = sow["status"]
 
-        # Determine which stage's gating rules to evaluate
-        if current_stage in ("internal_review", "drm_review"):
-            stage_key = "internal-review" if current_stage == "internal_review" else "drm-approval"
-            required_roles = await _get_required_roles(conn, sow_id, current_stage, esap)
+        wd = await _load_workflow_data(conn, sow_id)
+        current_cfg = _find_stage(wd, current_stage)
+        is_gateway = bool(current_cfg and current_cfg.get("stage_type") == "parallel_gateway")
+
+        if is_gateway:
+            # Aggregate gating across every still-active branch. The gateway
+            # itself has no roles, so calling check_gating_rules on it would
+            # trivially return (True, []) and mislead the UI into thinking
+            # the SoW is ready to advance when branches are still waiting.
+            parallel_branches = await _load_parallel_branches(conn, sow_id)
+            if not parallel_branches:
+                met, outstanding_roles = False, []
+            else:
+                active_branches = [k for k, v in parallel_branches.items() if v != "completed"]
+                all_met = True
+                agg_outstanding: list[str] = []
+                for branch_key in active_branches:
+                    branch_cfg = _find_stage(wd, branch_key)
+                    if not branch_cfg:
+                        continue
+                    if branch_cfg.get("stage_type") not in ("review", "approval"):
+                        continue
+                    branch_met, branch_outstanding = await check_gating_rules(
+                        conn, sow_id, branch_key, esap
+                    )
+                    if not branch_met:
+                        all_met = False
+                        for r in branch_outstanding:
+                            if r not in agg_outstanding:
+                                agg_outstanding.append(r)
+                met = all_met
+                outstanding_roles = agg_outstanding
         else:
-            stage_key = ""
-            required_roles = []
+            # Use the dynamic gating rules engine (reads from the per-SoW
+            # workflow snapshot) so custom stages work correctly.
+            met, outstanding_roles = await check_gating_rules(conn, sow_id, current_stage, esap)
 
     assignments = [
         ReviewAssignmentStatusSummary(
@@ -836,28 +1238,16 @@ async def get_review_status(sow_id: int, current_user: CurrentUser) -> ReviewSta
         for r in rows
     ]
 
-    if stage_key:
-        completed_roles = {
-            r["reviewer_role"]
-            for r in rows
-            if r["stage"] == stage_key
-            and r["status"] == "completed"
-            and r["decision"] in ("approved", "approved-with-conditions")
-        }
-        outstanding = [
-            f"{_ROLE_DISPLAY_NAMES.get(role, role)} approval pending"
-            for role in required_roles
-            if role not in completed_roles
-        ]
-    else:
-        outstanding = []
+    outstanding = [
+        f"{_ROLE_DISPLAY_NAMES.get(role, role)} approval pending" for role in outstanding_roles
+    ]
 
     return ReviewStatus(
         sow_id=sow_id,
         current_stage=current_stage,
         esap_level=esap,
         assignments=assignments,
-        gating_rules_met=len(outstanding) == 0,
+        gating_rules_met=met,
         outstanding_requirements=outstanding,
     )
 
@@ -876,10 +1266,23 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
     Reads the per-SoW workflow snapshot to determine the ``on_approve``
     transition target and required approvals.
 
+    Parallel gateways
+    -----------------
+    When the SoW is sitting on a ``parallel_gateway`` stage (i.e.
+    ``sow_documents.status`` is the gateway key, not a branch key), this
+    endpoint walks every *still-active* branch, verifies its gating, and
+    calls :func:`complete_parallel_branch` for each one that's ready. The
+    first branch whose completion triggers the join transition returns the
+    resulting status; any other ready branches stay waiting until another
+    advance/submit tick picks them up.
+
     Raises **409** if gating rules are not satisfied or no advance transition
     is defined for the current stage.
     """
     from services.workflow_engine import (
+        _find_stage,
+        _load_parallel_branches,
+        _load_workflow_data,
         check_gating_rules,
         complete_parallel_branch,
         execute_transition,
@@ -893,7 +1296,94 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
         esap = sow["esap_level"] or "type-3"
         current_stage = sow["status"]
+        wd = await _load_workflow_data(conn, sow_id)
+        current_cfg = _find_stage(wd, current_stage)
+        is_gateway = bool(current_cfg and current_cfg.get("stage_type") == "parallel_gateway")
 
+        # ── Parallel gateway: advance one (or more) ready branches ───────────
+        if is_gateway:
+            parallel_branches = await _load_parallel_branches(conn, sow_id)
+            if not parallel_branches:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"SoW is at parallel gateway '{current_stage}' but no "
+                        "parallel_branches tracking exists — workflow state is "
+                        "inconsistent."
+                    ),
+                )
+
+            active_branches = [k for k, v in parallel_branches.items() if v != "completed"]
+
+            # Aggregate outstanding roles across every active branch so the
+            # caller gets a single 409 listing everything that's still pending.
+            aggregated_outstanding: list[str] = []
+            any_ready = False
+            for branch_key in active_branches:
+                branch_cfg = _find_stage(wd, branch_key)
+                if not branch_cfg:
+                    continue
+                if branch_cfg.get("stage_type") not in ("review", "approval"):
+                    # Non-reviewable branch — treat as ready so the join picks
+                    # it up. (Shouldn't really happen for parallel branches.)
+                    any_ready = True
+                    continue
+                branch_met, branch_outstanding = await check_gating_rules(
+                    conn, sow_id, branch_key, esap
+                )
+                if not branch_met:
+                    aggregated_outstanding.extend(branch_outstanding)
+                    continue
+                any_ready = True
+
+            if not any_ready:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Gating rules not met on any active parallel branch. "
+                        "Pending approvals from: "
+                        + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in aggregated_outstanding)
+                    ),
+                )
+
+            # Try to complete every ready branch; first one that triggers the
+            # join returns the transition result.
+            final_result: dict | None = None
+            for branch_key in active_branches:
+                branch_cfg = _find_stage(wd, branch_key)
+                if not branch_cfg:
+                    continue
+                if branch_cfg.get("stage_type") in ("review", "approval"):
+                    branch_met, _ = await check_gating_rules(conn, sow_id, branch_key, esap)
+                    if not branch_met:
+                        continue
+                join_result = await complete_parallel_branch(
+                    conn, sow_id, branch_key, current_user.id, esap
+                )
+                if join_result:
+                    return join_result
+                # Branch marked complete but join still waiting.
+                final_result = {
+                    "advanced": False,
+                    "sow_id": sow_id,
+                    "parallel_branch_completed": True,
+                    "branch_stage": branch_key,
+                    "detail": "Branch completed. Waiting for other parallel branches.",
+                }
+
+            if final_result is not None:
+                return final_result
+
+            # Shouldn't reach here — any_ready was True but nothing happened.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"No advance transition defined from parallel gateway "
+                    f"'{current_stage}' — workflow routing is incomplete."
+                ),
+            )
+
+        # ── Single-stage advance ─────────────────────────────────────────────
         # Check gating rules for the current stage
         met, outstanding = await check_gating_rules(conn, sow_id, current_stage, esap)
         if not met:
@@ -904,36 +1394,6 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     + ", ".join(_ROLE_DISPLAY_NAMES.get(r, r) for r in outstanding)
                 ),
             )
-
-        # Check if this stage is part of a parallel group
-        pb_row = await conn.fetchrow(
-            "SELECT parallel_branches FROM sow_workflow WHERE sow_id = $1",
-            sow_id,
-        )
-        parallel_branches = (
-            pb_row["parallel_branches"] if pb_row and pb_row["parallel_branches"] else None
-        )
-        is_parallel_branch = (
-            parallel_branches
-            and isinstance(parallel_branches, dict)
-            and current_stage in parallel_branches
-        )
-
-        if is_parallel_branch:
-            # This is a parallel branch — try to complete it and check the join
-            join_result = await complete_parallel_branch(
-                conn, sow_id, current_stage, current_user.id, esap
-            )
-            if join_result:
-                return join_result
-            # Branch marked complete but join not ready yet
-            return {
-                "advanced": False,
-                "sow_id": sow_id,
-                "parallel_branch_completed": True,
-                "branch_stage": current_stage,
-                "detail": "Branch completed. Waiting for other parallel branches.",
-            }
 
         # Resolve the on_approve transition, falling back to default
         target = await resolve_transition(conn, sow_id, current_stage, "on_approve")
@@ -1144,10 +1604,20 @@ async def send_back(
 
     Clears pending assignments at the current stage, records an audit entry,
     and creates new assignments at the target stage if it requires reviewers.
+
+    Parallel gateways
+    -----------------
+    When the SoW sits on a ``parallel_gateway``, the caller's assignment
+    identifies which branch they're actually reviewing from. Valid send-back
+    targets are resolved from that **branch** stage (not the gateway), and
+    every pending assignment across every active branch is canceled so
+    sibling reviewers don't see a dangling task after the send-back. The
+    ``parallel_branches`` tracking state is cleared too.
     """
     from services.workflow_engine import (
         execute_transition,
         get_valid_send_back_targets,
+        resolve_effective_review_stage,
     )
 
     if not payload.comments:
@@ -1161,18 +1631,8 @@ async def send_back(
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
-        current_stage = sow["status"]
-
-        # Validate target_stage against workflow-defined send-back targets
-        valid_targets = await get_valid_send_back_targets(conn, sow_id, current_stage)
-        valid_keys = {t["stage_key"] for t in valid_targets}
-        if payload.target_stage not in valid_keys:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid target_stage '{payload.target_stage}'. Valid targets: {sorted(valid_keys)}",
-            )
-
-        # Find the reviewer's assignment at the current stage
+        # Find the reviewer's assignment first — we need it to resolve the
+        # effective stage when the SoW is at a parallel gateway.
         assignment = await conn.fetchrow(
             """SELECT * FROM review_assignments
                WHERE sow_id = $1 AND user_id = $2
@@ -1186,6 +1646,24 @@ async def send_back(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No active assignment found",
+            )
+
+        # Resolve the effective stage (branch key if at a parallel gateway).
+        effective_stage_key, _ = await resolve_effective_review_stage(
+            conn, sow_id, assignment["stage"], sow["status"]
+        )
+        is_parallel = effective_stage_key != sow["status"]
+
+        # Validate target_stage against workflow-defined send-back targets
+        # of the **effective** stage (branch for parallel, current stage
+        # otherwise). Gateways don't have on_send_back transitions — those
+        # live on the individual branches.
+        valid_targets = await get_valid_send_back_targets(conn, sow_id, effective_stage_key)
+        valid_keys = {t["stage_key"] for t in valid_targets}
+        if payload.target_stage not in valid_keys:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid target_stage '{payload.target_stage}'. Valid targets: {sorted(valid_keys)}",
             )
 
         now = datetime.now(UTC)
@@ -1205,20 +1683,44 @@ async def send_back(
             assignment["id"],
         )
 
-        # Cancel other pending assignments at the current stage
-        await conn.execute(
-            """
-            UPDATE review_assignments
-            SET    status = 'canceled'
-            WHERE  sow_id   = $1
-              AND  id      != $2
-              AND  stage    = $3
-              AND  status  IN ('pending', 'in_progress')
-            """,
-            sow_id,
-            assignment["id"],
-            assignment["stage"],
-        )
+        if is_parallel:
+            # At a parallel gateway: cancel every active assignment across
+            # every branch and wipe the parallel_branches tracking so a
+            # subsequent re-submission fan-out starts fresh.
+            await conn.execute(
+                """
+                UPDATE review_assignments
+                SET    status = 'canceled'
+                WHERE  sow_id   = $1
+                  AND  id      != $2
+                  AND  status  IN ('pending', 'in_progress')
+                """,
+                sow_id,
+                assignment["id"],
+            )
+            await conn.execute(
+                """
+                UPDATE sow_workflow
+                SET    parallel_branches = NULL, updated_at = NOW()
+                WHERE  sow_id = $1
+                """,
+                sow_id,
+            )
+        else:
+            # Single-stage send-back: only cancel siblings at the same stage.
+            await conn.execute(
+                """
+                UPDATE review_assignments
+                SET    status = 'canceled'
+                WHERE  sow_id   = $1
+                  AND  id      != $2
+                  AND  stage    = $3
+                  AND  status  IN ('pending', 'in_progress')
+                """,
+                sow_id,
+                assignment["id"],
+                assignment["stage"],
+            )
 
         # Audit entry
         await conn.execute(

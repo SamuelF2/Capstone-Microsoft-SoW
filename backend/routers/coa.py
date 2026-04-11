@@ -45,9 +45,21 @@ async def _check_condition_met_transition(conn, sow_id: int, user_id: int) -> di
     are now resolved or waived.  If so, and the current stage has an
     ``on_condition_met`` transition, execute it automatically.
 
+    Parallel gateways
+    -----------------
+    When the SoW sits on a ``parallel_gateway``, ``sow.status`` points at
+    the gateway (which has no ``on_condition_met`` transition). Instead,
+    the helper maps the resolved COAs back to the branch stages via their
+    ``review_assignment_id`` → ``review_assignments.stage`` linkage and
+    attempts the transition from each unique branch. The first branch
+    whose ``on_condition_met`` resolves wins.
+
     Returns the transition result dict if an auto-advance happened, else None.
     """
     from services.workflow_engine import (
+        _find_stage,
+        _load_workflow_data,
+        _stage_key_from_assignment_stage,
         execute_transition,
         resolve_transition,
     )
@@ -68,11 +80,47 @@ async def _check_condition_met_transition(conn, sow_id: int, user_id: int) -> di
     if not sow:
         return None
 
+    esap = sow["esap_level"] or "type-3"
+    wd = await _load_workflow_data(conn, sow_id)
+    current_cfg = _find_stage(wd, sow["status"])
+    is_gateway = bool(current_cfg and current_cfg.get("stage_type") == "parallel_gateway")
+
+    if is_gateway:
+        # Map the resolved COAs back to their review assignment stages
+        # (hyphenated form) and then to workflow branch keys.
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ra.stage
+            FROM   conditions_of_approval coa
+            JOIN   review_assignments    ra ON ra.id = coa.review_assignment_id
+            WHERE  coa.sow_id = $1
+              AND  coa.review_assignment_id IS NOT NULL
+            """,
+            sow_id,
+        )
+        candidate_stages: list[str] = []
+        for r in rows:
+            branch_key = _stage_key_from_assignment_stage(wd, r["stage"])
+            if branch_key and branch_key not in candidate_stages:
+                candidate_stages.append(branch_key)
+
+        for branch_key in candidate_stages:
+            target = await resolve_transition(conn, sow_id, branch_key, "on_condition_met")
+            if target:
+                return await execute_transition(
+                    conn,
+                    sow_id,
+                    target["stage_key"],
+                    user_id,
+                    esap,
+                    "All conditions of approval met",
+                )
+        return None
+
     target = await resolve_transition(conn, sow_id, sow["status"], "on_condition_met")
     if not target:
         return None
 
-    esap = sow["esap_level"] or "type-3"
     return await execute_transition(
         conn, sow_id, target["stage_key"], user_id, esap, "All conditions of approval met"
     )
