@@ -1,0 +1,267 @@
+{
+  "name": "Agile Sprint Delivery — Standard",
+  "methodology": "Agile Sprint Delivery",
+  "description": "Pre-populated starter content for Agile/Scrum engagements with sprint structure, backlog seed, and velocity-based delivery model.",
+  "template_data": {
+    "executiveSummary": {
+      "content": "This engagement delivers {{customer_name}}'s {{project_name}} initiative using Microsoft's Agile Sprint Delivery methodology. Working in time-boxed sprints, the team will iteratively build, test, and release prioritised features, ensuring continuous value delivery and built-in quality. The engagement is structured around a rolling product backlog that is refined collaboratively with {{customer_name}} stakeholders to ensure alignment with evolving business priorities.\n\nKey business outcomes include accelerated time-to-value through working software every sprint, transparent progress tracking via velocity metrics, and a reduced risk profile thanks to early and frequent feedback loops."
+    },
+    "projectScope": {
+      "inScope": [
+        { "id": "is-1", "text": "Discovery and backlog creation workshop (2-day)" },
+        {
+          "id": "is-2",
+          "text": "Sprint planning, execution, and retrospective ceremonies for all sprints"
+        },
+        {
+          "id": "is-3",
+          "text": "Continuous Integration / Continuous Deployment (CI/CD) pipeline setup"
+        },
+        { "id": "is-4", "text": "User Acceptance Testing (UAT) coordination per sprint" },
+        { "id": "is-5", "text": "Sprint Review demos to {{customer_name}} stakeholders" },
+        { "id": "is-6", "text": "Final solution handover and knowledge transfer session" }
+      ],
+      "outOfScope": [
+        { "id": "oos-1", "text": "Ongoing managed service or Level 3 support post-handover" },
+        { "id": "oos-2", "text": "Third-party software licensing procurement" },
+        {
+          "id": "oos-3",
+          "text": "Data migration from legacy systems unless explicitly itemised in backlog"
+        }
+      ]
+    },
+    "agileApproach": {
+      "deliveryApproach": "The engagement will follow a Scrum framework operating in two-week sprints. Each sprint begins with a Sprint Planning session to select backlog items from the prioritised Product Backlog and ends with a Sprint Review (demo to {{customer_name}}) and Retrospective. A daily stand-up (15 min) keeps the team aligned. The Microsoft-nominated Scrum Master facilitates all ceremonies and removes impediments. The {{customer_name}}-nominated Product Owner owns the backlog and attends planning and review sessions.",
+      "supportTransitionPlan": "In the final sprint, the team will conduct a structured handover: (1) deploy to production environment, (2) deliver runbook and operational documentation, (3) perform a 2-hour knowledge transfer session with {{customer_name}} IT team, (4) remain on call for a 2-week hypercare period post go-live.",
+      "sprints": [
+        {
+          "id": "sp-1",
+          "name": "Sprint 0 — Foundation",
+          "goals": "Environment provisioning, CI/CD pipeline, backlog refinement, team onboarding",
+          "durationWeeks": 2
+        },
+        {
+          "id": "sp-2",
+          "name": "Sprint 1 — Core Capability",
+          "goals": "Highest-priority backlog items; first working build",
+          "durationWeeks": 2
+        },
+        {
+          "id": "sp-3",
+          "name": "Sprint 2 — Feature Build",
+          "goals": "Second tier of backlog items; integration tests",
+          "durationWeeks": 2
+        },
+        {
+          "id": "sp-4",
+          "name": "Sprint 3 — Hardening",
+          "goals": "Bug fixes, performance tuning, UAT support",
+          "durationWeeks": 2
+        },
+        {
+          "id": "sp-5",
+          "name": "Sprint 4 — Go-Live",
+          "goals": "Production deployment, cutover, hypercare",
+          "durationWeeks": 2
+        }
+      ]
+    },
+    "productBacklog": [
+      {
+        "id": "pb-1",
+        "epic": "Platform Setup",
+        "story": "As a developer, I need the Azure DevOps project and repositories configured so that the team can begin feature work",
+        "storyPoints": 5,
+        "priority": "high"
+      },
+      {
+        "id": "pb-2",
+        "epic": "Platform Setup",
+        "story": "As a developer, I need a CI pipeline that builds and tests on every pull request so that code quality is enforced automatically",
+        "storyPoints": 8,
+        "priority": "high"
+      },
+      {
+        "id": "pb-3",
+        "epic": "Core Feature",
+        "story": "As a {{customer_name}} user, I need [primary feature] so that I can achieve [business outcome]",
+        "storyPoints": 13,
+        "priority": "high"
+      },
+      {
+        "id": "pb-4",
+        "epic": "Core Feature",
+        "story": "As a {{customer_name}} administrator, I need role-based access control so that data is only accessible to authorised users",
+        "storyPoints": 8,
+        "priority": "medium"
+      },
+      {
+        "id": "pb-5",
+        "epic": "Reporting",
+        "story": "As a {{customer_name}} manager, I need a dashboard showing key metrics so that I can monitor business outcomes",
+        "storyPoints": 8,
+        "priority": "medium"
+      }
+    ],
+    "deliverables": [
+      {
+        "id": "d-1",
+        "title": "Sprint 0 — Project Kickoff Report",
+        "description": "Documented environment setup, team charter, and refined Product Backlog",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-2",
+        "title": "Working Software (per sprint)",
+        "description": "Tested, demo-ready build at the end of each sprint deployed to staging",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-3",
+        "title": "UAT Sign-off Documentation",
+        "description": "Completed UAT results signed off by {{customer_name}} Product Owner",
+        "dueDate": "",
+        "owner": "{{customer_name}}"
+      },
+      {
+        "id": "d-4",
+        "title": "Solution Architecture Document",
+        "description": "As-built architecture diagram and component descriptions",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-5",
+        "title": "Runbook & Operations Guide",
+        "description": "Day-2 operations playbook including deployment, rollback, and monitoring procedures",
+        "dueDate": "",
+        "owner": "Microsoft"
+      }
+    ],
+    "assumptionsRisks": {
+      "assumptions": [
+        {
+          "id": "a-1",
+          "text": "{{customer_name}} will nominate a Product Owner who is available for planning and review ceremonies (min. 4 hrs/week)"
+        },
+        {
+          "id": "a-2",
+          "text": "Azure subscription with sufficient quota for the target workload will be provisioned by {{customer_name}} prior to Sprint 0"
+        },
+        {
+          "id": "a-3",
+          "text": "All third-party dependencies (APIs, data feeds) are accessible and documented before Sprint 1"
+        },
+        {
+          "id": "a-4",
+          "text": "{{customer_name}} will provide timely UAT feedback within 3 business days of each Sprint Review"
+        }
+      ],
+      "customerResponsibilities": [
+        {
+          "id": "cr-1",
+          "text": "Assign and maintain an empowered Product Owner for the duration of the engagement"
+        },
+        { "id": "cr-2", "text": "Provision Azure environment, networking, and required licences" },
+        {
+          "id": "cr-3",
+          "text": "Ensure subject matter expert availability for requirements workshops (Sprint 0)"
+        },
+        { "id": "cr-4", "text": "Perform and sign off UAT within agreed timelines" }
+      ],
+      "risks": [
+        {
+          "id": "r-1",
+          "text": "Backlog scope creep — mitigated by sprint-level change control and backlog re-prioritisation ceremonies"
+        },
+        {
+          "id": "r-2",
+          "text": "Product Owner unavailability — mitigated by nominating a deputy and scheduling ceremonies 2 weeks in advance"
+        },
+        {
+          "id": "r-3",
+          "text": "Third-party API instability — mitigated by stub/mock services during development, with live integration in Sprint 3+"
+        }
+      ]
+    },
+    "teamStructure": {
+      "members": [
+        {
+          "id": "t-1",
+          "role": "Engagement Lead",
+          "name": "",
+          "allocation": "20%",
+          "responsibilities": "Stakeholder management, escalation, commercial oversight"
+        },
+        {
+          "id": "t-2",
+          "role": "Scrum Master",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Ceremony facilitation, impediment removal, velocity tracking"
+        },
+        {
+          "id": "t-3",
+          "role": "Senior Developer",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Solution architecture, hands-on development, code review"
+        },
+        {
+          "id": "t-4",
+          "role": "Developer",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Feature development, unit testing, CI/CD maintenance"
+        },
+        {
+          "id": "t-5",
+          "role": "QA Engineer",
+          "name": "",
+          "allocation": "50%",
+          "responsibilities": "Test strategy, automated test authoring, UAT coordination"
+        }
+      ],
+      "supportTransitionPlan": "Hypercare support (best-effort, business hours) for 2 weeks post go-live. Issues triaged by Scrum Master; severity-1 bugs addressed within 4 business hours."
+    },
+    "pricing": {
+      "totalValue": "",
+      "breakdown": [
+        {
+          "id": "p-1",
+          "item": "Sprint 0 — Foundation",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-2",
+          "item": "Sprint 1–3 — Delivery (per sprint)",
+          "unit": "Sprint",
+          "qty": 3,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-3",
+          "item": "Sprint 4 — Go-Live & Hypercare",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-4",
+          "item": "Travel & Expenses (estimate)",
+          "unit": "Lump sum",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        }
+      ]
+    }
+  }
+}

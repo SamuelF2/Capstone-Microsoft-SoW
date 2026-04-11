@@ -1,8 +1,8 @@
 import { useRef } from 'react';
-
-function genId() {
-  return `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
 
 function ScopeList({
   title,
@@ -151,7 +151,7 @@ export default function CloudAdoptionScope({ data, onChange }) {
   const update = (patch) => onChange({ ...data, ...patch });
 
   const handleAdd = (listKey) => {
-    const newItem = { id: genId(), text: '' };
+    const newItem = { id: genId('item'), text: '' };
     if (listKey === 'inScope') update({ inScope: [...inScope, newItem] });
     else update({ outOfScope: [...outOfScope, newItem] });
   };
@@ -203,28 +203,17 @@ export default function CloudAdoptionScope({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Cloud Adoption Scope</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the cloud adoption objectives, target environment, and what workloads and services
-          are in and out of scope for this engagement.
-        </p>
-      </div>
+      <SectionHeader
+        title="Cloud Adoption Scope"
+        description="Define the cloud adoption objectives, target environment, and what workloads and services are in and out of scope for this engagement."
+      />
 
       {/* Cloud Objectives */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-2xl)',
-        }}
-      >
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-sm">Cloud Objectives</h3>
-          <p className="text-sm text-secondary mb-md">
-            Describe the business and technical goals driving the cloud adoption.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-2xl)' }}>
+        <FormCard
+          title="Cloud Objectives"
+          description="Describe the business and technical goals driving the cloud adoption."
+        >
           <textarea
             className="form-textarea"
             value={cloudObjectives}
@@ -232,14 +221,12 @@ export default function CloudAdoptionScope({ data, onChange }) {
             placeholder="e.g. Reduce on-premises infrastructure costs by 40%, improve scalability for seasonal workloads, enable disaster recovery capabilities..."
             rows={6}
           />
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-sm">Target Environment</h3>
-          <p className="text-sm text-secondary mb-md">
-            Describe the target Azure environment — subscriptions, regions, landing zones, and
-            governance model.
-          </p>
+        <FormCard
+          title="Target Environment"
+          description="Describe the target Azure environment — subscriptions, regions, landing zones, and governance model."
+        >
           <textarea
             className="form-textarea"
             value={targetEnvironment}
@@ -247,11 +234,11 @@ export default function CloudAdoptionScope({ data, onChange }) {
             placeholder="e.g. Azure landing zone in Australia East (primary) and Australia Southeast (DR), three subscriptions (Production, Non-Prod, Shared Services)..."
             rows={6}
           />
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
 
       {/* Scope Lists */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--spacing-xl)' }}>
+      <TwoColumnGrid>
         <ScopeList
           title="In Scope"
           items={inScope}
@@ -276,7 +263,7 @@ export default function CloudAdoptionScope({ data, onChange }) {
           onDragOver={() => {}}
           onDrop={handleDrop}
         />
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

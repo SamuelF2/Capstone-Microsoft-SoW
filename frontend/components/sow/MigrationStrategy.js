@@ -1,3 +1,7 @@
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function MigrationStrategy({ data, onChange }) {
   const approach = data?.approach ?? '';
   const waveStrategy = data?.waveStrategy ?? '';
@@ -8,38 +12,16 @@ export default function MigrationStrategy({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Migration Strategy</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the cloud migration approach, wave strategy, timeline, and rollback plan.
-        </p>
-      </div>
+      <SectionHeader
+        title="Migration Strategy"
+        description="Define the cloud migration approach, wave strategy, timeline, and rollback plan."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Migration Approach
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Ensure your approach aligns with the Cloud Adoption Framework and includes how you'll
-            manage risks and quality throughout the migration.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
+        <FormCard
+          title="Migration Approach"
+          description="Ensure your approach aligns with the Cloud Adoption Framework and includes how you'll manage risks and quality throughout the migration."
+        >
           <textarea
             className="form-textarea"
             value={approach}
@@ -47,25 +29,12 @@ export default function MigrationStrategy({ data, onChange }) {
             placeholder="Describe the migration patterns to be used (Rehost, Refactor, Rearchitect, Rebuild, Replace), tooling (Azure Migrate, ASR, DMS), and the sequencing of workload migrations..."
             rows={8}
           />
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Support Transition Plan
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Describe how the solution will be transitioned to the customer's operations team after
-            go-live.
-          </p>
+        <FormCard
+          title="Support Transition Plan"
+          description="Describe how the solution will be transitioned to the customer's operations team after go-live."
+        >
           <textarea
             className="form-textarea"
             value={waveStrategy}
@@ -73,16 +42,10 @@ export default function MigrationStrategy({ data, onChange }) {
             placeholder="Describe the wave-by-wave handover plan — which teams take ownership, runbook delivery, monitoring setup, and the support model during steady-state operations..."
             rows={8}
           />
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Migration Timeline</h3>
           <textarea
@@ -104,7 +67,7 @@ export default function MigrationStrategy({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

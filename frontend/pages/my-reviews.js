@@ -10,6 +10,8 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { formatDate, formatDeal, esapBadgeStyle } from '../lib/format';
+import { assignmentStageLabel, roleLabel } from '../lib/workflowStages';
 
 const ASSIGNMENT_STATUS_STYLES = {
   pending: {
@@ -35,55 +37,21 @@ const ASSIGNMENT_STATUS_STYLES = {
   },
 };
 
-const ESAP_STYLES = {
-  'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-  'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-  'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-};
-
-const ROLE_DISPLAY = {
-  'solution-architect': 'Solution Architect',
-  'sqa-reviewer': 'SQA Reviewer',
-  cpl: 'Customer Practice Lead',
-  cdp: 'Customer Delivery Partner',
-  'delivery-manager': 'Delivery Manager',
-};
-
-const STAGE_DISPLAY = {
-  'internal-review': 'Internal Review',
-  'drm-approval': 'DRM Approval',
-};
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatDeal(v) {
-  if (v == null) return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : '$' + n.toLocaleString('en-US');
-}
-
 // ── ReviewCard ────────────────────────────────────────────────────────────────
 
 function ReviewCard({ assignment }) {
   const router = useRouter();
   const style = ASSIGNMENT_STATUS_STYLES[assignment.status] || ASSIGNMENT_STATUS_STYLES.pending;
-  const esapStyle = ESAP_STYLES[assignment.esap_level] || {};
-  const deal = formatDeal(assignment.deal_value);
-  const reviewPath =
-    assignment.stage === 'drm-approval'
-      ? `/drm-review/${assignment.sow_id}`
-      : `/internal-review/${assignment.sow_id}`;
+  const esapStyle = esapBadgeStyle(assignment.esap_level);
+  const deal = formatDeal(assignment.deal_value, null);
+  // Each card links by assignment id (not SoW id) so a user holding multiple
+  // role assignments on the same SoW gets independent review surfaces — one
+  // URL per (sow, role, stage) tuple — and submitting one doesn't lock the
+  // others.  Falls back to the legacy SoW-scoped path if the assignment id
+  // is missing for any reason.
+  const reviewPath = assignment.id
+    ? `/review/assignment/${assignment.id}`
+    : `/review/${assignment.sow_id}`;
 
   return (
     <div
@@ -178,11 +146,11 @@ function ReviewCard({ assignment }) {
           )}
           <span className="text-sm text-secondary">
             <strong style={{ color: 'var(--color-text-primary)' }}>Your Role:</strong>{' '}
-            {ROLE_DISPLAY[assignment.reviewer_role] || assignment.reviewer_role}
+            {roleLabel(assignment.reviewer_role)}
           </span>
           <span className="text-sm text-secondary">
             <strong style={{ color: 'var(--color-text-primary)' }}>Stage:</strong>{' '}
-            {STAGE_DISPLAY[assignment.stage] || assignment.stage}
+            {assignment.stage_display_name || assignmentStageLabel(assignment.stage)}
           </span>
           {deal && (
             <span className="text-sm text-secondary">
@@ -230,22 +198,33 @@ export default function MyReviews() {
   const [activeTab, setActiveTab] = useState('pending');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setLoading(true);
     setError(null);
-    authFetch('/api/review/assigned')
+    authFetch('/api/review/assigned', { signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load reviews (${res.status})`);
         return res.json();
       })
       .then((data) => {
+        if (signal.aborted) return;
+        // The backend keys this list off ``ra.user_id`` only — every row
+        // belongs to the current user — so we trust it without re-filtering.
+        // (We used to narrow by ``user.role`` to simulate a role-override
+        // experience, but that hid legitimate cross-role self-designations
+        // and the SoW-author auto-assignment that the workflow engine seeds
+        // on every required role.)
         setAssignments(data);
         setLoading(false);
       })
       .catch((err) => {
+        if (err?.name === 'AbortError' || signal.aborted) return;
         setError(err.message);
         setLoading(false);
       });
+    return () => ctrl.abort();
   }, [user, authFetch]);
 
   const pending = assignments.filter((a) => a.status === 'pending');

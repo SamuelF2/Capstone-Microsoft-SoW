@@ -15,61 +15,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
-import ReviewStatusTracker from '../../components/ReviewStatusTracker';
+import WorkflowProgress from '../../components/WorkflowProgress';
 import HandoffPackageBuilder from '../../components/HandoffPackageBuilder';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDeal(v) {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US');
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatDateTime(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatBytes(bytes) {
-  if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function esapBadgeStyle(level) {
-  return (
-    {
-      'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-      'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-      'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-    }[level] || {}
-  );
-}
+import COATracker from '../../components/COATracker';
+import AttachmentManager from '../../components/AttachmentManager';
+import {
+  formatDeal,
+  formatDate,
+  formatDateTime,
+  formatBytes,
+  esapBadgeStyle,
+} from '../../lib/format';
 
 // ── Step card wrapper ─────────────────────────────────────────────────────────
 
@@ -320,6 +276,7 @@ export default function FinalizePage() {
   const [showLockModal, setShowLockModal] = useState(false);
   const [locking, setLocking] = useState(false);
   const [toast, setToast] = useState(null);
+  const [coaSummary, setCoaSummary] = useState(null);
 
   function showToast(msg, type = 'success') {
     setToast({ msg, type });
@@ -331,19 +288,22 @@ export default function FinalizePage() {
     setLoading(true);
     setError(null);
     try {
-      const [sowRes, statusRes] = await Promise.all([
+      const [sowRes, statusRes, coaRes] = await Promise.all([
         authFetch(`/api/sow/${id}`),
         authFetch(`/api/review/${id}/status`),
+        authFetch(`/api/coa/sow/${id}/summary`),
       ]);
       if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
 
-      const [sowData, statusData] = await Promise.all([
+      const [sowData, statusData, coaData] = await Promise.all([
         sowRes.json(),
         statusRes.ok ? statusRes.json() : Promise.resolve(null),
+        coaRes.ok ? coaRes.json() : Promise.resolve(null),
       ]);
 
       setSow(sowData);
       setReviewStatus(statusData);
+      setCoaSummary(coaData);
 
       // Load handoff package (optional — may not exist yet)
       const handoffRes = await authFetch(`/api/finalize/${id}/handoff`);
@@ -459,20 +419,20 @@ export default function FinalizePage() {
   const docReady = !!docInfo;
   const handoffReady = !!handoffPackage;
 
-  // Outstanding conditions from approved-with-conditions decisions
-  const conditions = (reviewStatus?.assignments || []).filter(
-    (a) => a.decision === 'approved-with-conditions'
-  ).length;
+  // Outstanding COAs from the COA tracker
+  const coaBlocking = coaSummary?.blocks_finalization ?? false;
+  const coaOutstanding = coaSummary?.open ?? 0 + (coaSummary?.in_progress ?? 0);
 
   const prerequisites = [
     { label: 'Document generated', met: docReady },
     { label: 'Handoff package created', met: handoffReady },
-    ...(conditions > 0
+    ...(coaSummary && coaSummary.total > 0
       ? [
           {
-            label: `Conditions noted (${conditions} reviewer${conditions !== 1 ? 's' : ''} approved with conditions)`,
-            met: true,
-            info: true,
+            label: coaBlocking
+              ? `Conditions of Approval: ${coaSummary.open + (coaSummary.in_progress ?? 0)} outstanding — must resolve or waive all before finalizing`
+              : `Conditions of Approval: all resolved or waived (${coaSummary.resolved} resolved, ${coaSummary.waived} waived)`,
+            met: !coaBlocking,
           },
         ]
       : []),
@@ -641,14 +601,99 @@ export default function FinalizePage() {
               )}
             </div>
 
-            <ReviewStatusTracker
-              currentStatus={sow?.status}
+            <WorkflowProgress
+              sowId={sow?.id}
+              currentStage={sow?.status}
               reviewAssignments={reviewStatus?.assignments || []}
             />
           </div>
 
           {/* Approval summary */}
           <ApprovalSummary reviewStatus={reviewStatus} />
+
+          {/* COA blocking banner */}
+          {coaBlocking && !isFinalized && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-md)',
+                padding: 'var(--spacing-md) var(--spacing-xl)',
+                borderRadius: 'var(--radius-xl)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.35)',
+                marginBottom: 'var(--spacing-xl)',
+              }}
+            >
+              <span style={{ fontSize: '1.4rem' }}>⛔</span>
+              <div>
+                <p
+                  style={{
+                    margin: 0,
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--color-error)',
+                    fontSize: 'var(--font-size-sm)',
+                  }}
+                >
+                  Cannot finalize — {(coaSummary?.open ?? 0) + (coaSummary?.in_progress ?? 0)}{' '}
+                  condition
+                  {(coaSummary?.open ?? 0) + (coaSummary?.in_progress ?? 0) !== 1 ? 's' : ''} of
+                  approval still outstanding.
+                </p>
+                <p
+                  style={{
+                    margin: '2px 0 0',
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  Resolve or waive all conditions below before locking the SoW.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Conditions of Approval tracker */}
+          {!isFinalized && (
+            <div
+              style={{
+                backgroundColor: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border-default)',
+                borderRadius: 'var(--radius-xl)',
+                padding: 'var(--spacing-lg) var(--spacing-xl)',
+                marginBottom: 'var(--spacing-xl)',
+              }}
+            >
+              <h2
+                style={{
+                  margin: '0 0 var(--spacing-sm)',
+                  fontSize: 'var(--font-size-base)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                }}
+              >
+                Conditions of Approval
+              </h2>
+              <COATracker
+                sowId={id}
+                readOnly={false}
+                authFetch={authFetch}
+                onStatusChange={loadAll}
+              />
+            </div>
+          )}
+
+          {/* Attachments — all files collected across the lifecycle */}
+          {id && (
+            <div style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <AttachmentManager
+                sowId={id}
+                stageKey={null}
+                readOnly={true}
+                showRequirements={false}
+                authFetch={authFetch}
+              />
+            </div>
+          )}
 
           {/* Step 1: Generate Document */}
           <div style={{ marginBottom: 'var(--spacing-xl)' }}>
@@ -744,7 +789,7 @@ export default function FinalizePage() {
                       }}
                     >
                       Generated {formatDateTime(docInfo.generated_at)} ·{' '}
-                      {formatBytes(docInfo.size_bytes)}
+                      {formatBytes(docInfo.size_bytes, '')}
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>

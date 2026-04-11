@@ -1,6 +1,5 @@
-function genId() {
-  return `price-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
 
 const DEFAULT_BREAKDOWN = [
   { id: 'price-assessment', name: 'Assessment & Planning', description: '', cost: '' },
@@ -22,7 +21,7 @@ export default function Pricing({ data, onChange }) {
 
   const addLineItem = () =>
     update({
-      breakdown: [...breakdown, { id: genId(), name: '', description: '', cost: '' }],
+      breakdown: [...breakdown, { id: genId('price'), name: '', description: '', cost: '' }],
     });
 
   const removeLineItem = (id) => update({ breakdown: breakdown.filter((item) => item.id !== id) });
@@ -36,12 +35,10 @@ export default function Pricing({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Pricing</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the total engagement value and provide a cost breakdown by category.
-        </p>
-      </div>
+      <SectionHeader
+        title="Pricing"
+        description="Define the total engagement value and provide a cost breakdown by category."
+      />
 
       {/* Total Value */}
       <div

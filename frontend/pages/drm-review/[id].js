@@ -4,7 +4,7 @@
  * Step 3 — DRM Review page for CPL, CDP, and Delivery Manager reviewers.
  *
  * Layout:
- *   Top:    Back link + SoW header + ReviewStatusTracker
+ *   Top:    Back link + SoW header + WorkflowProgress
  *   Banner: Internal Review Results (SA/SQA decisions and conditions)
  *   Body:   Two-column split
  *     Left  (55%) — PersonaDashboard (role-specific summary)
@@ -12,7 +12,7 @@
  *   Bottom: DRM reviewer status footer
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -20,25 +20,15 @@ import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import ReviewChecklist from '../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../components/AISuggestionsPanel';
-import ReviewStatusTracker from '../../components/ReviewStatusTracker';
+import WorkflowProgress from '../../components/WorkflowProgress';
 import PersonaDashboard from '../../components/PersonaDashboard';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDeal(v) {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US');
-}
-
-function esapBadgeStyle(level) {
-  const map = {
-    'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-    'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-    'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-  };
-  return map[level] || {};
-}
+import COATracker from '../../components/COATracker';
+import AttachmentManager from '../../components/AttachmentManager';
+import ActivityLog from '../../components/ActivityLog';
+import DecisionModal from '../../components/review/DecisionModal';
+import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
+import { formatDeal, esapBadgeStyle } from '../../lib/format';
+import { roleLabel, STAGE_KEYS } from '../../lib/workflowStages';
 
 const DECISION_COLORS = {
   approved: 'var(--color-success)',
@@ -52,20 +42,12 @@ const DECISION_ICONS = {
   rejected: '✗',
 };
 
-const ROLE_DISPLAY = {
-  solution_architect: 'Solution Architect',
-  sqa_reviewer: 'SQA Reviewer',
-  cpl: 'Customer Practice Lead',
-  cdp: 'Customer Delivery Partner',
-  'delivery-manager': 'Delivery Manager',
-};
-
 // ── Internal Review Results Banner ────────────────────────────────────────────
 
 function InternalReviewBanner({ reviewStatus }) {
   const [expanded, setExpanded] = useState(false);
   const internal = (reviewStatus?.assignments || []).filter(
-    (a) => a.stage === 'internal-review' && a.status === 'completed'
+    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_INTERNAL_REVIEW && a.status === 'completed'
   );
   if (internal.length === 0) return null;
 
@@ -180,186 +162,19 @@ function InternalReviewBanner({ reviewStatus }) {
   );
 }
 
-// ── Decision Modal ────────────────────────────────────────────────────────────
-
-function DecisionModal({ type, onClose, onSubmit, submitting }) {
-  const [comments, setComments] = useState('');
-  const [conditions, setConditions] = useState(['']);
-
-  const isConditional = type === 'approved-with-conditions';
-
-  function addCondition() {
-    setConditions((c) => [...c, '']);
-  }
-  function updateCondition(i, val) {
-    setConditions((c) => c.map((x, j) => (j === i ? val : x)));
-  }
-  function removeCondition(i) {
-    setConditions((c) => c.filter((_, j) => j !== i));
-  }
-
-  function handleSubmit() {
-    const validConditions = conditions.filter((c) => c.trim());
-    if (isConditional && validConditions.length === 0) return;
-    onSubmit({
-      decision: type,
-      comments: comments.trim(),
-      conditions: isConditional ? validConditions : null,
-    });
-  }
-
-  const titles = {
-    approved: 'Approve SoW',
-    'approved-with-conditions': 'Approve with Conditions',
-  };
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--spacing-xl)',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: 'var(--color-bg-primary)',
-          borderRadius: 'var(--radius-xl)',
-          border: '1px solid var(--color-border-default)',
-          padding: 'var(--spacing-xl)',
-          width: '100%',
-          maxWidth: '480px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--spacing-md)',
-        }}
-      >
-        <h3 className="text-lg font-semibold" style={{ margin: 0 }}>
-          {titles[type] || type}
-        </h3>
-
-        <div>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 'var(--font-size-sm)',
-              marginBottom: '6px',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            Comments {!isConditional ? '(optional)' : ''}
-          </label>
-          <textarea
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            placeholder="Add comments…"
-            rows={3}
-            style={{
-              width: '100%',
-              resize: 'vertical',
-              padding: 'var(--spacing-sm)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border-default)',
-              backgroundColor: 'var(--color-bg-secondary)',
-              color: 'var(--color-text-primary)',
-              fontSize: 'var(--font-size-sm)',
-              fontFamily: 'inherit',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        {isConditional && (
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: 'var(--font-size-sm)',
-                marginBottom: '6px',
-                color: 'var(--color-text-secondary)',
-              }}
-            >
-              Conditions <span style={{ color: 'var(--color-error)' }}>*</span>
-            </label>
-            {conditions.map((c, i) => (
-              <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                <input
-                  value={c}
-                  onChange={(e) => updateCondition(i, e.target.value)}
-                  placeholder={`Condition ${i + 1}`}
-                  style={{
-                    flex: 1,
-                    padding: 'var(--spacing-xs) var(--spacing-sm)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-default)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    fontSize: 'var(--font-size-sm)',
-                  }}
-                />
-                {conditions.length > 1 && (
-                  <button
-                    onClick={() => removeCondition(i)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      color: 'var(--color-error)',
-                      fontSize: '16px',
-                      padding: '0 4px',
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              onClick={addCondition}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--color-accent-purple, #7c3aed)',
-                fontSize: 'var(--font-size-xs)',
-              }}
-            >
-              + Add condition
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
-          <button className="btn btn-secondary" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleSubmit}
-            disabled={
-              submitting || (isConditional && conditions.filter((c) => c.trim()).length === 0)
-            }
-          >
-            {submitting ? 'Submitting…' : 'Confirm'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Send-Back Modal ───────────────────────────────────────────────────────────
 
-function SendBackModal({ onClose, onSubmit, submitting }) {
-  const [targetStage, setTargetStage] = useState('internal_review');
+function SendBackModal({ onClose, onSubmit, submitting, availableStages }) {
+  const targets =
+    availableStages && availableStages.length > 0
+      ? availableStages
+      : [
+          { stage_key: STAGE_KEYS.INTERNAL_REVIEW, display_name: 'Internal Review' },
+          { stage_key: STAGE_KEYS.DRAFT, display_name: 'Draft' },
+        ];
+  const [targetStage, setTargetStage] = useState(
+    targets[0]?.stage_key || STAGE_KEYS.INTERNAL_REVIEW
+  );
   const [comments, setComments] = useState('');
   const [actionItems, setActionItems] = useState(['']);
 
@@ -436,10 +251,7 @@ function SendBackModal({ onClose, onSubmit, submitting }) {
             Return to
           </label>
           <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-            {[
-              { value: 'internal_review', label: 'Internal Review' },
-              { value: 'draft', label: 'Draft' },
-            ].map(({ value, label }) => (
+            {targets.map(({ stage_key: value, display_name: label }) => (
               <button
                 key={value}
                 onClick={() => setTargetStage(value)}
@@ -580,7 +392,9 @@ function SendBackModal({ onClose, onSubmit, submitting }) {
 // ── DRM Review Status Footer ──────────────────────────────────────────────────
 
 function DrmReviewerStatus({ reviewStatus, currentUserId }) {
-  const drm = (reviewStatus?.assignments || []).filter((a) => a.stage === 'drm-approval');
+  const drm = (reviewStatus?.assignments || []).filter(
+    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL
+  );
   if (drm.length === 0) return null;
 
   return (
@@ -668,16 +482,12 @@ export default function DrmReview() {
   const { id } = router.query;
   const { user, authFetch } = useAuth();
 
-  const [sow, setSow] = useState(null);
-  const [checklistItems, setChecklistItems] = useState([]);
-  const [checklistRole, setChecklistRole] = useState('');
+  // Local UI state — checklist responses are mutated by the user, so they
+  // live outside the loaded payload (they get re-seeded on every refresh).
   const [responses, setResponses] = useState([]);
-  const [reviewStatus, setReviewStatus] = useState(null);
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -685,57 +495,107 @@ export default function DrmReview() {
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
-  }
-
-  const loadAll = useCallback(async () => {
-    if (!id || !user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [sowRes, checklistRes, statusRes] = await Promise.all([
-        authFetch(`/api/sow/${id}`),
-        authFetch(`/api/review/${id}/checklist`),
-        authFetch(`/api/review/${id}/status`),
+  // ── Loader: parallel-fetches sow + checklist + status + workflow ────────
+  const load = useCallback(
+    async (signal) => {
+      const [sowRes, checklistRes, statusRes, wfRes] = await Promise.all([
+        authFetch(`/api/sow/${id}`, { signal }),
+        authFetch(`/api/review/${id}/checklist`, { signal }),
+        authFetch(`/api/review/${id}/status`, { signal }),
+        authFetch(`/api/workflow/sow/${id}`, { signal }),
       ]);
 
       if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
       if (!checklistRes.ok) throw new Error(`Checklist load failed (${checklistRes.status})`);
       if (!statusRes.ok) throw new Error(`Status load failed (${statusRes.status})`);
 
-      const [sowData, checklistData, statusData] = await Promise.all([
+      const [sowData, checklistData, statusData, wfData] = await Promise.all([
         sowRes.json(),
         checklistRes.json(),
         statusRes.json(),
+        wfRes.ok ? wfRes.json() : Promise.resolve(null),
       ]);
 
-      setSow(sowData);
-      setChecklistItems(checklistData.items || []);
-      setChecklistRole(checklistData.reviewer_role || '');
+      // Reseed checklist responses from the freshly loaded data — this is
+      // intentionally outside the returned payload so the hook owns the
+      // server state and React owns the user-mutated state.
       setResponses(checklistData.saved_responses || []);
-      setReviewStatus(statusData);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+
+      return {
+        sow: sowData,
+        checklistItems: checklistData.items || [],
+        checklistRole: checklistData.reviewer_role || '',
+        reviewStatus: statusData,
+        workflowData: wfData?.workflow_data || null,
+      };
+    },
+    [id, authFetch]
+  );
+
+  const {
+    data,
+    loading,
+    error,
+    refresh: loadAll,
+  } = useAutoRefreshFetch({
+    load,
+    enabled: Boolean(id && user),
+    deps: [id, user],
+  });
+
+  const sow = data?.sow ?? null;
+  const checklistItems = data?.checklistItems ?? [];
+  const checklistRole = data?.checklistRole ?? '';
+  const reviewStatus = data?.reviewStatus ?? null;
+  const workflowData = data?.workflowData ?? null;
+
+  // Compute send-back targets from workflow on_send_back transitions
+  const sendBackTargets = useMemo(() => {
+    if (!workflowData || !sow) return null; // null = use modal defaults
+    const transitions = workflowData.transitions || [];
+    const stages = workflowData.stages || [];
+    const stageMap = Object.fromEntries(stages.map((s) => [s.stage_key, s]));
+    const targets = transitions
+      .filter((t) => t.from_stage === sow.status && t.condition === 'on_send_back')
+      .map((t) => ({
+        stage_key: t.to_stage,
+        display_name: stageMap[t.to_stage]?.display_name || t.to_stage,
+      }));
+    if (!targets.find((t) => t.stage_key === 'draft')) {
+      targets.push({ stage_key: 'draft', display_name: 'Draft' });
     }
-  }, [id, user, authFetch]);
+    return targets;
+  }, [workflowData, sow]);
 
-  useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+  // Derive the current workflow stage object
+  const currentStage = useMemo(() => {
+    if (!workflowData || !sow) return null;
+    const stages = workflowData.stages || [];
+    return stages.find((s) => s.stage_key === sow.status) || null;
+  }, [workflowData, sow]);
 
-  // Load DRM summary after initial load
+  function showToast(msg, type = 'success') {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  // Load DRM summary after initial load — depends on checklistRole being set
   useEffect(() => {
     if (!id || !user || !checklistRole) return;
+    const ctrl = new AbortController();
     setSummaryLoading(true);
-    authFetch(`/api/review/${id}/drm-summary`)
+    authFetch(`/api/review/${id}/drm-summary`, { signal: ctrl.signal })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setSummaryData(data))
-      .catch(() => setSummaryData(null))
-      .finally(() => setSummaryLoading(false));
+      .then((d) => {
+        if (!ctrl.signal.aborted) setSummaryData(d);
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setSummaryData(null);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setSummaryLoading(false);
+      });
+    return () => ctrl.abort();
   }, [id, user, checklistRole, authFetch]);
 
   async function handleSaveProgress() {
@@ -768,7 +628,21 @@ export default function DrmReview() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `Submit failed (${res.status})`);
       }
+      const resBody = await res.json().catch(() => ({}));
       setModal(null);
+
+      if (resBody.auto_advanced) {
+        showToast('Review submitted — automatically advanced to next stage');
+        setTimeout(() => router.push('/drm-dashboard'), 1500);
+        return;
+      }
+
+      if (resBody.parallel_branch_completed) {
+        showToast('Your branch review is complete. Waiting for other parallel branches.');
+        await loadAll();
+        return;
+      }
+
       showToast(
         decision === 'approved'
           ? 'Review approved'
@@ -842,16 +716,16 @@ export default function DrmReview() {
 
   // Derived state
   const myAssignment = (reviewStatus?.assignments || []).find(
-    (a) => a.stage === 'drm-approval' && a.display_name && a.status
+    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.display_name && a.status
   );
   const isMyReviewDone =
     reviewStatus?.assignments?.some(
-      (a) => a.stage === 'drm-approval' && a.status === 'completed'
+      (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.status === 'completed'
     ) ?? false;
 
   // More precise: is the current user's assignment done?
   const myDrmAssignment = (reviewStatus?.assignments || []).find(
-    (a) => a.stage === 'drm-approval' && a.reviewer_role === checklistRole
+    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.reviewer_role === checklistRole
   );
   const isMyDone = myDrmAssignment?.status === 'completed';
 
@@ -860,7 +734,7 @@ export default function DrmReview() {
   const allRequiredChecked = requiredIds.every((id) => checkedIds.includes(id));
 
   const gatingMet = reviewStatus?.gating_rules_met ?? false;
-  const canAdvance = gatingMet && sow?.status === 'drm_review';
+  const canAdvance = gatingMet && sow?.status === STAGE_KEYS.DRM_REVIEW;
   const alreadyApproved = sow?.status === 'approved';
 
   const aiResult = sow?.ai_suggestion || null;
@@ -935,6 +809,7 @@ export default function DrmReview() {
           onClose={() => setModal(null)}
           onSubmit={handleSendBack}
           submitting={submitting}
+          availableStages={sendBackTargets}
         />
       )}
 
@@ -1033,14 +908,15 @@ export default function DrmReview() {
               )}
               <span className="text-sm text-secondary">
                 <strong style={{ color: 'var(--color-text-primary)' }}>Your Role:</strong>{' '}
-                {ROLE_DISPLAY[checklistRole] || checklistRole}
+                {roleLabel(checklistRole)}
               </span>
             </div>
 
             {/* Status tracker */}
             <div style={{ marginTop: 'var(--spacing-lg)' }}>
-              <ReviewStatusTracker
-                currentStatus={sow?.status}
+              <WorkflowProgress
+                sowId={sow?.id}
+                currentStage={sow?.status}
                 reviewAssignments={reviewStatus?.assignments || []}
               />
             </div>
@@ -1048,6 +924,27 @@ export default function DrmReview() {
 
           {/* Internal review results banner */}
           <InternalReviewBanner reviewStatus={reviewStatus} />
+
+          {/* Reviewer instructions from workflow stage config */}
+          {currentStage?.config?.reviewer_instructions && (
+            <div
+              style={{
+                display: 'flex',
+                gap: 'var(--spacing-sm)',
+                padding: 'var(--spacing-sm) var(--spacing-md)',
+                marginBottom: 'var(--spacing-xl)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--color-info-border, #93c5fd)',
+                backgroundColor: 'var(--color-info-bg, #eff6ff)',
+                color: 'var(--color-info-text, #1e40af)',
+                fontSize: 'var(--text-sm)',
+                lineHeight: 1.5,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>ℹ</span>
+              <span>{currentStage.config.reviewer_instructions}</span>
+            </div>
+          )}
 
           {/* Two-column body */}
           <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'flex-start' }}>
@@ -1291,6 +1188,67 @@ export default function DrmReview() {
 
           {/* DRM reviewer status footer */}
           <DrmReviewerStatus reviewStatus={reviewStatus} />
+
+          {/* Attachments */}
+          {sow && (
+            <div
+              style={{
+                padding: 'var(--spacing-xl)',
+                borderTop: '1px solid var(--color-border-default)',
+              }}
+            >
+              <AttachmentManager
+                sowId={sow.id}
+                stageKey={STAGE_KEYS.DRM_REVIEW}
+                readOnly={false}
+                showRequirements={true}
+                authFetch={authFetch}
+              />
+            </div>
+          )}
+
+          {/* Conditions of Approval */}
+          {sow && (
+            <div
+              style={{
+                padding: 'var(--spacing-xl)',
+                borderTop: '1px solid var(--color-border-default)',
+              }}
+            >
+              <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 0 }}>
+                Conditions of Approval
+              </h3>
+              <COATracker
+                sowId={sow.id}
+                authFetch={authFetch}
+                readOnly={false}
+                onStatusChange={() => {}}
+              />
+            </div>
+          )}
+
+          {/* Activity Log */}
+          {sow && (
+            <div
+              style={{
+                padding: 'var(--spacing-xl)',
+                borderTop: '1px solid var(--color-border-default)',
+              }}
+            >
+              <div className="card">
+                <h3
+                  style={{
+                    fontSize: 'var(--font-size-base)',
+                    fontWeight: 600,
+                    marginBottom: 'var(--spacing-md)',
+                  }}
+                >
+                  Activity Log
+                </h3>
+                <ActivityLog sowId={sow.id} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>

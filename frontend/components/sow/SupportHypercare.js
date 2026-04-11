@@ -1,3 +1,7 @@
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 const HYPERCARE_WINDOWS = ['2 weeks', '30 days', '45 days', '60 days', '90 days', 'Custom'];
 
 export default function SupportHypercare({ data, onChange }) {
@@ -12,35 +16,16 @@ export default function SupportHypercare({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Support & Hypercare</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the hypercare support model for the period immediately following go-live, and the
-          transition to business-as-usual (BAU) support.
-        </p>
-      </div>
+      <SectionHeader
+        title="Support & Hypercare"
+        description="Define the hypercare support model for the period immediately following go-live, and the transition to business-as-usual (BAU) support."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Go-Live Support Plan
-          </h3>
-          <p className="text-sm text-secondary mb-md">
-            Describe the support provided to the customer during the go-live period.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
+        <FormCard
+          title="Go-Live Support Plan"
+          description="Describe the support provided to the customer during the go-live period."
+        >
           <textarea
             className="form-textarea"
             value={supportPlan}
@@ -48,18 +33,9 @@ export default function SupportHypercare({ data, onChange }) {
             placeholder="Describe the go-live support activities — war room setup, on-site/remote support team, monitoring activities, and daily check-in process..."
             rows={7}
           />
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Hypercare Period
-          </h3>
+        <FormCard title="Hypercare Period">
           <div className="form-group">
             <label className="form-label">Hypercare Window</label>
             <select
@@ -94,16 +70,10 @@ export default function SupportHypercare({ data, onChange }) {
               rows={4}
             />
           </div>
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Escalation Path</h3>
           <textarea
@@ -125,7 +95,7 @@ export default function SupportHypercare({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

@@ -1,3 +1,6 @@
+import SectionHeader from './ui/SectionHeader';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function DataMigration({ data, onChange }) {
   const strategy = data?.strategy ?? '';
   const dataSources = data?.dataSources ?? '';
@@ -8,22 +11,12 @@ export default function DataMigration({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Data Migration Strategy</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the strategy for migrating legacy data into Dynamics 365, including data sources,
-          transformation rules, and validation processes.
-        </p>
-      </div>
+      <SectionHeader
+        title="Data Migration Strategy"
+        description="Define the strategy for migrating legacy data into Dynamics 365, including data sources, transformation rules, and validation processes."
+      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Migration Strategy Overview</h3>
           <p className="text-sm text-secondary mb-md">
@@ -51,15 +44,9 @@ export default function DataMigration({ data, onChange }) {
             rows={7}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Migration Approach</h3>
           <p className="text-sm text-secondary mb-md">
@@ -87,7 +74,7 @@ export default function DataMigration({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

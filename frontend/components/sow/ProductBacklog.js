@@ -1,6 +1,6 @@
-function genId() {
-  return `pb-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 const PRIORITY_COLORS = {
@@ -11,7 +11,7 @@ const PRIORITY_COLORS = {
 };
 
 const emptyItem = () => ({
-  id: genId(),
+  id: genId('pb'),
   epic: '',
   userStory: '',
   storyPoints: '',
@@ -20,57 +20,23 @@ const emptyItem = () => ({
 });
 
 function BacklogCard({ item, onChange, onRemove }) {
-  return (
-    <div
-      className="card"
+  const priorityBadge = (
+    <span
       style={{
-        minWidth: '300px',
-        maxWidth: '300px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
+        fontSize: 'var(--font-size-xs)',
+        fontWeight: 'var(--font-weight-semibold)',
+        color: PRIORITY_COLORS[item.priority],
+        padding: '2px 8px',
+        borderRadius: 'var(--radius-full)',
+        border: `1px solid ${PRIORITY_COLORS[item.priority]}`,
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          display: 'flex',
-          gap: 'var(--spacing-xs)',
-          alignItems: 'center',
-        }}
-      >
-        <span
-          style={{
-            fontSize: 'var(--font-size-xs)',
-            fontWeight: 'var(--font-weight-semibold)',
-            color: PRIORITY_COLORS[item.priority],
-            padding: '2px 8px',
-            borderRadius: 'var(--radius-full)',
-            border: `1px solid ${PRIORITY_COLORS[item.priority]}`,
-          }}
-        >
-          {item.priority}
-        </span>
-        <button
-          onClick={onRemove}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--color-text-tertiary)',
-            cursor: 'pointer',
-            fontSize: '18px',
-            lineHeight: 1,
-            padding: '2px',
-          }}
-        >
-          ×
-        </button>
-      </div>
+      {item.priority}
+    </span>
+  );
 
+  return (
+    <ListCard width="300px" onRemove={onRemove} headerExtras={priorityBadge}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Epic / Feature
@@ -146,7 +112,7 @@ function BacklogCard({ item, onChange, onRemove }) {
           style={{ fontSize: 'var(--font-size-sm)' }}
         />
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -157,13 +123,10 @@ export default function ProductBacklog({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Product Backlog</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the initial product backlog for this engagement. Each item represents a user story
-          or feature to be delivered.
-        </p>
-      </div>
+      <SectionHeader
+        title="Product Backlog"
+        description="Define the initial product backlog for this engagement. Each item represents a user story or feature to be delivered."
+      />
 
       {/* Stats bar */}
       {items.length > 0 && (
@@ -202,14 +165,7 @@ export default function ProductBacklog({ data, onChange }) {
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {items.map((item) => (
           <BacklogCard
             key={item.id}
@@ -218,37 +174,8 @@ export default function ProductBacklog({ data, onChange }) {
             onRemove={() => onChange(items.filter((i) => i.id !== item.id))}
           />
         ))}
-        <div
-          style={{
-            minWidth: '180px',
-            maxWidth: '180px',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            transition: 'border-color var(--transition-base), color var(--transition-base)',
-            minHeight: '200px',
-          }}
-          onClick={() => onChange([...items, emptyItem()])}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-            e.currentTarget.style.color = 'var(--color-accent-blue)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-border-default)';
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
-          }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-            <div className="text-sm">Add Story</div>
-          </div>
-        </div>
-      </div>
+        <AddCardButton label="Add Story" onClick={() => onChange([...items, emptyItem()])} />
+      </HorizontalCardList>
     </div>
   );
 }

@@ -1,3 +1,6 @@
+import SectionHeader from './ui/SectionHeader';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+
 export default function TestingStrategy({ data, onChange }) {
   const overview = data?.overview ?? '';
   const unitTesting = data?.unitTesting ?? '';
@@ -9,13 +12,10 @@ export default function TestingStrategy({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Testing Strategy</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the end-to-end testing approach for this Dynamics 365 implementation, covering all
-          test phases from unit testing through to user acceptance.
-        </p>
-      </div>
+      <SectionHeader
+        title="Testing Strategy"
+        description="Define the end-to-end testing approach for this Dynamics 365 implementation, covering all test phases from unit testing through to user acceptance."
+      />
 
       <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
         <h3 className="text-lg font-semibold mb-sm">Testing Overview</h3>
@@ -31,14 +31,7 @@ export default function TestingStrategy({ data, onChange }) {
         />
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">Unit & System Testing</h3>
           <textarea
@@ -60,15 +53,9 @@ export default function TestingStrategy({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-        }}
-      >
+      <TwoColumnGrid>
         <div className="card">
           <h3 className="text-lg font-semibold mb-sm">User Acceptance Testing (UAT)</h3>
           <textarea
@@ -90,7 +77,7 @@ export default function TestingStrategy({ data, onChange }) {
             rows={6}
           />
         </div>
-      </div>
+      </TwoColumnGrid>
     </div>
   );
 }

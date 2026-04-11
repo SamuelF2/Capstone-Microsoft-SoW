@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+import WorkflowTemplateSelector from '../components/WorkflowTemplateSelector';
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -38,6 +39,17 @@ export default function CreateNew() {
   });
   const [touched, setTouched] = useState({});
 
+  // Content template selection
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null); // null = scratch
+  const [previewTemplate, setPreviewTemplate] = useState(null); // template being previewed
+  const [previewData, setPreviewData] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Workflow template selection
+  const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState(null);
+
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
@@ -50,6 +62,53 @@ export default function CreateNew() {
     if (!touched[name]) return null;
     if (!form[name] || !form[name].trim()) return 'This field is required';
     return null;
+  };
+
+  // Fetch templates when methodology changes
+  useEffect(() => {
+    if (!form.deliveryMethodology) {
+      setTemplates([]);
+      setSelectedTemplateId(null);
+      return undefined;
+    }
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
+    setTemplatesLoading(true);
+    authFetch(`/api/sow/templates?methodology=${encodeURIComponent(form.deliveryMethodology)}`, {
+      signal,
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (signal.aborted) return;
+        setTemplates(data);
+        setSelectedTemplateId(null); // reset selection on methodology change
+      })
+      .catch((e) => {
+        if (e?.name === 'AbortError' || signal.aborted) return;
+        setTemplates([]);
+      })
+      .finally(() => {
+        if (!signal.aborted) setTemplatesLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [form.deliveryMethodology, authFetch]);
+
+  const handlePreview = async (template) => {
+    setPreviewTemplate(template);
+    setPreviewData(null);
+    setPreviewLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (form.customerName) params.set('customer_name', form.customerName);
+      if (form.opportunityId) params.set('opportunity_id', form.opportunityId);
+      if (form.sowTitle) params.set('project_name', form.sowTitle);
+      const res = await authFetch(`/api/sow/templates/${template.id}/preview?${params}`);
+      if (res.ok) setPreviewData(await res.json());
+    } catch {
+      // preview is optional — silently fail
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -70,6 +129,8 @@ export default function CreateNew() {
           opportunity_id: form.opportunityId,
           deal_value: form.dealValue ? parseFloat(form.dealValue) : null,
           estimated_margin: form.estimatedMargin ? parseFloat(form.estimatedMargin) : null,
+          content_template_id: selectedTemplateId || null,
+          workflow_template_id: selectedWorkflowTemplateId || null,
           metadata: {
             workOrderNumber: form.workOrderNumber,
             customerLegalName: form.customerLegalName,
@@ -412,10 +473,209 @@ export default function CreateNew() {
               </div>
             </div>
 
+            {/* Template selection — shown when a methodology is chosen */}
+            {form.deliveryMethodology && (
+              <div className="card" style={{ marginTop: 'var(--spacing-lg)' }}>
+                <h2
+                  className="text-xl font-semibold mb-xl"
+                  style={{
+                    paddingBottom: 'var(--spacing-md)',
+                    borderBottom: '1px solid var(--color-border-default)',
+                  }}
+                >
+                  Starter Content
+                </h2>
+                <p className="text-sm text-secondary" style={{ marginBottom: 'var(--spacing-md)' }}>
+                  Optionally choose a pre-populated template for{' '}
+                  <strong>{form.deliveryMethodology}</strong>. You can edit every section after
+                  creation.
+                </p>
+
+                {templatesLoading ? (
+                  <p className="text-sm text-secondary">Loading templates…</p>
+                ) : (
+                  <div
+                    style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}
+                  >
+                    {/* Start from scratch option */}
+                    <div
+                      onClick={() => setSelectedTemplateId(null)}
+                      style={{
+                        padding: 'var(--spacing-md)',
+                        border: `2px solid ${selectedTemplateId === null ? 'var(--color-accent-purple, #7c3aed)' : 'var(--color-border-default)'}`,
+                        borderRadius: 'var(--radius-lg)',
+                        cursor: 'pointer',
+                        backgroundColor:
+                          selectedTemplateId === null
+                            ? 'rgba(124,58,237,0.05)'
+                            : 'var(--color-bg-primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--spacing-md)',
+                      }}
+                    >
+                      <span style={{ fontSize: '1.5rem' }}>✏️</span>
+                      <div>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontWeight: 'var(--font-weight-semibold)',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                        >
+                          Start from scratch
+                        </p>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: 'var(--font-size-xs)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >
+                          All sections begin empty — fill in your own content
+                        </p>
+                      </div>
+                      {selectedTemplateId === null && (
+                        <span
+                          style={{
+                            marginLeft: 'auto',
+                            color: 'var(--color-accent-purple, #7c3aed)',
+                            fontWeight: 700,
+                          }}
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Template cards */}
+                    {templates.map((tmpl) => (
+                      <div
+                        key={tmpl.id}
+                        style={{
+                          padding: 'var(--spacing-md)',
+                          border: `2px solid ${selectedTemplateId === tmpl.id ? 'var(--color-accent-purple, #7c3aed)' : 'var(--color-border-default)'}`,
+                          borderRadius: 'var(--radius-lg)',
+                          cursor: 'pointer',
+                          backgroundColor:
+                            selectedTemplateId === tmpl.id
+                              ? 'rgba(124,58,237,0.05)'
+                              : 'var(--color-bg-primary)',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 'var(--spacing-md)',
+                        }}
+                        onClick={() => setSelectedTemplateId(tmpl.id)}
+                      >
+                        <span style={{ fontSize: '1.5rem', flexShrink: 0 }}>📄</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p
+                            style={{
+                              margin: 0,
+                              fontWeight: 'var(--font-weight-semibold)',
+                              fontSize: 'var(--font-size-sm)',
+                            }}
+                          >
+                            {tmpl.name}
+                          </p>
+                          {tmpl.description && (
+                            <p
+                              style={{
+                                margin: '2px 0 0',
+                                fontSize: 'var(--font-size-xs)',
+                                color: 'var(--color-text-secondary)',
+                              }}
+                            >
+                              {tmpl.description}
+                            </p>
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            gap: '6px',
+                            alignItems: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '11px', padding: '3px 10px' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePreview(tmpl);
+                            }}
+                          >
+                            Preview
+                          </button>
+                          {selectedTemplateId === tmpl.id && (
+                            <span
+                              style={{
+                                color: 'var(--color-accent-purple, #7c3aed)',
+                                fontWeight: 700,
+                              }}
+                            >
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {templates.length === 0 && (
+                      <p className="text-sm text-secondary">
+                        No templates available for this methodology yet.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Workflow template selection — always shown */}
+            <div className="card" style={{ marginTop: 'var(--spacing-lg)' }}>
+              <h2
+                className="text-xl font-semibold mb-xl"
+                style={{
+                  paddingBottom: 'var(--spacing-md)',
+                  borderBottom: '1px solid var(--color-border-default)',
+                }}
+              >
+                Review Workflow
+              </h2>
+              <p className="text-sm text-secondary" style={{ marginBottom: 'var(--spacing-md)' }}>
+                Choose the review workflow for this SoW. The default ESAP workflow is recommended
+                for most deals.
+              </p>
+              <WorkflowTemplateSelector
+                selectedTemplateId={selectedWorkflowTemplateId}
+                onSelect={setSelectedWorkflowTemplateId}
+                authFetch={authFetch}
+              />
+            </div>
+
             {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: 'var(--spacing-lg)',
+              }}
+            >
               <p className="text-sm text-secondary">
                 <span style={{ color: 'var(--color-error)' }}>*</span> Required fields
+                {selectedTemplateId && (
+                  <span
+                    style={{
+                      marginLeft: 'var(--spacing-md)',
+                      color: 'var(--color-accent-purple, #7c3aed)',
+                    }}
+                  >
+                    · Template selected
+                  </span>
+                )}
               </p>
               <div style={{ display: 'flex', gap: 'var(--spacing-md)' }}>
                 <button
@@ -439,6 +699,105 @@ export default function CreateNew() {
           </form>
         </div>
       </div>
+
+      {/* Template preview modal */}
+      {previewTemplate && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 'var(--spacing-xl)',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPreviewTemplate(null);
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              borderRadius: 'var(--radius-xl)',
+              border: '1px solid var(--color-border-default)',
+              padding: 'var(--spacing-xl)',
+              maxWidth: '640px',
+              width: '100%',
+              maxHeight: '80vh',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--spacing-md)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 'var(--font-size-lg)',
+                  fontWeight: 'var(--font-weight-semibold)',
+                }}
+              >
+                {previewTemplate.name}
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setPreviewTemplate(null)}>
+                Close
+              </button>
+            </div>
+            {previewTemplate.description && (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 'var(--font-size-sm)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                {previewTemplate.description}
+              </p>
+            )}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border-default)',
+                backgroundColor: 'var(--color-bg-secondary)',
+                padding: 'var(--spacing-md)',
+              }}
+            >
+              {previewLoading ? (
+                <p className="text-sm text-secondary">Loading preview…</p>
+              ) : previewData ? (
+                <div
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {JSON.stringify(previewData, null, 2)}
+                </div>
+              ) : (
+                <p className="text-sm text-secondary">Preview unavailable.</p>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setSelectedTemplateId(previewTemplate.id);
+                  setPreviewTemplate(null);
+                }}
+              >
+                Use This Template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

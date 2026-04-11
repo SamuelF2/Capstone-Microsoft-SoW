@@ -1,6 +1,6 @@
-function genId() {
-  return `phase-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const PHASE_STATUSES = ['Not Started', 'In Progress', 'Complete'];
 const STATUS_COLORS = {
@@ -12,7 +12,7 @@ const STATUS_COLORS = {
 const SURE_STEP_PHASES = ['Analyse', 'Design', 'Develop', 'Deploy', 'Operate'];
 
 const emptyPhase = () => ({
-  id: genId(),
+  id: genId('phase'),
   name: '',
   description: '',
   deliverables: '',
@@ -21,54 +21,20 @@ const emptyPhase = () => ({
 });
 
 function PhaseCard({ item, onChange, onRemove }) {
-  return (
-    <div
-      className="card"
+  const statusBadge = (
+    <span
       style={{
-        minWidth: '320px',
-        maxWidth: '320px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
+        fontSize: 'var(--font-size-xs)',
+        color: STATUS_COLORS[item.status],
+        fontWeight: 'var(--font-weight-medium)',
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          display: 'flex',
-          gap: 'var(--spacing-xs)',
-          alignItems: 'center',
-        }}
-      >
-        <span
-          style={{
-            fontSize: 'var(--font-size-xs)',
-            color: STATUS_COLORS[item.status],
-            fontWeight: 'var(--font-weight-medium)',
-          }}
-        >
-          ● {item.status}
-        </span>
-        <button
-          onClick={onRemove}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--color-text-tertiary)',
-            cursor: 'pointer',
-            fontSize: '18px',
-            lineHeight: 1,
-            padding: '2px',
-          }}
-        >
-          ×
-        </button>
-      </div>
+      ● {item.status}
+    </span>
+  );
 
+  return (
+    <ListCard width="320px" onRemove={onRemove} headerExtras={statusBadge}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Phase Name
@@ -159,7 +125,7 @@ function PhaseCard({ item, onChange, onRemove }) {
           </select>
         </div>
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -168,21 +134,12 @@ export default function PhasesDeliverables({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Phases & Deliverables</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Define the Sure Step implementation phases and the key deliverables produced in each.
-        </p>
-      </div>
+      <SectionHeader
+        title="Phases & Deliverables"
+        description="Define the Sure Step implementation phases and the key deliverables produced in each."
+      />
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {phases.map((phase) => (
           <PhaseCard
             key={phase.id}
@@ -191,37 +148,8 @@ export default function PhasesDeliverables({ data, onChange }) {
             onRemove={() => onChange(phases.filter((p) => p.id !== phase.id))}
           />
         ))}
-        <div
-          style={{
-            minWidth: '180px',
-            maxWidth: '180px',
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--color-border-default)',
-            borderRadius: 'var(--radius-lg)',
-            cursor: 'pointer',
-            color: 'var(--color-text-tertiary)',
-            transition: 'border-color var(--transition-base), color var(--transition-base)',
-            minHeight: '200px',
-          }}
-          onClick={() => onChange([...phases, emptyPhase()])}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-            e.currentTarget.style.color = 'var(--color-accent-blue)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--color-border-default)';
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
-          }}
-        >
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-            <div className="text-sm">Add Phase</div>
-          </div>
-        </div>
-      </div>
+        <AddCardButton label="Add Phase" onClick={() => onChange([...phases, emptyPhase()])} />
+      </HorizontalCardList>
     </div>
   );
 }

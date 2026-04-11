@@ -9,116 +9,112 @@
  * the fetch if no token is present, and the app-level auth redirects them).
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { formatDeal as formatDealValue, formatDate } from '../lib/format';
+import { routeForStage, stageColor, STAGE_KEYS } from '../lib/workflowStages';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const STATUS_COLOR = {
-  draft: 'var(--color-text-secondary)',
-  ai_review: 'var(--color-accent-blue, #1967d2)',
-  internal_review: 'var(--color-warning)',
-  drm_review: 'var(--color-accent-purple, #7c3aed)',
-  approved: 'var(--color-success)',
-  finalized: 'var(--color-accent-blue, #3f51b5)',
-  rejected: 'var(--color-error)',
-  // legacy
-  in_review: 'var(--color-warning)',
-};
-
-function formatDealValue(raw) {
-  if (raw == null) return '—';
-  const num = parseFloat(raw);
-  return isNaN(num) ? '—' : '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0 });
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
+/**
+ * Render a Postgres ts_headline() snippet safely.
+ *
+ * ts_headline wraps matched terms in literal <b>…</b> tags but does not
+ * escape the surrounding text — so a user-supplied title containing
+ * "<script>" would otherwise become live HTML when fed to
+ * dangerouslySetInnerHTML.  Splitting on the bold tags and rendering each
+ * piece as a React text node gives us automatic escaping while still
+ * preserving the highlight.
+ */
+function HighlightedSnippet({ html }) {
+  if (!html) return null;
+  // ts_headline only emits <b>…</b>; split on those literal tags.
+  const parts = String(html).split(/(<b>|<\/b>)/g);
+  let bold = false;
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === '<b>') {
+      bold = true;
+      continue;
+    }
+    if (p === '</b>') {
+      bold = false;
+      continue;
+    }
+    if (!p) continue;
+    out.push(bold ? <b key={i}>{p}</b> : <span key={i}>{p}</span>);
   }
+  return <>{out}</>;
 }
 
 // ── Status-aware action buttons ───────────────────────────────────────────────
 
+/**
+ * Pick an action label based on the stage role. Anchor stages get explicit
+ * labels; every other (user-defined) stage gets a generic "Review →" since
+ * those all land on the unified /review/[id] page.
+ */
+function actionLabelForStage(status) {
+  if (status === STAGE_KEYS.DRAFT || status === STAGE_KEYS.REJECTED) return 'Edit →';
+  if (status === STAGE_KEYS.AI_REVIEW) return 'View AI Results →';
+  if (status === STAGE_KEYS.APPROVED) return 'Finalize →';
+  if (status === STAGE_KEYS.FINALIZED) return 'View →';
+  // All user-defined review/approval stages route to the unified review page.
+  return 'Review →';
+}
+
+function actionVariantForStage(status) {
+  return status === STAGE_KEYS.APPROVED ? 'primary' : 'secondary';
+}
+
+// Stages where the manage page is meaningful: any non-terminal stage past
+// draft. Drafts already have an inline reviewer panel + workflow editor on
+// the draft page, and terminal SoWs (approved/finalized/rejected) shouldn't
+// be edited.
+const MANAGE_HIDDEN_STATUSES = new Set([
+  STAGE_KEYS.DRAFT,
+  STAGE_KEYS.APPROVED,
+  STAGE_KEYS.FINALIZED,
+  STAGE_KEYS.REJECTED,
+]);
+
 function SoWActions({ sow, router }) {
-  const { status, id } = sow;
+  const { status, id, is_author: isAuthor } = sow;
+  const href = routeForStage(status, id);
+  const label = actionLabelForStage(status);
+  const variant = actionVariantForStage(status);
+  const showManage = isAuthor && status && !MANAGE_HIDDEN_STATUSES.has(status);
 
-  const btn = (label, href, variant = 'secondary') => (
-    <button
-      key={label}
-      className={`btn btn-${variant} btn-sm`}
-      style={{ whiteSpace: 'nowrap' }}
-      onClick={(e) => {
-        e.stopPropagation();
-        router.push(href);
-      }}
-    >
-      {label}
-    </button>
+  return (
+    <div style={{ display: 'flex', gap: '6px' }}>
+      {showManage && (
+        <button
+          className="btn btn-secondary btn-sm"
+          style={{ whiteSpace: 'nowrap' }}
+          title="Live-edit reviewers, stage config, or workflow structure"
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/sow/${id}/manage`);
+          }}
+        >
+          Manage →
+        </button>
+      )}
+      <button
+        className={`btn btn-${variant} btn-sm`}
+        style={{ whiteSpace: 'nowrap' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          router.push(href);
+        }}
+      >
+        {label}
+      </button>
+    </div>
   );
-
-  switch (status) {
-    case 'draft':
-    case 'rejected':
-      return (
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {btn('Edit →', `/draft/${id}`, 'secondary')}
-        </div>
-      );
-
-    case 'ai_review':
-      return (
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {btn('View AI Results →', `/ai-review?sowId=${id}`, 'secondary')}
-        </div>
-      );
-
-    case 'internal_review':
-      return (
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {btn('Review Status →', `/internal-review/${id}`, 'secondary')}
-        </div>
-      );
-
-    case 'drm_review':
-      return (
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {btn('DRM Status →', `/drm-review/${id}`, 'secondary')}
-        </div>
-      );
-
-    case 'approved':
-      return (
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {btn('Finalize →', `/finalize/${id}`, 'primary')}
-        </div>
-      );
-
-    case 'finalized':
-      return (
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {btn('View →', `/finalize/${id}`, 'secondary')}
-        </div>
-      );
-
-    default:
-      return (
-        <span style={{ color: 'var(--color-accent-blue)', fontSize: 'var(--font-size-sm)' }}>
-          View →
-        </span>
-      );
-  }
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -132,6 +128,8 @@ export default function AllSoWs() {
   const [search, setSearch] = useState('');
   const [filterMethod, setFilterMethod] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
+  const [searchResults, setSearchResults] = useState(null); // null = not searching
+  const debounceTimer = useRef(null);
 
   useEffect(() => {
     if (!user) return;
@@ -151,41 +149,73 @@ export default function AllSoWs() {
       });
   }, [user, authFetch]);
 
-  const filtered = sows.filter((s) => {
-    const q = search.toLowerCase();
-    const matchSearch =
-      (s.title ?? '').toLowerCase().includes(q) ||
-      (s.customer_name ?? '').toLowerCase().includes(q) ||
-      (s.opportunity_id ?? '').toLowerCase().includes(q);
-    const matchMethod = filterMethod === 'All' || s.methodology === filterMethod;
-    const matchStatus = filterStatus === 'All' || s.status === filterStatus;
-    return matchSearch && matchMethod && matchStatus;
-  });
+  // Debounced server-side full-text search
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (!user || search.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ q: search });
+        if (filterMethod !== 'All') params.set('methodology', filterMethod);
+        if (filterStatus !== 'All') params.set('status', filterStatus);
+        const res = await authFetch(`/api/sow/search?${params}`);
+        if (res.ok) setSearchResults(await res.json());
+      } catch {
+        // Fall back to client-side filter on error
+        setSearchResults(null);
+      }
+    }, 300);
+    return () => clearTimeout(debounceTimer.current);
+  }, [search, filterMethod, filterStatus, user, authFetch]);
+
+  // Dynamically build the stage filter from loaded SoWs, so custom workflow
+  // stages surface automatically. Uses stage_display_name from the workflow
+  // snapshot (falls back to the raw status key with basic prettification).
+  const stageOptions = useMemo(() => {
+    const seen = new Map();
+    const prettify = (s) =>
+      s
+        .split(/[-_]/)
+        .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(' ');
+    for (const sow of sows) {
+      const key = sow.status || '';
+      if (!key || seen.has(key)) continue;
+      seen.set(key, sow.stage_display_name || prettify(key));
+    }
+    return [...seen.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([value, label]) => ({ value, label }));
+  }, [sows]);
+
+  // Client-side filter used when search is short or server search is unavailable
+  const filtered = useMemo(
+    () =>
+      sows.filter((s) => {
+        const q = search.toLowerCase();
+        const matchSearch =
+          !q ||
+          (s.title ?? '').toLowerCase().includes(q) ||
+          (s.customer_name ?? '').toLowerCase().includes(q) ||
+          (s.opportunity_id ?? '').toLowerCase().includes(q);
+        const matchMethod = filterMethod === 'All' || s.methodology === filterMethod;
+        const matchStatus = filterStatus === 'All' || s.status === filterStatus;
+        return matchSearch && matchMethod && matchStatus;
+      }),
+    [sows, search, filterMethod, filterStatus]
+  );
+
+  // What to display: server search results (if active) or client-side filtered list
+  const displayedSows = searchResults !== null ? searchResults : filtered;
 
   const handleRowClick = (sow) => {
-    switch (sow.status) {
-      case 'draft':
-      case 'rejected':
-        router.push(`/draft/${sow.id}`);
-        break;
-      case 'ai_review':
-        router.push(`/ai-review?sowId=${sow.id}`);
-        break;
-      case 'internal_review':
-        router.push(`/internal-review/${sow.id}`);
-        break;
-      case 'drm_review':
-        router.push(`/drm-review/${sow.id}`);
-        break;
-      case 'approved':
-        router.push(`/finalize/${sow.id}`);
-        break;
-      case 'finalized':
-        router.push(`/finalize/${sow.id}`);
-        break;
-      default:
-        router.push(`/draft/${sow.id}`);
-    }
+    // routeForStage handles anchors (draft, approved, finalized, rejected,
+    // ai_review) and falls back to the unified /review/[id] page for any
+    // user-defined stage.
+    router.push(routeForStage(sow.status, sow.id));
   };
 
   if (loading) {
@@ -300,19 +330,19 @@ export default function AllSoWs() {
               className="form-select"
               style={{ flex: '1', minWidth: '140px' }}
             >
-              <option value="All">All Statuses</option>
-              <option value="draft">Draft</option>
-              <option value="ai_review">AI Review</option>
-              <option value="internal_review">Internal Review</option>
-              <option value="drm_review">DRM Review</option>
-              <option value="approved">Approved</option>
-              <option value="finalized">Finalized</option>
-              <option value="rejected">Rejected</option>
+              <option value="All">All Stages</option>
+              {stageOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
 
           <p className="text-sm text-tertiary mb-md">
-            {filtered.length} SoW{filtered.length !== 1 ? 's' : ''} found
+            {searchResults !== null
+              ? `${searchResults.length} search result${searchResults.length !== 1 ? 's' : ''}`
+              : `${filtered.length} SoW${filtered.length !== 1 ? 's' : ''} found`}
           </p>
 
           {/* Empty state */}
@@ -330,7 +360,7 @@ export default function AllSoWs() {
           )}
 
           {/* Table */}
-          {sows.length > 0 && (
+          {(sows.length > 0 || searchResults !== null) && (
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -368,7 +398,7 @@ export default function AllSoWs() {
                 </thead>
 
                 <tbody>
-                  {filtered.map((sow, i) => (
+                  {displayedSows.map((sow, i) => (
                     <motion.tr
                       key={sow.id}
                       initial={{ opacity: 0, y: 6 }}
@@ -377,7 +407,7 @@ export default function AllSoWs() {
                       onClick={() => handleRowClick(sow)}
                       style={{
                         borderBottom:
-                          i < filtered.length - 1
+                          i < displayedSows.length - 1
                             ? '1px solid var(--color-border-default)'
                             : 'none',
                         cursor: 'pointer',
@@ -396,6 +426,11 @@ export default function AllSoWs() {
                         <p className="font-medium" style={{ marginBottom: '2px' }}>
                           {sow.title}
                         </p>
+                        {sow.snippet && (
+                          <p className="text-xs text-tertiary" style={{ marginTop: '2px' }}>
+                            <HighlightedSnippet html={sow.snippet} />
+                          </p>
+                        )}
                         {sow.opportunity_id && (
                           <p className="text-xs text-tertiary">{sow.opportunity_id}</p>
                         )}
@@ -432,12 +467,16 @@ export default function AllSoWs() {
                       <td style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}>
                         <span
                           style={{
-                            color: STATUS_COLOR[sow.status] ?? 'var(--color-text-secondary)',
+                            // stageColor picks the right color for anchors
+                            // (draft/approved/finalized/rejected) and falls
+                            // back to a palette keyed on stage_type for
+                            // user-defined stages.
+                            color: stageColor(sow.status, sow.stage_type),
                             fontWeight: 'var(--font-weight-medium)',
                             fontSize: 'var(--font-size-sm)',
                           }}
                         >
-                          ● {sow.status ?? '—'}
+                          ● {sow.stage_display_name ?? sow.status ?? '—'}
                         </span>
                       </td>
 
@@ -459,9 +498,13 @@ export default function AllSoWs() {
                 </tbody>
               </table>
 
-              {filtered.length === 0 && sows.length > 0 && (
+              {displayedSows.length === 0 && (sows.length > 0 || searchResults !== null) && (
                 <div style={{ padding: 'var(--spacing-3xl)', textAlign: 'center' }}>
-                  <p className="text-secondary">No SoWs match your filters.</p>
+                  <p className="text-secondary">
+                    {searchResults !== null
+                      ? 'No SoWs match your search.'
+                      : 'No SoWs match your filters.'}
+                  </p>
                 </div>
               )}
             </div>

@@ -1,0 +1,287 @@
+{
+  "name": "Waterfall — Standard",
+  "methodology": "Waterfall",
+  "description": "Pre-populated starter content for traditional sequential project delivery with defined phases, milestone-based governance, and fixed-scope contractual structure.",
+  "template_data": {
+    "executiveSummary": {
+      "content": "This engagement delivers {{customer_name}}'s {{project_name}} initiative using a structured Waterfall delivery model. The project follows a clearly defined sequence of phases — Requirements, Architecture & Design, Build, Testing, and Deployment — with formal milestone approvals between each phase ensuring full alignment before progression.\n\nThe Waterfall approach is appropriate for this engagement given the well-understood requirements, stable technology landscape, and {{customer_name}}'s governance framework requiring milestone-level sign-off. Deliverables are defined upfront in the Statement of Work, with a formal change control process governing any scope variations."
+    },
+    "projectScope": {
+      "inScope": [
+        {
+          "id": "is-1",
+          "text": "Requirements elicitation and documentation (Functional & Non-Functional Requirements)"
+        },
+        { "id": "is-2", "text": "Solution architecture and detailed technical design" },
+        { "id": "is-3", "text": "Development and unit testing of all agreed components" },
+        {
+          "id": "is-4",
+          "text": "System Integration Testing (SIT) and User Acceptance Testing (UAT) facilitation"
+        },
+        { "id": "is-5", "text": "Production deployment and cutover execution" },
+        { "id": "is-6", "text": "Post-deployment stabilisation support (2 weeks)" },
+        { "id": "is-7", "text": "Project closure report and lessons learned documentation" }
+      ],
+      "outOfScope": [
+        {
+          "id": "oos-1",
+          "text": "Scope changes after baseline Requirements sign-off (subject to formal Change Request process)"
+        },
+        { "id": "oos-2", "text": "Ongoing operations and support beyond the stabilisation period" },
+        { "id": "oos-3", "text": "Third-party vendor management or procurement" },
+        {
+          "id": "oos-4",
+          "text": "Business process re-engineering not directly related to the technical solution"
+        }
+      ]
+    },
+    "waterfallApproach": {
+      "deliveryApproach": "The project will be executed in five sequential phases with milestone gate reviews between each:\n\n1. Requirements (Weeks 1–3): Structured workshops with {{customer_name}} business and technical stakeholders. Output: signed Functional & Non-Functional Requirements document.\n\n2. Architecture & Design (Weeks 4–6): Solution architecture, component design, interface specifications, and security design. Output: Technical Design Document (TDD), signed at Design Gate.\n\n3. Build (Weeks 7–14): Development and unit testing by the Microsoft delivery team. Build progress tracked weekly against the agreed Work Breakdown Structure (WBS).\n\n4. Testing (Weeks 15–18): SIT (Microsoft-led) followed by UAT ({{customer_name}}-led). Defects managed in Azure DevOps with P1/P2 blocker criteria for go-live approval.\n\n5. Deployment (Week 19–20): Production cutover per the agreed Cutover Plan; 2-week stabilisation support period.",
+      "supportTransitionPlan": "2-week post-deployment stabilisation: Microsoft resources available at 50% for critical issue resolution. Formal handover at end of stabilisation including as-built documentation, runbook, and support escalation contacts."
+    },
+    "phasesMilestones": [
+      {
+        "id": "m-1",
+        "phase": "Requirements",
+        "milestone": "Requirements Sign-Off",
+        "successCriteria": "All functional and non-functional requirements documented and signed by {{customer_name}} sponsor",
+        "targetWeek": "Week 3"
+      },
+      {
+        "id": "m-2",
+        "phase": "Architecture & Design",
+        "milestone": "Design Gate Review",
+        "successCriteria": "Technical Design Document approved; architecture security review passed",
+        "targetWeek": "Week 6"
+      },
+      {
+        "id": "m-3",
+        "phase": "Build",
+        "milestone": "Build Complete / Code Freeze",
+        "successCriteria": "All components developed; unit test pass rate ≥98%; code review approved",
+        "targetWeek": "Week 14"
+      },
+      {
+        "id": "m-4",
+        "phase": "Testing",
+        "milestone": "UAT Sign-Off",
+        "successCriteria": "UAT pass rate ≥95%; zero open Critical/High defects; {{customer_name}} sign-off",
+        "targetWeek": "Week 18"
+      },
+      {
+        "id": "m-5",
+        "phase": "Deployment",
+        "milestone": "Go-Live",
+        "successCriteria": "Production deployment completed; cutover checklist signed off by both parties",
+        "targetWeek": "Week 19"
+      },
+      {
+        "id": "m-6",
+        "phase": "Deployment",
+        "milestone": "Project Closure",
+        "successCriteria": "Stabilisation period complete; all deliverables accepted; closure report signed",
+        "targetWeek": "Week 21"
+      }
+    ],
+    "deliverables": [
+      {
+        "id": "d-1",
+        "title": "Functional & Non-Functional Requirements Document",
+        "description": "Complete, baselined requirements document signed off by {{customer_name}}",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-2",
+        "title": "Technical Design Document (TDD)",
+        "description": "Architecture diagrams, component specifications, interface contracts, security design",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-3",
+        "title": "SIT Completion Report",
+        "description": "SIT test results with defect register and resolution evidence",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-4",
+        "title": "UAT Completion Sign-Off",
+        "description": "UAT results signed by {{customer_name}} stakeholders confirming acceptance",
+        "dueDate": "",
+        "owner": "{{customer_name}}"
+      },
+      {
+        "id": "d-5",
+        "title": "Deployed Production Solution",
+        "description": "Fully configured and tested solution deployed to {{customer_name}} production environment",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-6",
+        "title": "Runbook & Operations Guide",
+        "description": "Operational runbook covering deployment, rollback, monitoring, and escalation",
+        "dueDate": "",
+        "owner": "Microsoft"
+      },
+      {
+        "id": "d-7",
+        "title": "Project Closure Report",
+        "description": "Project summary, lessons learned, and formal acceptance sign-off",
+        "dueDate": "",
+        "owner": "Joint"
+      }
+    ],
+    "assumptionsRisks": {
+      "assumptions": [
+        {
+          "id": "a-1",
+          "text": "Requirements can be fully defined and baselined prior to the Architecture & Design phase"
+        },
+        {
+          "id": "a-2",
+          "text": "{{customer_name}} will assign a Business Analyst or subject matter expert to participate in requirements workshops"
+        },
+        {
+          "id": "a-3",
+          "text": "All infrastructure and environments (development, test, production) will be provisioned by {{customer_name}} before the Build phase begins"
+        },
+        {
+          "id": "a-4",
+          "text": "Milestone sign-off decisions will be provided within 5 business days of deliverable submission"
+        }
+      ],
+      "customerResponsibilities": [
+        {
+          "id": "cr-1",
+          "text": "Provide SMEs and business stakeholders for requirements workshops and milestone reviews"
+        },
+        {
+          "id": "cr-2",
+          "text": "Provision and manage environments (development, test, production) and required access"
+        },
+        {
+          "id": "cr-3",
+          "text": "Lead UAT execution, track defects, and provide sign-off within agreed timelines"
+        },
+        { "id": "cr-4", "text": "Manage internal change management and end-user communications" }
+      ],
+      "risks": [
+        {
+          "id": "r-1",
+          "text": "Requirement changes after baseline — mitigated by formal Change Request process with documented impact assessment"
+        },
+        {
+          "id": "r-2",
+          "text": "Environment delays impacting Build phase — mitigated by environment readiness checkpoint at Design Gate"
+        },
+        {
+          "id": "r-3",
+          "text": "UAT resource constraints — mitigated by scheduling UAT participants and test windows at project kickoff"
+        }
+      ]
+    },
+    "teamStructure": {
+      "members": [
+        {
+          "id": "t-1",
+          "role": "Engagement Lead",
+          "name": "",
+          "allocation": "20%",
+          "responsibilities": "Executive governance, milestone approval, commercial oversight"
+        },
+        {
+          "id": "t-2",
+          "role": "Project Manager",
+          "name": "",
+          "allocation": "100%",
+          "responsibilities": "Schedule, RAID log, stakeholder communications, milestone tracking"
+        },
+        {
+          "id": "t-3",
+          "role": "Business Analyst",
+          "name": "",
+          "allocation": "100% (Phases 1–2)",
+          "responsibilities": "Requirements elicitation, FRD authoring, UAT facilitation"
+        },
+        {
+          "id": "t-4",
+          "role": "Solution Architect",
+          "name": "",
+          "allocation": "75%",
+          "responsibilities": "Architecture design, TDD authorship, technical governance"
+        },
+        {
+          "id": "t-5",
+          "role": "Senior Developer",
+          "name": "",
+          "allocation": "100% (Phases 3–4)",
+          "responsibilities": "Lead development, code reviews, build governance"
+        },
+        {
+          "id": "t-6",
+          "role": "QA Lead",
+          "name": "",
+          "allocation": "100% (Phase 4)",
+          "responsibilities": "SIT planning, test execution, defect management, UAT support"
+        }
+      ],
+      "supportTransitionPlan": "2-week stabilisation support at 50% allocation. Formal handover session including runbook walkthrough, escalation path, and transition to {{customer_name}} support team."
+    },
+    "pricing": {
+      "totalValue": "",
+      "breakdown": [
+        {
+          "id": "p-1",
+          "item": "Phase 1 — Requirements",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-2",
+          "item": "Phase 2 — Architecture & Design",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-3",
+          "item": "Phase 3 — Build",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-4",
+          "item": "Phase 4 — Testing",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-5",
+          "item": "Phase 5 — Deployment & Stabilisation",
+          "unit": "Fixed",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        },
+        {
+          "id": "p-6",
+          "item": "Travel & Expenses (estimate)",
+          "unit": "Lump sum",
+          "qty": 1,
+          "rate": "",
+          "total": ""
+        }
+      ]
+    }
+  }
+}

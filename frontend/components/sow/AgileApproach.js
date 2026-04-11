@@ -1,11 +1,13 @@
-function genId() {
-  return `sprint-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import FormCard from './ui/FormCard';
+import TwoColumnGrid from './ui/TwoColumnGrid';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const SPRINT_DURATIONS = ['1 week', '2 weeks', '3 weeks', '4 weeks'];
 
 const emptySprint = () => ({
-  id: genId(),
+  id: genId('sprint'),
   name: '',
   goal: '',
   duration: '2 weeks',
@@ -14,36 +16,7 @@ const emptySprint = () => ({
 
 function SprintCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '300px',
-        maxWidth: '300px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <button
-        onClick={onRemove}
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: '18px',
-          lineHeight: 1,
-          padding: '2px',
-        }}
-      >
-        ×
-      </button>
-
+    <ListCard width="300px" onRemove={onRemove}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Sprint Name
@@ -103,7 +76,7 @@ function SprintCard({ item, onChange, onRemove }) {
           style={{ fontSize: 'var(--font-size-sm)', resize: 'none' }}
         />
       </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -121,39 +94,16 @@ export default function AgileApproach({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Agile Approach & Sprints</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Describe the Agile delivery methodology and plan the sprint structure for this engagement.
-        </p>
-      </div>
+      <SectionHeader
+        title="Agile Approach & Sprints"
+        description="Describe the Agile delivery methodology and plan the sprint structure for this engagement."
+      />
 
-      {/* Two approach cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 'var(--spacing-xl)',
-          marginBottom: 'var(--spacing-2xl)',
-        }}
-      >
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Delivery Approach & Methodology
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Ensure your approach aligns with the Agile methodology and includes how you'll manage
-            risks and quality across sprints.
-          </p>
+      <TwoColumnGrid style={{ marginBottom: 'var(--spacing-2xl)' }}>
+        <FormCard
+          title="Delivery Approach & Methodology"
+          description="Ensure your approach aligns with the Agile methodology and includes how you'll manage risks and quality across sprints."
+        >
           <textarea
             className="form-textarea"
             value={deliveryApproach}
@@ -161,25 +111,12 @@ export default function AgileApproach({ data, onChange }) {
             placeholder="Describe the Agile delivery approach — ceremonies (stand-ups, reviews, retrospectives), tooling (Azure DevOps, Jira), sprint cadence, and quality gates..."
             rows={8}
           />
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3
-            className="text-lg font-semibold mb-md"
-            style={{
-              paddingBottom: 'var(--spacing-md)',
-              borderBottom: '1px solid var(--color-border-default)',
-            }}
-          >
-            Support Transition Plan
-          </h3>
-          <p
-            className="text-sm text-secondary mb-md"
-            style={{ lineHeight: 'var(--line-height-relaxed)' }}
-          >
-            Describe how the solution will be transitioned to the customer's operations team after
-            go-live.
-          </p>
+        <FormCard
+          title="Support Transition Plan"
+          description="Describe how the solution will be transitioned to the customer's operations team after go-live."
+        >
           <textarea
             className="form-textarea"
             value={supportTransitionPlan}
@@ -187,8 +124,8 @@ export default function AgileApproach({ data, onChange }) {
             placeholder="Outline the transition activities — knowledge transfer sessions, runbook handover, training plan, and the support window post-go-live..."
             rows={8}
           />
-        </div>
-      </div>
+        </FormCard>
+      </TwoColumnGrid>
 
       {/* Sprint Planning */}
       <div>
@@ -207,14 +144,7 @@ export default function AgileApproach({ data, onChange }) {
             </p>
           </div>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--spacing-lg)',
-            overflowX: 'auto',
-            paddingBottom: 'var(--spacing-md)',
-          }}
-        >
+        <HorizontalCardList>
           {sprints.map((sprint) => (
             <SprintCard
               key={sprint.id}
@@ -223,37 +153,8 @@ export default function AgileApproach({ data, onChange }) {
               onRemove={() => removeSprint(sprint.id)}
             />
           ))}
-          <div
-            style={{
-              minWidth: '180px',
-              maxWidth: '180px',
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '2px dashed var(--color-border-default)',
-              borderRadius: 'var(--radius-lg)',
-              cursor: 'pointer',
-              color: 'var(--color-text-tertiary)',
-              transition: 'border-color var(--transition-base), color var(--transition-base)',
-              minHeight: '200px',
-            }}
-            onClick={addSprint}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-              e.currentTarget.style.color = 'var(--color-accent-blue)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--color-border-default)';
-              e.currentTarget.style.color = 'var(--color-text-tertiary)';
-            }}
-          >
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-              <div className="text-sm">Add Sprint</div>
-            </div>
-          </div>
-        </div>
+          <AddCardButton label="Add Sprint" onClick={addSprint} />
+        </HorizontalCardList>
       </div>
     </div>
   );

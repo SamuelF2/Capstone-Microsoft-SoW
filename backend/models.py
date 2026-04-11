@@ -122,6 +122,14 @@ class SoWCreate(BaseModel):
     estimated_margin: float | None = None
     content: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    workflow_template_id: int | None = Field(
+        default=None,
+        description="Workflow template ID; defaults to the system default template",
+    )
+    content_template_id: int | None = Field(
+        default=None,
+        description="Content template ID for pre-populated section content",
+    )
 
 
 class SoWUpdate(BaseModel):
@@ -184,6 +192,12 @@ class SoWSummary(BaseModel):
     estimated_margin: float | None = None
     client_id: str | None = None
     updated_at: datetime
+    stage_display_name: str | None = None
+    # True when the requesting user has an ``author`` row in collaboration
+    # for this SoW. Lets the listing UI surface author-only entry points
+    # (e.g. the "Manage" button on /all-sows). Defaults to False so legacy
+    # callers and non-collaboration responses don't accidentally elevate.
+    is_author: bool = False
 
 
 # ── History / Collaboration  (PDF §2.4, §2.5) ────────────────────────────────
@@ -389,6 +403,68 @@ class ReviewAssignmentStatusSummary(BaseModel):
     completed_at: datetime | None = None
 
 
+class AssignmentChecklistResponse(ReviewChecklistResponse):
+    """Checklist response scoped to a specific assignment id.
+
+    Extends ReviewChecklistResponse with the surrounding context the
+    assignment-scoped review page needs (sow_id, assignment metadata) so
+    the frontend can fetch SoW + workflow data after loading the checklist.
+    """
+
+    assignment_id: int
+    sow_id: int
+    user_id: int
+    stage: str
+    assignment_status: str
+    decision: str | None = None
+
+
+# ── SoW Reviewer Designation ────────────────────────────────────────────────
+
+
+class ReviewerSlot(BaseModel):
+    """One required (stage, role) slot on a SoW with the currently designated user.
+
+    Returned by GET /api/sow/{sow_id}/reviewers — one slot per required role
+    on every review/approval stage in the SoW's workflow snapshot.  ``user_id``
+    is null when nobody has been designated yet.
+    """
+
+    stage_key: str
+    stage_display_name: str
+    role_key: str
+    role_display_name: str
+    user_id: int | None = None
+    user_email: str | None = None
+    user_full_name: str | None = None
+
+
+class ReviewerSelection(BaseModel):
+    """One author-supplied (stage, role) → user designation."""
+
+    stage_key: str
+    role_key: str
+    user_id: int | None = None  # null clears the slot
+
+
+class ReviewerSelectionPayload(BaseModel):
+    """Bulk-update payload for PUT /api/sow/{sow_id}/reviewers."""
+
+    selections: list[ReviewerSelection]
+
+
+# ── User Listing  (for the reviewer picker) ─────────────────────────────────
+
+
+class UserListEntry(BaseModel):
+    """Minimal user representation for picker dropdowns."""
+
+    id: int
+    email: str
+    full_name: str | None = None
+    role: str
+
+
 class ReviewStatus(BaseModel):
     """Aggregated review status for a SoW."""
 
@@ -442,3 +518,313 @@ class DocumentGenerationResponse(BaseModel):
     file_name: str
     format: str
     size_bytes: int
+
+
+# ── Workflow Templates ───────────────────────────────────────────────────────
+
+
+class WorkflowStageRoleConfig(BaseModel):
+    """A reviewer role required at a workflow stage."""
+
+    role_key: str
+    is_required: bool = True
+    esap_levels: list[str] | None = None  # None = all levels
+
+
+class WorkflowStageConfig(BaseModel):
+    """A single stage within a workflow template.
+
+    stage_type values:
+        draft, ai_analysis, review, approval, terminal, parallel_gateway
+
+    config dict may contain:
+        approval_mode:      str  — all_must_approve | any_can_approve | majority | threshold
+        approval_threshold:  int  — required count when mode is 'threshold'
+        auto_advance:        bool — auto-advance when gating rules met
+        is_failure:          bool — marks stage as a failure / revision branch
+        reviewer_instructions: str — banner text shown to reviewers
+        assignment_stage_keys: list[str] — legacy hyphenated keys for review_assignments
+        join_mode:           str  — default | all_required | any_required | custom
+        required_predecessors: list[str] — stage_keys that must complete before join (custom mode)
+    """
+
+    stage_key: str
+    display_name: str
+    stage_order: int
+    stage_type: str = (
+        "review"  # draft | ai_analysis | review | approval | terminal | parallel_gateway
+    )
+    roles: list[WorkflowStageRoleConfig] = []
+    config: dict[str, Any] = {}
+
+
+class WorkflowTransitionConfig(BaseModel):
+    """A valid transition between two stages."""
+
+    from_stage: str
+    to_stage: str
+    condition: str = "default"  # default | on_approve | on_reject | on_send_back | on_condition_met (on_condition_met is backend-only, not exposed in the graph editor UI)
+
+
+class WorkflowData(BaseModel):
+    """Full workflow snapshot stored per-SoW."""
+
+    stages: list[WorkflowStageConfig]
+    transitions: list[WorkflowTransitionConfig]
+
+
+class WorkflowTemplateCreate(BaseModel):
+    """Payload for creating a new workflow template."""
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+    workflow_data: WorkflowData
+
+
+class WorkflowTemplateResponse(BaseModel):
+    """Full workflow template with stages, roles, and transitions."""
+
+    id: int
+    name: str
+    description: str | None = None
+    is_system: bool
+    created_by: int | None = None
+    workflow_data: WorkflowData
+    created_at: datetime
+
+
+class WorkflowTemplateSummary(BaseModel):
+    """Lightweight listing of a workflow template."""
+
+    id: int
+    name: str
+    description: str | None = None
+    is_system: bool
+    created_by: int | None = None
+    stage_count: int = 0
+    created_at: datetime
+
+
+class SoWWorkflowResponse(BaseModel):
+    """Per-SoW workflow instance."""
+
+    id: int
+    sow_id: int
+    template_id: int | None = None
+    current_stage: str
+    workflow_data: WorkflowData
+    parallel_branches: dict[str, str] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+# ── Conditions of Approval ───────────────────────────────────────────────────
+
+
+class COACreate(BaseModel):
+    """Payload for creating a Condition of Approval."""
+
+    condition_text: str = Field(min_length=1)
+    category: str = "general"  # technical, commercial, legal, staffing, general
+    priority: str = "medium"  # low, medium, high, critical
+    assigned_to: int | None = None
+    due_date: str | None = None  # ISO date string (YYYY-MM-DD)
+
+
+class COAUpdate(BaseModel):
+    """Partial update payload for a COA."""
+
+    condition_text: str | None = None
+    category: str | None = None
+    priority: str | None = None
+    assigned_to: int | None = None
+    due_date: str | None = None
+    status: str | None = None
+    resolution_notes: str | None = None
+
+
+class COAResolvePayload(BaseModel):
+    """Payload for resolving a COA."""
+
+    resolution_notes: str = Field(min_length=1)
+
+
+class COAWaivePayload(BaseModel):
+    """Payload for waiving a COA."""
+
+    resolution_notes: str = Field(min_length=1)
+
+
+class COAResponse(BaseModel):
+    """Full COA representation."""
+
+    id: int
+    sow_id: int
+    review_assignment_id: int | None = None
+    condition_text: str
+    category: str
+    priority: str
+    assigned_to: int | None = None
+    due_date: str | None = None
+    status: str
+    resolution_notes: str | None = None
+    resolved_by: int | None = None
+    resolved_at: datetime | None = None
+    evidence: list[Any] = []
+    created_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class COASummary(BaseModel):
+    """Summary counts for all COAs on a SoW."""
+
+    sow_id: int
+    total: int
+    open: int
+    in_progress: int
+    resolved: int
+    waived: int
+    blocks_finalization: bool
+
+
+# ── Content Templates ────────────────────────────────────────────────────────
+
+
+class ContentTemplateResponse(BaseModel):
+    """A SoW content template with pre-populated bullet-point content."""
+
+    id: int
+    name: str
+    methodology: str
+    description: str | None = None
+    template_data: dict[str, Any]
+    is_system: bool
+    created_at: datetime
+
+
+# ── Attachments ──────────────────────────────────────────────────────────────
+
+
+class AttachmentResponse(BaseModel):
+    """Metadata for a file attached to a SoW."""
+
+    id: int
+    sow_id: int
+    filename: str
+    original_name: str
+    file_size: int | None = None
+    mime_type: str | None = None
+    document_type: str
+    stage_key: str | None = None
+    description: str | None = None
+    uploaded_by: int | None = None
+    uploaded_at: datetime
+
+
+class DocumentRequirement(BaseModel):
+    """A single document requirement for a workflow stage."""
+
+    document_type: str
+    is_required: bool
+    description: str | None = None
+    fulfilled: bool = False
+
+
+class StageRequirementsResponse(BaseModel):
+    """Document requirements + fulfillment status for a SoW stage."""
+
+    sow_id: int
+    stage_key: str
+    requirements: list[DocumentRequirement]
+    all_required_met: bool
+
+
+# ── AI / GraphRAG ────────────────────────────────────────────────────────────
+
+
+class AIContextRequest(BaseModel):
+    query: str
+    sow_id: str | None = None
+    top_k: int = 5
+    hop_depth: int = 2
+
+
+class AIAssistRequest(BaseModel):
+    query: str
+    sow_id: str | None = None
+    history: list[dict] | None = None
+    top_k: int = 5
+    hop_depth: int = 2
+
+
+class AIAssistResponse(BaseModel):
+    answer: str
+    context: dict
+    retrieved: dict
+
+
+class AIContextResponse(BaseModel):
+    query: str
+    sow_id: str | None = None
+    methodology: str | None = None
+    deal_value: float | None = None
+    sections: list[dict]
+    rules: list[dict]
+    banned_phrases: list[dict]
+    risks: list[dict]
+    deliverables: list[dict]
+    similar_sections: list[dict]
+    empty: bool
+
+
+class AIValidationResponse(BaseModel):
+    sow_id: str
+    overall_score: int
+    summary: str
+    violations: list[dict]
+    checklist: list[dict]
+    approval: dict
+    suggestions: list[dict]
+
+
+class AIRisksResponse(BaseModel):
+    risks: list[dict]
+    triggered: list[dict]
+
+
+class AISimilarSoW(BaseModel):
+    sow_id: str
+    title: str
+    similarity: float
+    methodology: str | None = None
+    overlap_areas: list[str] = []
+
+
+# ── Search ───────────────────────────────────────────────────────────────────
+
+
+class SearchResult(BaseModel):
+    id: int
+    title: str
+    customer_name: str | None = None
+    methodology: str | None = None
+    status: str
+    stage_display_name: str | None = None
+    snippet: str | None = None  # highlighted matching text
+    rank: float  # ts_rank score
+    updated_at: datetime
+
+
+# ── Audit ────────────────────────────────────────────────────────────────────
+
+
+class AuditEntry(BaseModel):
+    id: int
+    sow_id: int
+    event_type: str  # status_change, review_submit, coa_update, attachment_upload, etc.
+    actor_name: str | None = None
+    actor_email: str | None = None
+    description: str
+    metadata: dict | None = None
+    timestamp: datetime

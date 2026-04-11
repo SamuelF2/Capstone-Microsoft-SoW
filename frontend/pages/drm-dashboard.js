@@ -11,6 +11,8 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { formatDate, formatDeal } from '../lib/format';
+import { roleLabel } from '../lib/workflowStages';
 
 const ESAP_STYLES = {
   'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)', label: 'TYPE-1' },
@@ -39,38 +41,13 @@ const STATUS_STYLES = {
   },
 };
 
-const ROLE_DISPLAY = {
-  cpl: 'Customer Practice Lead',
-  cdp: 'Customer Delivery Partner',
-  'delivery-manager': 'Delivery Manager',
-};
-
-function formatDeal(v) {
-  if (v == null) return null;
-  const n = parseFloat(v);
-  return isNaN(n) ? null : '$' + n.toLocaleString('en-US');
-}
-
-function formatDate(iso) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
 // ── DRM SoW Card ──────────────────────────────────────────────────────────────
 
 function DrmCard({ assignment }) {
   const router = useRouter();
   const esapStyle = ESAP_STYLES[assignment.esap_level] || {};
   const statusStyle = STATUS_STYLES[assignment.status] || STATUS_STYLES.pending;
-  const deal = formatDeal(assignment.deal_value);
+  const deal = formatDeal(assignment.deal_value, null);
 
   return (
     <div
@@ -175,7 +152,7 @@ function DrmCard({ assignment }) {
           )}
           <span className="text-sm text-secondary">
             <strong style={{ color: 'var(--color-text-primary)' }}>Your Role:</strong>{' '}
-            {ROLE_DISPLAY[assignment.reviewer_role] || assignment.reviewer_role}
+            {roleLabel(assignment.reviewer_role)}
           </span>
           {assignment.methodology && (
             <span className="text-sm text-secondary">
@@ -228,22 +205,27 @@ export default function DrmDashboard() {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) return undefined;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setLoading(true);
     setError(null);
-    authFetch('/api/review/assigned?stage=drm-approval')
+    authFetch('/api/review/assigned?stage=drm-approval', { signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load DRM assignments (${res.status})`);
         return res.json();
       })
       .then((data) => {
+        if (signal.aborted) return;
         setAssignments(data);
         setLoading(false);
       })
       .catch((err) => {
+        if (err?.name === 'AbortError' || signal.aborted) return;
         setError(err.message);
         setLoading(false);
       });
+    return () => ctrl.abort();
   }, [user, authFetch]);
 
   const filtered = useMemo(() => {

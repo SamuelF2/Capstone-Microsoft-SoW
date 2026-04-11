@@ -10,7 +10,7 @@
  * Below both columns: Review Status footer showing all reviewer progress.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -18,422 +18,15 @@ import { useAuth } from '../../lib/auth';
 import Spinner from '../../components/Spinner';
 import ReviewChecklist from '../../components/ReviewChecklist';
 import AISuggestionsPanel from '../../components/AISuggestionsPanel';
-import ReviewStatusTracker from '../../components/ReviewStatusTracker';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDeal(v) {
-  if (v == null) return '—';
-  const n = parseFloat(v);
-  return isNaN(n) ? '—' : '$' + n.toLocaleString('en-US');
-}
-
-function esapBadgeStyle(level) {
-  if (!level) return {};
-  const map = {
-    'type-1': { bg: 'rgba(239,68,68,0.1)', color: 'var(--color-error)' },
-    'type-2': { bg: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)' },
-    'type-3': { bg: 'rgba(74,222,128,0.1)', color: 'var(--color-success)' },
-  };
-  return map[level] || {};
-}
-
-// ── SoW content read-only renderer ───────────────────────────────────────────
-
-const CONTENT_LABELS = {
-  executiveSummary: 'Executive Summary',
-  projectScope: 'Project Scope',
-  scope: 'Project Scope',
-  deliverables: 'Deliverables',
-  assumptions: 'Assumptions',
-  risks: 'Risks',
-  pricing: 'Pricing',
-  teamStructure: 'Team Structure',
-  supportTransition: 'Support & Transition',
-  agileApproach: 'Agile Approach',
-  productBacklog: 'Product Backlog',
-  sureStepMethodology: 'Sure Step Methodology',
-  phasesDeliverables: 'Phases & Deliverables',
-  dataMigration: 'Data Migration',
-  testingStrategy: 'Testing Strategy',
-  supportHypercare: 'Support & Hypercare',
-  waterfallApproach: 'Waterfall Approach',
-  phasesMilestones: 'Phases & Milestones',
-  cloudAdoptionScope: 'Cloud Adoption Scope',
-  migrationStrategy: 'Migration Strategy',
-  workloadAssessment: 'Workload Assessment',
-  securityCompliance: 'Security & Compliance',
-  supportOperations: 'Support & Operations',
-};
-
-const CONTENT_TAB_GROUPS = [
-  { label: 'Overview', keys: ['executiveSummary'] },
-  { label: 'Scope', keys: ['projectScope', 'scope', 'cloudAdoptionScope'] },
-  {
-    label: 'Approach',
-    keys: [
-      'agileApproach',
-      'productBacklog',
-      'sureStepMethodology',
-      'waterfallApproach',
-      'migrationStrategy',
-      'workloadAssessment',
-    ],
-  },
-  {
-    label: 'Deliverables',
-    keys: [
-      'deliverables',
-      'phasesDeliverables',
-      'phasesMilestones',
-      'dataMigration',
-      'testingStrategy',
-    ],
-  },
-  {
-    label: 'Team & Support',
-    keys: [
-      'teamStructure',
-      'supportTransition',
-      'supportHypercare',
-      'supportOperations',
-      'securityCompliance',
-    ],
-  },
-  { label: 'Pricing', keys: ['pricing', 'assumptions', 'risks'] },
-];
-
-function renderValue(val, depth = 0) {
-  if (val == null) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
-  if (typeof val === 'string') {
-    return (
-      <p
-        style={{
-          margin: '0 0 8px',
-          lineHeight: 'var(--line-height-relaxed)',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
-        {val}
-      </p>
-    );
-  }
-  if (Array.isArray(val)) {
-    if (val.length === 0) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
-    return (
-      <ul style={{ margin: '0 0 8px', paddingLeft: '20px' }}>
-        {val.map((item, i) => (
-          <li key={i} style={{ marginBottom: '4px' }}>
-            {typeof item === 'object' ? renderValue(item, depth + 1) : String(item)}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-  if (typeof val === 'object') {
-    return (
-      <div style={{ paddingLeft: depth > 0 ? '12px' : '0' }}>
-        {Object.entries(val).map(([k, v]) => (
-          <div key={k} style={{ marginBottom: '8px' }}>
-            <span
-              style={{
-                fontSize: 'var(--font-size-xs)',
-                color: 'var(--color-text-tertiary)',
-                textTransform: 'capitalize',
-                display: 'block',
-                marginBottom: '2px',
-              }}
-            >
-              {k.replace(/([A-Z])/g, ' $1').trim()}
-            </span>
-            {renderValue(v, depth + 1)}
-          </div>
-        ))}
-      </div>
-    );
-  }
-  return <span>{String(val)}</span>;
-}
-
-function SoWContentPanel({ sow, activeTab, onTabChange }) {
-  const content = sow?.content || {};
-
-  // Filter groups to only those with content
-  const tabs = CONTENT_TAB_GROUPS.filter((g) => g.keys.some((k) => content[k] != null));
-  if (tabs.length === 0) {
-    return (
-      <div style={{ padding: 'var(--spacing-xl)', color: 'var(--color-text-tertiary)' }}>
-        No structured content available for this SoW.
-      </div>
-    );
-  }
-
-  const currentTab = tabs.find((t) => t.label === activeTab) || tabs[0];
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Tab bar */}
-      <div
-        style={{
-          display: 'flex',
-          gap: '2px',
-          borderBottom: '1px solid var(--color-border-default)',
-          overflowX: 'auto',
-          flexShrink: 0,
-          paddingBottom: '-1px',
-        }}
-      >
-        {tabs.map((tab) => (
-          <button
-            key={tab.label}
-            onClick={() => onTabChange(tab.label)}
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: '8px 14px',
-              fontSize: 'var(--font-size-sm)',
-              fontWeight: currentTab.label === tab.label ? 'var(--font-weight-semibold)' : 'normal',
-              color:
-                currentTab.label === tab.label
-                  ? 'var(--color-accent-purple, #7c3aed)'
-                  : 'var(--color-text-secondary)',
-              borderBottom:
-                currentTab.label === tab.label
-                  ? '2px solid var(--color-accent-purple, #7c3aed)'
-                  : '2px solid transparent',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              marginBottom: '-1px',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--spacing-xl)' }}>
-        {currentTab.keys
-          .filter((k) => content[k] != null)
-          .map((k) => (
-            <div key={k} style={{ marginBottom: 'var(--spacing-xl)' }}>
-              <h4
-                style={{
-                  margin: '0 0 var(--spacing-sm)',
-                  fontSize: 'var(--font-size-sm)',
-                  fontWeight: 'var(--font-weight-semibold)',
-                  color: 'var(--color-text-primary)',
-                  borderBottom: '1px solid var(--color-border-default)',
-                  paddingBottom: '6px',
-                }}
-              >
-                {CONTENT_LABELS[k] || k}
-              </h4>
-              <div
-                style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-secondary)' }}
-              >
-                {renderValue(content[k])}
-              </div>
-            </div>
-          ))}
-        {currentTab.keys.filter((k) => content[k] != null).length === 0 && (
-          <p style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}>
-            No content for this section yet.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Decision modal ────────────────────────────────────────────────────────────
-
-function DecisionModal({ type, onClose, onSubmit, submitting }) {
-  const [comments, setComments] = useState('');
-  const [conditions, setConditions] = useState(['']);
-
-  const isReject = type === 'rejected';
-  const isConditional = type === 'approved-with-conditions';
-
-  function addCondition() {
-    setConditions((c) => [...c, '']);
-  }
-  function updateCondition(i, val) {
-    setConditions((c) => c.map((x, j) => (j === i ? val : x)));
-  }
-  function removeCondition(i) {
-    setConditions((c) => c.filter((_, j) => j !== i));
-  }
-
-  function handleSubmit() {
-    if (isReject && !comments.trim()) return;
-    if (isConditional && conditions.every((c) => !c.trim())) return;
-    onSubmit({
-      comments: comments.trim() || null,
-      conditions: isConditional ? conditions.filter((c) => c.trim()) : null,
-    });
-  }
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-        padding: 'var(--spacing-xl)',
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          backgroundColor: 'var(--color-bg-primary)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 'var(--spacing-2xl)',
-          maxWidth: '480px',
-          width: '100%',
-          boxShadow: 'var(--shadow-xl)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 var(--spacing-md)', fontSize: 'var(--font-size-lg)' }}>
-          {isReject ? 'Reject SoW' : isConditional ? 'Approve with Conditions' : 'Confirm Approval'}
-        </h3>
-
-        <div style={{ marginBottom: 'var(--spacing-md)' }}>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 'var(--font-size-sm)',
-              fontWeight: 'var(--font-weight-semibold)',
-              marginBottom: 'var(--spacing-xs)',
-            }}
-          >
-            {isReject ? 'Reason for rejection *' : 'Comments'}
-          </label>
-          <textarea
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            placeholder={
-              isReject
-                ? 'Describe the issues that need to be addressed...'
-                : 'Optional comments for the author...'
-            }
-            rows={4}
-            style={{
-              width: '100%',
-              padding: 'var(--spacing-sm)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border-default)',
-              backgroundColor: 'var(--color-bg-secondary)',
-              color: 'var(--color-text-primary)',
-              fontSize: 'var(--font-size-sm)',
-              fontFamily: 'inherit',
-              resize: 'vertical',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        {isConditional && (
-          <div style={{ marginBottom: 'var(--spacing-md)' }}>
-            <label
-              style={{
-                display: 'block',
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: 'var(--font-weight-semibold)',
-                marginBottom: 'var(--spacing-xs)',
-              }}
-            >
-              Conditions *
-            </label>
-            {conditions.map((cond, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  gap: 'var(--spacing-xs)',
-                  marginBottom: 'var(--spacing-xs)',
-                }}
-              >
-                <input
-                  type="text"
-                  value={cond}
-                  onChange={(e) => updateCondition(i, e.target.value)}
-                  placeholder={`Condition ${i + 1}`}
-                  style={{
-                    flex: 1,
-                    padding: 'var(--spacing-xs) var(--spacing-sm)',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--color-border-default)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    color: 'var(--color-text-primary)',
-                    fontSize: 'var(--font-size-sm)',
-                    fontFamily: 'inherit',
-                  }}
-                />
-                {conditions.length > 1 && (
-                  <button
-                    onClick={() => removeCondition(i)}
-                    style={{
-                      background: 'none',
-                      border: '1px solid var(--color-border-default)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '4px 8px',
-                      cursor: 'pointer',
-                      color: 'var(--color-error)',
-                      fontSize: 'var(--font-size-xs)',
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
-            <button
-              onClick={addCondition}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '4px 0',
-                cursor: 'pointer',
-                color: 'var(--color-accent-purple, #7c3aed)',
-                fontSize: 'var(--font-size-xs)',
-              }}
-            >
-              + Add condition
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
-          <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            className={`btn btn-sm ${isReject ? 'btn-danger' : 'btn-primary'}`}
-            style={
-              isReject
-                ? { backgroundColor: 'var(--color-error)', color: '#fff', border: 'none' }
-                : {}
-            }
-            onClick={handleSubmit}
-            disabled={
-              submitting ||
-              (isReject && !comments.trim()) ||
-              (isConditional && conditions.every((c) => !c.trim()))
-            }
-          >
-            {submitting ? 'Submitting...' : isReject ? 'Reject' : 'Confirm'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+import WorkflowProgress from '../../components/WorkflowProgress';
+import COATracker from '../../components/COATracker';
+import AttachmentManager from '../../components/AttachmentManager';
+import ActivityLog from '../../components/ActivityLog';
+import DecisionModal from '../../components/review/DecisionModal';
+import SoWContentPanel from '../../components/sow/SoWContentPanel';
+import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
+import { formatDeal, esapBadgeStyle } from '../../lib/format';
+import { STAGE_KEYS } from '../../lib/workflowStages';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -442,22 +35,18 @@ export default function InternalReview() {
   const { id } = router.query;
   const { user, authFetch } = useAuth();
 
-  const [sow, setSow] = useState(null);
-  const [checklist, setChecklist] = useState(null);
+  // User-mutated state — re-seeded from the loaded payload on every refresh.
   const [responses, setResponses] = useState([]);
-  const [reviewStatus, setReviewStatus] = useState(null);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [comments, setComments] = useState('');
   const [contentTab, setContentTab] = useState('Overview');
 
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [runningAI, setRunningAI] = useState(false);
   const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions'
   const [toast, setToast] = useState(null);
-  const [error, setError] = useState(null);
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
@@ -465,52 +54,48 @@ export default function InternalReview() {
   }, []);
 
   // ── Load SoW, checklist, review status ───────────────────────────────────
+  const load = useCallback(
+    async (signal) => {
+      const [sowRes, checkRes, statusRes] = await Promise.all([
+        authFetch(`/api/sow/${id}`, { signal }),
+        authFetch(`/api/review/${id}/checklist`, { signal }),
+        authFetch(`/api/review/${id}/status`, { signal }),
+      ]);
 
-  useEffect(() => {
-    if (!id || !user) return;
+      if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
+      // Checklist 403 is fine — some roles don't have one for this stage.
+      if (!checkRes.ok && checkRes.status !== 403)
+        throw new Error(`Checklist load failed (${checkRes.status})`);
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [sowRes, checkRes, statusRes] = await Promise.all([
-          authFetch(`/api/sow/${id}`),
-          authFetch(`/api/review/${id}/checklist`),
-          authFetch(`/api/review/${id}/status`),
-        ]);
-
-        if (!sowRes.ok) throw new Error(`SoW load failed (${sowRes.status})`);
-        if (!checkRes.ok && checkRes.status !== 403)
-          throw new Error(`Checklist load failed (${checkRes.status})`);
-
-        const sowData = await sowRes.json();
-        setSow(sowData);
-
-        if (checkRes.ok) {
-          const checkData = await checkRes.json();
-          setChecklist(checkData);
-          setResponses(checkData.saved_responses || []);
-        }
-
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          setReviewStatus(statusData);
-        }
-
-        // Load AI analysis if linked
-        if (sowData.ai_suggestion_id) {
-          const aiRes = await authFetch(`/api/sow/${id}/ai-analyze`);
-          if (aiRes.ok) setAiAnalysis(await aiRes.json());
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      const sowData = await sowRes.json();
+      let checkData = null;
+      if (checkRes.ok) {
+        checkData = await checkRes.json();
+        setResponses(checkData.saved_responses || []);
       }
-    }
+      const statusData = statusRes.ok ? await statusRes.json() : null;
 
-    load();
-  }, [id, user, authFetch]);
+      // Load AI analysis if linked — fire it from inside the loader so the
+      // hook tracks it under the same loading flag.
+      if (sowData.ai_suggestion_id) {
+        const aiRes = await authFetch(`/api/sow/${id}/ai-analyze`, { signal });
+        if (aiRes.ok) setAiAnalysis(await aiRes.json());
+      }
+
+      return { sow: sowData, checklist: checkData, reviewStatus: statusData };
+    },
+    [id, authFetch]
+  );
+
+  const { data, loading, error, refresh } = useAutoRefreshFetch({
+    load,
+    enabled: Boolean(id && user),
+    deps: [id, user],
+  });
+
+  const sow = data?.sow ?? null;
+  const checklist = data?.checklist ?? null;
+  const reviewStatus = data?.reviewStatus ?? null;
 
   // ── Save progress ─────────────────────────────────────────────────────────
 
@@ -554,9 +139,9 @@ export default function InternalReview() {
       showToast(
         decision === 'rejected' ? 'SoW returned to draft' : 'Review submitted successfully'
       );
-      // Reload review status
-      const statusRes = await authFetch(`/api/review/${id}/status`);
-      if (statusRes.ok) setReviewStatus(await statusRes.json());
+      // Reload everything (sow, checklist, status) so the UI reflects the
+      // server's view — the assignment may have flipped to "completed".
+      await refresh();
       if (decision === 'rejected') {
         setTimeout(() => router.push('/my-reviews'), 1500);
       }
@@ -610,7 +195,7 @@ export default function InternalReview() {
   );
   const canApprove = requiredItems.length === 0 || checkedRequired.length === requiredItems.length;
   const isMyReviewDone = reviewStatus?.assignments?.some(
-    (a) => a.status === 'completed' && a.stage === 'internal-review'
+    (a) => a.status === 'completed' && a.stage === STAGE_KEYS.ASSIGNMENT_INTERNAL_REVIEW
   );
 
   // ── Loading / error states ────────────────────────────────────────────────
@@ -784,8 +369,9 @@ export default function InternalReview() {
               padding: 'var(--spacing-md) var(--spacing-xl)',
             }}
           >
-            <ReviewStatusTracker
-              currentStatus={sow?.status || 'internal_review'}
+            <WorkflowProgress
+              sowId={sow?.id}
+              currentStage={sow?.status || STAGE_KEYS.INTERNAL_REVIEW}
               reviewAssignments={reviewStatus?.assignments || []}
             />
           </div>
@@ -1058,7 +644,7 @@ export default function InternalReview() {
 
                 <div style={{ display: 'flex', gap: 'var(--spacing-md)', flexWrap: 'wrap' }}>
                   {reviewStatus.assignments
-                    .filter((a) => a.stage === 'internal-review')
+                    .filter((a) => a.stage === STAGE_KEYS.ASSIGNMENT_INTERNAL_REVIEW)
                     .map((a, i) => {
                       const decisionColor =
                         a.decision === 'approved' || a.decision === 'approved-with-conditions'
@@ -1116,6 +702,62 @@ export default function InternalReview() {
                       Outstanding: {reviewStatus.outstanding_requirements.join(' · ')}
                     </div>
                   )}
+              </div>
+            )}
+
+            {/* Attachments */}
+            {sow && (
+              <div style={{ marginTop: 'var(--spacing-xl)', padding: '0 var(--spacing-xl)' }}>
+                <AttachmentManager
+                  sowId={sow.id}
+                  stageKey={STAGE_KEYS.INTERNAL_REVIEW}
+                  readOnly={false}
+                  showRequirements={true}
+                  authFetch={authFetch}
+                />
+              </div>
+            )}
+
+            {/* Conditions of Approval */}
+            {sow && (
+              <div
+                style={{
+                  marginTop: 'var(--spacing-xl)',
+                  padding: '0 var(--spacing-xl) var(--spacing-xl)',
+                }}
+              >
+                <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 0 }}>
+                  Conditions of Approval
+                </h3>
+                <COATracker
+                  sowId={sow.id}
+                  authFetch={authFetch}
+                  readOnly={false}
+                  onStatusChange={() => {}}
+                />
+              </div>
+            )}
+
+            {/* Activity Log */}
+            {sow && (
+              <div
+                style={{
+                  marginTop: 'var(--spacing-xl)',
+                  padding: '0 var(--spacing-xl) var(--spacing-xl)',
+                }}
+              >
+                <div className="card">
+                  <h3
+                    style={{
+                      fontSize: 'var(--font-size-base)',
+                      fontWeight: 600,
+                      marginBottom: 'var(--spacing-md)',
+                    }}
+                  >
+                    Activity Log
+                  </h3>
+                  <ActivityLog sowId={sow.id} />
+                </div>
               </div>
             )}
           </div>

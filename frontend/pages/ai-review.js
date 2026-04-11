@@ -3,6 +3,16 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { useAuth } from '../lib/auth';
+import { STAGE_KEYS } from '../lib/workflowStages';
+import {
+  ViolationsSection,
+  RisksSection,
+  ApprovalSection,
+  ChecklistSection,
+  SuggestionsSection,
+  SectionAnalysisSection,
+  SimilarSowsSection,
+} from '../components/ai-review';
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
 
@@ -12,170 +22,6 @@ const ALLOWED_MIMES = new Set([
 ]);
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.docx'];
-
-// ── Mock AI recommendations (replace with API call when ready) ──────────────
-
-const MOCK_RECOMMENDATIONS = {
-  violations: [
-    {
-      rule: 'Missing SLA terms',
-      severity: 'high',
-      message:
-        'No Service Level Agreement defined in the scope section. MCEM requires explicit SLA commitments for all delivery engagements.',
-    },
-    {
-      rule: 'Unbounded scope language',
-      severity: 'high',
-      message:
-        'Phrase "best effort" detected in section 3.2. SDMPlus prohibits vague commitment language — replace with measurable deliverables.',
-    },
-    {
-      rule: 'Missing support transition plan',
-      severity: 'medium',
-      message:
-        'No support handoff or hypercare period defined. Required for all methodologies per MCEM guidelines.',
-    },
-    {
-      rule: 'Incomplete risk register',
-      severity: 'medium',
-      message:
-        'Two identified risks lack mitigation strategies. All risks must include severity, probability, and mitigation plan.',
-    },
-    {
-      rule: 'Customer responsibilities unclear',
-      severity: 'low',
-      message:
-        'Customer resource commitments listed but no RACI matrix provided. Recommended for engagements over $500K.',
-    },
-  ],
-  risks: [
-    {
-      category: 'Staffing',
-      level: 'high',
-      description:
-        'No backup resource identified for lead Solution Architect role. Single point of failure on critical path.',
-    },
-    {
-      category: 'Timeline',
-      level: 'medium',
-      description:
-        'Sprint 4 delivery overlaps with customer holiday freeze (Dec 20 – Jan 5). Milestone dates may need adjustment.',
-    },
-    {
-      category: 'Budget',
-      level: 'low',
-      description:
-        'Travel & expenses estimated at 3% of engagement value, which is below the typical 5-8% range for on-site delivery.',
-    },
-  ],
-  approval: {
-    level: 'Yellow',
-    esapType: 'Type-2',
-    reason: 'Deal value $2.4M exceeds $1M threshold with estimated margin at 14% (below 15%).',
-    chain: [
-      'Solution Architect',
-      'SQA Reviewer',
-      'Customer Practice Lead',
-      'Customer Delivery Partner',
-    ],
-  },
-  checklist: [
-    { item: 'Verify pricing against approved rate card', required: true, checked: false },
-    { item: 'Confirm scope aligns with selected methodology', required: true, checked: false },
-    {
-      item: 'Validate deliverable acceptance criteria are measurable',
-      required: true,
-      checked: false,
-    },
-    {
-      item: 'Review risk register for completeness (severity + mitigation)',
-      required: true,
-      checked: false,
-    },
-    {
-      item: 'Ensure customer responsibilities are explicitly stated',
-      required: true,
-      checked: false,
-    },
-    { item: 'Check change management process is documented', required: false, checked: false },
-    { item: 'Verify billing milestones match delivery schedule', required: false, checked: false },
-    {
-      item: 'Confirm support transition plan covers hypercare period',
-      required: true,
-      checked: false,
-    },
-  ],
-  suggestions: [
-    {
-      section: 'Scope',
-      line: '3.2',
-      type: 'rewrite',
-      original: 'We will provide best effort support during the transition period.',
-      suggested:
-        'Microsoft will provide Severity-1 incident response within 4 business hours during the 30-day hypercare period.',
-      reason:
-        'Replace vague "best effort" commitment with measurable SLA terms per MCEM guidelines.',
-    },
-    {
-      section: 'Deliverables',
-      line: '4.1',
-      type: 'add',
-      original: 'Architecture design document.',
-      suggested:
-        'Architecture design document — includes deployment topology, data flow diagrams, security boundary mapping, and disaster recovery plan. Acceptance criteria: approved by customer technical lead within 5 business days.',
-      reason:
-        'Deliverable lacks acceptance criteria. SDMPlus requires measurable AC for every deliverable.',
-    },
-    {
-      section: 'Assumptions',
-      line: '6.3',
-      type: 'rewrite',
-      original: 'Customer will provide necessary access and resources.',
-      suggested:
-        'Customer will provision VPN access for 5 named Microsoft consultants within 10 business days of SOW signature. Customer will assign a dedicated technical POC available 4 hours/week.',
-      reason: 'Assumption is too vague — specify quantity, timeline, and commitment level.',
-    },
-    {
-      section: 'Risks',
-      line: '7.2',
-      type: 'add',
-      original: 'Data migration may encounter unexpected schema differences.',
-      suggested:
-        'Data migration may encounter unexpected schema differences. Mitigation: allocate 2-week discovery sprint for schema analysis before migration begins. Contingency: 15% buffer on migration timeline. Severity: Medium. Probability: High.',
-      reason:
-        'Risk identified but missing mitigation strategy, severity rating, and probability assessment.',
-    },
-    {
-      section: 'Pricing',
-      line: '8.1',
-      type: 'flag',
-      original: 'Total engagement value: $2,400,000 (Fixed Fee).',
-      suggested:
-        'Total engagement value: $2,400,000 (Fixed Fee). Includes 8% risk reserve ($192,000) per ESAP Type-2 requirements. Change orders billed at T&M rates per approved rate card.',
-      reason:
-        'Fixed-fee engagements over $1M require explicit risk reserve allocation and change order terms.',
-    },
-    {
-      section: 'Support Transition',
-      line: '9.1',
-      type: 'add',
-      original: '',
-      suggested:
-        'Post-delivery support transition plan: 30-day hypercare period with dedicated L2 engineer. Knowledge transfer sessions (3x per week) for customer ops team. Runbook handoff with incident escalation matrix. RACI: Microsoft leads hypercare; customer assumes ownership on Day 31.',
-      reason:
-        'Support transition plan is entirely missing. Required for all delivery methodologies per MCEM.',
-    },
-  ],
-  similarSows: [
-    { title: 'Contoso Cloud Adoption Phase 2', methodology: 'Cloud Adoption', similarity: 0.89 },
-    {
-      title: 'Fabrikam Agile Transformation',
-      methodology: 'Agile Sprint Delivery',
-      similarity: 0.76,
-    },
-    { title: 'Northwind ERP Sure Step Migration', methodology: 'Sure Step 365', similarity: 0.71 },
-  ],
-};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,664 +45,6 @@ function validateFile(file) {
   return '';
 }
 
-const SEVERITY_STYLES = {
-  high: {
-    bg: 'rgba(239,68,68,0.12)',
-    color: '#ef4444',
-    border: 'rgba(239,68,68,0.3)',
-    label: 'High',
-  },
-  medium: {
-    bg: 'rgba(251,191,36,0.12)',
-    color: '#fbbf24',
-    border: 'rgba(251,191,36,0.3)',
-    label: 'Medium',
-  },
-  low: {
-    bg: 'rgba(74,222,128,0.12)',
-    color: '#4ade80',
-    border: 'rgba(74,222,128,0.3)',
-    label: 'Low',
-  },
-};
-
-const APPROVAL_STYLES = {
-  Green: { bg: 'rgba(74,222,128,0.15)', color: '#4ade80', border: 'rgba(74,222,128,0.4)' },
-  Yellow: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: 'rgba(251,191,36,0.4)' },
-  Red: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'rgba(239,68,68,0.4)' },
-};
-
-// ── Recommendation Sub-Components ───────────────────────────────────────────
-
-function SeverityBadge({ severity }) {
-  const s = SEVERITY_STYLES[severity] || SEVERITY_STYLES.low;
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 10px',
-        borderRadius: 'var(--radius-full)',
-        fontSize: 'var(--font-size-xs)',
-        fontWeight: 600,
-        backgroundColor: s.bg,
-        color: s.color,
-        border: `1px solid ${s.border}`,
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-      }}
-    >
-      {s.label}
-    </span>
-  );
-}
-
-function ViolationsSection({ violations }) {
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-error)' }}>&#9888;</span> Compliance Violations
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 'var(--font-size-sm)',
-            color: 'var(--color-text-secondary)',
-            fontWeight: 400,
-          }}
-        >
-          {violations.length} found
-        </span>
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-        {violations.map((v, i) => (
-          <div
-            key={i}
-            style={{
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-bg-tertiary)',
-              borderLeft: `3px solid ${(SEVERITY_STYLES[v.severity] || SEVERITY_STYLES.low).color}`,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 'var(--spacing-xs)',
-              }}
-            >
-              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
-                {v.rule}
-              </span>
-              <SeverityBadge severity={v.severity} />
-            </div>
-            <p
-              className="text-secondary"
-              style={{ fontSize: 'var(--font-size-sm)', lineHeight: 'var(--line-height-relaxed)' }}
-            >
-              {v.message}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RisksSection({ risks }) {
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-warning)' }}>&#9873;</span> Delivery Risks
-      </h3>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: 'var(--spacing-md)',
-        }}
-      >
-        {risks.map((r, i) => {
-          const s = SEVERITY_STYLES[r.level] || SEVERITY_STYLES.low;
-          return (
-            <div
-              key={i}
-              style={{
-                padding: 'var(--spacing-lg)',
-                borderRadius: 'var(--radius-lg)',
-                backgroundColor: 'var(--color-bg-tertiary)',
-                border: `1px solid ${s.border}`,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 'var(--spacing-sm)',
-                }}
-              >
-                <span
-                  className="font-semibold"
-                  style={{ fontSize: 'var(--font-size-sm)', color: s.color }}
-                >
-                  {r.category}
-                </span>
-                <SeverityBadge severity={r.level} />
-              </div>
-              <p
-                className="text-secondary"
-                style={{
-                  fontSize: 'var(--font-size-sm)',
-                  lineHeight: 'var(--line-height-relaxed)',
-                }}
-              >
-                {r.description}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ApprovalSection({ approval }) {
-  const style = APPROVAL_STYLES[approval.level] || APPROVAL_STYLES.Yellow;
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-info)' }}>&#9745;</span> ESAP Approval Status
-      </h3>
-      <div
-        style={{
-          padding: 'var(--spacing-lg)',
-          borderRadius: 'var(--radius-lg)',
-          backgroundColor: style.bg,
-          border: `1px solid ${style.border}`,
-          marginBottom: 'var(--spacing-lg)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--spacing-md)',
-            marginBottom: 'var(--spacing-sm)',
-          }}
-        >
-          <span
-            style={{
-              display: 'inline-block',
-              width: 14,
-              height: 14,
-              borderRadius: '50%',
-              backgroundColor: style.color,
-              boxShadow: `0 0 8px ${style.color}`,
-            }}
-          />
-          <span
-            className="font-semibold"
-            style={{ fontSize: 'var(--font-size-xl)', color: style.color }}
-          >
-            {approval.level} — {approval.esapType}
-          </span>
-        </div>
-        <p
-          className="text-secondary"
-          style={{ fontSize: 'var(--font-size-sm)', lineHeight: 'var(--line-height-relaxed)' }}
-        >
-          {approval.reason}
-        </p>
-      </div>
-      <div>
-        <p className="text-sm font-semibold mb-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          Required Approval Chain
-        </p>
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 'var(--spacing-sm)',
-            alignItems: 'center',
-          }}
-        >
-          {approval.chain.map((person, i) => (
-            <span
-              key={i}
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-            >
-              <span
-                style={{
-                  padding: '4px 14px',
-                  borderRadius: 'var(--radius-full)',
-                  fontSize: 'var(--font-size-sm)',
-                  backgroundColor: 'var(--color-bg-tertiary)',
-                  border: '1px solid var(--color-border-default)',
-                  color: 'var(--color-text-primary)',
-                }}
-              >
-                {person}
-              </span>
-              {i < approval.chain.length - 1 && (
-                <span
-                  style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}
-                >
-                  &#8594;
-                </span>
-              )}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChecklistSection({ checklist }) {
-  const [items, setItems] = useState(checklist);
-  const toggle = (idx) => {
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, checked: !it.checked } : it)));
-  };
-  const done = items.filter((it) => it.checked).length;
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-accent-blue)' }}>&#9776;</span> Review Checklist
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 'var(--font-size-sm)',
-            color: done === items.length ? 'var(--color-success)' : 'var(--color-text-secondary)',
-            fontWeight: 400,
-          }}
-        >
-          {done}/{items.length} complete
-        </span>
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-        {items.map((it, i) => (
-          <label
-            key={i}
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 'var(--spacing-md)',
-              padding: 'var(--spacing-sm) var(--spacing-md)',
-              borderRadius: 'var(--radius-md)',
-              cursor: 'pointer',
-              backgroundColor: it.checked ? 'rgba(74,222,128,0.05)' : 'transparent',
-              transition: 'background-color var(--transition-base)',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={it.checked}
-              onChange={() => toggle(i)}
-              style={{
-                marginTop: 3,
-                accentColor: 'var(--color-accent-blue)',
-                width: 16,
-                height: 16,
-              }}
-            />
-            <span
-              style={{
-                fontSize: 'var(--font-size-sm)',
-                color: it.checked ? 'var(--color-text-tertiary)' : 'var(--color-text-primary)',
-                textDecoration: it.checked ? 'line-through' : 'none',
-                lineHeight: 'var(--line-height-relaxed)',
-              }}
-            >
-              {it.item}
-              {it.required && (
-                <span
-                  style={{
-                    color: 'var(--color-error)',
-                    marginLeft: 4,
-                    fontSize: 'var(--font-size-xs)',
-                  }}
-                >
-                  *
-                </span>
-              )}
-            </span>
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const SUGGESTION_TYPE_STYLES = {
-  rewrite: { label: 'Rewrite', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
-  add: { label: 'Add', color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
-  flag: { label: 'Flag', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
-};
-
-function SuggestionsSection({ suggestions }) {
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-accent-blue)' }}>&#9998;</span> Section Suggestions
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 'var(--font-size-sm)',
-            color: 'var(--color-text-secondary)',
-            fontWeight: 400,
-          }}
-        >
-          {suggestions.length} suggestions
-        </span>
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
-        {suggestions.map((s, i) => {
-          const typeStyle = SUGGESTION_TYPE_STYLES[s.type] || SUGGESTION_TYPE_STYLES.flag;
-          return (
-            <div
-              key={i}
-              style={{
-                padding: 'var(--spacing-lg)',
-                borderRadius: 'var(--radius-lg)',
-                backgroundColor: 'var(--color-bg-tertiary)',
-                border: '1px solid var(--color-border-default)',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 'var(--spacing-md)',
-                }}
-              >
-                <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
-                  {s.section}
-                  <span className="text-tertiary" style={{ fontWeight: 400, marginLeft: 6 }}>
-                    Line {s.line}
-                  </span>
-                </span>
-                <span
-                  style={{
-                    padding: '2px 10px',
-                    borderRadius: 'var(--radius-full)',
-                    fontSize: 'var(--font-size-xs)',
-                    fontWeight: 600,
-                    backgroundColor: typeStyle.bg,
-                    color: typeStyle.color,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {typeStyle.label}
-                </span>
-              </div>
-
-              {s.original && (
-                <div
-                  style={{
-                    padding: 'var(--spacing-sm) var(--spacing-md)',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'rgba(239,68,68,0.06)',
-                    borderLeft: '3px solid rgba(239,68,68,0.4)',
-                    marginBottom: 'var(--spacing-sm)',
-                  }}
-                >
-                  <p
-                    style={{
-                      fontSize: 'var(--font-size-sm)',
-                      color: 'var(--color-text-tertiary)',
-                      textDecoration: 'line-through',
-                      lineHeight: 'var(--line-height-relaxed)',
-                      margin: 0,
-                    }}
-                  >
-                    {s.original}
-                  </p>
-                </div>
-              )}
-
-              <div
-                style={{
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'rgba(74,222,128,0.06)',
-                  borderLeft: '3px solid rgba(74,222,128,0.4)',
-                  marginBottom: 'var(--spacing-sm)',
-                }}
-              >
-                <p
-                  style={{
-                    fontSize: 'var(--font-size-sm)',
-                    color: 'var(--color-success)',
-                    lineHeight: 'var(--line-height-relaxed)',
-                    margin: 0,
-                  }}
-                >
-                  {s.suggested}
-                </p>
-              </div>
-
-              <p
-                className="text-secondary"
-                style={{
-                  fontSize: 'var(--font-size-xs)',
-                  lineHeight: 'var(--line-height-relaxed)',
-                  margin: 0,
-                  fontStyle: 'italic',
-                }}
-              >
-                {s.reason}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function SectionAnalysisSection({ sections, missingKeywords }) {
-  const found = sections.filter((s) => s.found).length;
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-accent-blue)' }}>&#128196;</span> Section Analysis
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 'var(--font-size-sm)',
-            color: found === sections.length ? 'var(--color-success)' : 'var(--color-warning)',
-            fontWeight: 400,
-          }}
-        >
-          {found}/{sections.length} sections found
-        </span>
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-        {sections.map((s, i) => (
-          <div
-            key={i}
-            style={{
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-bg-tertiary)',
-              borderLeft: `3px solid ${s.found ? 'var(--color-success)' : 'var(--color-error)'}`,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: s.issues.length > 0 ? 'var(--spacing-xs)' : 0,
-              }}
-            >
-              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
-                {s.displayName}
-              </span>
-              <span
-                style={{
-                  padding: '2px 10px',
-                  borderRadius: 'var(--radius-full)',
-                  fontSize: 'var(--font-size-xs)',
-                  fontWeight: 600,
-                  backgroundColor: s.found ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)',
-                  color: s.found ? '#4ade80' : '#ef4444',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                }}
-              >
-                {s.found ? 'Found' : 'Missing'}
-              </span>
-            </div>
-            {s.issues.length > 0 && (
-              <div style={{ marginTop: 'var(--spacing-xs)' }}>
-                {s.issues.map((issue, j) => (
-                  <p
-                    key={j}
-                    className="text-secondary"
-                    style={{
-                      fontSize: 'var(--font-size-xs)',
-                      lineHeight: 'var(--line-height-relaxed)',
-                      margin: 0,
-                    }}
-                  >
-                    {issue}
-                  </p>
-                ))}
-              </div>
-            )}
-            {s.found && s.content && (
-              <details style={{ marginTop: 'var(--spacing-sm)' }}>
-                <summary
-                  style={{
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-text-tertiary)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Preview extracted content
-                </summary>
-                <p
-                  style={{
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-text-tertiary)',
-                    lineHeight: 'var(--line-height-relaxed)',
-                    marginTop: 'var(--spacing-xs)',
-                    whiteSpace: 'pre-wrap',
-                    maxHeight: '120px',
-                    overflow: 'auto',
-                  }}
-                >
-                  {s.content}
-                </p>
-              </details>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {missingKeywords && missingKeywords.length > 0 && (
-        <div style={{ marginTop: 'var(--spacing-lg)' }}>
-          <p
-            className="text-sm font-semibold mb-sm"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            Missing Methodology Keywords
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-xs)' }}>
-            {missingKeywords.map((kw, i) => (
-              <span
-                key={i}
-                style={{
-                  padding: '2px 10px',
-                  borderRadius: 'var(--radius-full)',
-                  fontSize: 'var(--font-size-xs)',
-                  backgroundColor: 'rgba(251,191,36,0.12)',
-                  color: '#fbbf24',
-                  border: '1px solid rgba(251,191,36,0.3)',
-                }}
-              >
-                {kw}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SimilarSowsSection({ similarSows }) {
-  return (
-    <div className="card" style={{ marginBottom: 'var(--spacing-lg)' }}>
-      <h3
-        className="text-lg font-semibold mb-lg"
-        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-      >
-        <span style={{ color: 'var(--color-accent-purple-light)' }}>&#128279;</span> Similar SoWs in
-        Knowledge Graph
-      </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-        {similarSows.map((s, i) => (
-          <div
-            key={i}
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-bg-tertiary)',
-            }}
-          >
-            <div>
-              <p className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
-                {s.title}
-              </p>
-              <p className="text-tertiary" style={{ fontSize: 'var(--font-size-xs)' }}>
-                {s.methodology}
-              </p>
-            </div>
-            <div
-              style={{
-                padding: '4px 12px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: 'rgba(139,92,246,0.12)',
-                color: 'var(--color-accent-purple-light)',
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: 600,
-              }}
-            >
-              {Math.round(s.similarity * 100)}% match
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ── Main Page ───────────────────────────────────────────────────────────────
 
 export default function AIReview() {
@@ -874,15 +62,25 @@ export default function AIReview() {
   const [recommendations, setRecommendations] = useState(null);
   const [currentSowId, setCurrentSowId] = useState(null);
   const [isProceeding, setIsProceeding] = useState(false);
+  const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [similarSows, setSimilarSows] = useState([]);
+  // Display name of the stage that follows ai_review in this SoW's workflow
+  // snapshot.  Hardcoding "Internal Review" was wrong for any custom workflow
+  // that renames or replaces that stage — we now look it up live so the
+  // "Proceed" button label matches whatever the workflow actually does.
+  const [nextStageLabel, setNextStageLabel] = useState(null);
 
   // If arriving from draft submit-for-review (Path A), auto-trigger AI analysis
   useEffect(() => {
     if (!sowId || !authFetch) return;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
     setCurrentSowId(sowId);
     setIsAnalyzing(true);
+    setAiUnavailable(false);
     setError(null);
 
-    authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST' })
+    authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST', signal })
       .then(async (res) => {
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
@@ -891,6 +89,7 @@ export default function AIReview() {
         return res.json();
       })
       .then((data) => {
+        if (signal.aborted) return;
         // Map API response to component format
         setRecommendations({
           violations: data.violations || [],
@@ -914,20 +113,58 @@ export default function AIReview() {
             suggested: s.suggested_text || '',
             reason: s.rationale || '',
           })),
-          similarSows: MOCK_RECOMMENDATIONS.similarSows,
           sections: [],
           missingKeywords: [],
         });
         setIsAnalyzing(false);
         setShowResults(true);
+
+        // Fetch similar SoWs from the AI proxy (non-blocking)
+        authFetch(`/api/ai/sow/${sowId}/similar`, { signal })
+          .then((r) => (r.ok ? r.json() : []))
+          .then((data) => {
+            if (!signal.aborted) setSimilarSows(data);
+          })
+          .catch(() => {});
       })
       .catch((err) => {
+        if (err?.name === 'AbortError' || signal.aborted) return;
+        setAiUnavailable(true);
         setError(err.message);
         setIsAnalyzing(false);
       });
+
+    return () => ctrl.abort();
   }, [sowId, authFetch]);
 
-  // Proceed to Internal Review (after AI review)
+  // Resolve the *actual* next stage out of ai_review from this SoW's
+  // workflow snapshot so we can render an accurate button label.  Prefers
+  // an on_approve transition (the "happy path" out of AI review) and falls
+  // back to a default transition.  Silent on failure — the button just
+  // shows a generic "Next Stage" label.
+  useEffect(() => {
+    if (!currentSowId || !authFetch) return;
+    const ctrl = new AbortController();
+    const { signal } = ctrl;
+    authFetch(`/api/workflow/sow/${currentSowId}`, { signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (signal.aborted || !data?.workflow_data) return;
+        const { stages = [], transitions = [] } = data.workflow_data;
+        const out = transitions.filter((t) => t.from_stage === STAGE_KEYS.AI_REVIEW);
+        const picked =
+          out.find((t) => t.condition === 'on_approve') ||
+          out.find((t) => t.condition === 'default') ||
+          out[0];
+        if (!picked) return;
+        const target = stages.find((s) => s.stage_key === picked.to_stage);
+        if (target?.display_name) setNextStageLabel(target.display_name);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [currentSowId, authFetch]);
+
+  // Proceed to next stage (after AI review)
   const handleProceedToReview = async () => {
     const id = currentSowId;
     if (!id) return;
@@ -1063,13 +300,19 @@ export default function AIReview() {
           suggested: s.suggested_text || '',
           reason: s.rationale || '',
         })),
-        similarSows: MOCK_RECOMMENDATIONS.similarSows,
       };
 
       setRecommendations(data);
       setIsAnalyzing(false);
       setShowResults(true);
+
+      // Fetch similar SoWs from the AI proxy (non-blocking)
+      authFetch(`/api/ai/sow/${sow.id}/similar`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((similar) => setSimilarSows(similar))
+        .catch(() => {});
     } catch (err) {
+      setAiUnavailable(true);
       setError(err.message);
       setIsUploading(false);
       setIsAnalyzing(false);
@@ -1103,8 +346,25 @@ export default function AIReview() {
             </p>
           </div>
 
+          {/* AI unavailable banner */}
+          {aiUnavailable && (
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(251,191,36,0.08)',
+                border: '1px solid rgba(251,191,36,0.3)',
+                color: 'var(--color-warning)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
+              AI analysis is temporarily unavailable. You can continue with manual review.
+            </div>
+          )}
+
           {/* Error banner */}
-          {error && (
+          {error && !aiUnavailable && (
             <div
               style={{
                 marginBottom: 'var(--spacing-lg)',
@@ -1349,11 +609,9 @@ export default function AIReview() {
               <SuggestionsSection suggestions={recommendations.suggestions} />
               <RisksSection risks={recommendations.risks} />
               <ChecklistSection checklist={recommendations.checklist} />
-              {recommendations.similarSows && recommendations.similarSows.length > 0 && (
-                <SimilarSowsSection similarSows={recommendations.similarSows} />
-              )}
+              {similarSows.length > 0 && <SimilarSowsSection similarSows={similarSows} />}
 
-              {/* Action Bar — Proceed to Internal Review */}
+              {/* Action Bar — Proceed to next workflow stage */}
               {currentSowId && (
                 <div
                   className="card"
@@ -1391,7 +649,9 @@ export default function AIReview() {
                       disabled={isProceeding}
                       style={{ opacity: isProceeding ? 0.6 : 1 }}
                     >
-                      {isProceeding ? 'Proceeding…' : 'Proceed to Internal Review →'}
+                      {isProceeding
+                        ? 'Proceeding…'
+                        : `Proceed to ${nextStageLabel || 'Next Stage'} →`}
                     </button>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
-function genId() {
-  return `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-}
+import { genId } from '../../lib/ids';
+import SectionHeader from './ui/SectionHeader';
+import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
 
 const ASSUMPTION_LABELS = ['Assumption', 'Technical', 'Customer Responsibility', 'Other'];
 const SEVERITY_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
@@ -14,36 +14,7 @@ const SEVERITY_COLORS = {
 
 function AssumptionCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '300px',
-        maxWidth: '300px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <button
-        onClick={onRemove}
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: '18px',
-          lineHeight: 1,
-          padding: '2px',
-        }}
-      >
-        ×
-      </button>
-
+    <ListCard width="300px" onRemove={onRemove}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Label
@@ -75,42 +46,13 @@ function AssumptionCard({ item, onChange, onRemove }) {
           style={{ fontSize: 'var(--font-size-sm)', resize: 'none' }}
         />
       </div>
-    </div>
+    </ListCard>
   );
 }
 
 function ResponsibilityCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '280px',
-        maxWidth: '280px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <button
-        onClick={onRemove}
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: '18px',
-          lineHeight: 1,
-          padding: '2px',
-        }}
-      >
-        ×
-      </button>
-
+    <ListCard width="280px" onRemove={onRemove}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Responsibility
@@ -124,42 +66,13 @@ function ResponsibilityCard({ item, onChange, onRemove }) {
           style={{ fontSize: 'var(--font-size-sm)', resize: 'none' }}
         />
       </div>
-    </div>
+    </ListCard>
   );
 }
 
 function RiskCard({ item, onChange, onRemove }) {
   return (
-    <div
-      className="card"
-      style={{
-        minWidth: '320px',
-        maxWidth: '320px',
-        flexShrink: 0,
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--spacing-md)',
-      }}
-    >
-      <button
-        onClick={onRemove}
-        style={{
-          position: 'absolute',
-          top: 'var(--spacing-md)',
-          right: 'var(--spacing-md)',
-          background: 'none',
-          border: 'none',
-          color: 'var(--color-text-tertiary)',
-          cursor: 'pointer',
-          fontSize: '18px',
-          lineHeight: 1,
-          padding: '2px',
-        }}
-      >
-        ×
-      </button>
-
+    <ListCard width="320px" onRemove={onRemove}>
       <div className="form-group" style={{ marginBottom: 0 }}>
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Risk Description <span style={{ color: 'var(--color-error)' }}>*</span>
@@ -223,42 +136,7 @@ function RiskCard({ item, onChange, onRemove }) {
           style={{ fontSize: 'var(--font-size-sm)', resize: 'none' }}
         />
       </div>
-    </div>
-  );
-}
-
-function AddCard({ label, onClick }) {
-  return (
-    <div
-      style={{
-        minWidth: '200px',
-        maxWidth: '200px',
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: '2px dashed var(--color-border-default)',
-        borderRadius: 'var(--radius-lg)',
-        cursor: 'pointer',
-        color: 'var(--color-text-tertiary)',
-        transition: 'border-color var(--transition-base), color var(--transition-base)',
-        minHeight: '160px',
-      }}
-      onClick={onClick}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = 'var(--color-accent-blue)';
-        e.currentTarget.style.color = 'var(--color-accent-blue)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = 'var(--color-border-default)';
-        e.currentTarget.style.color = 'var(--color-text-tertiary)';
-      }}
-    >
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '24px', marginBottom: 'var(--spacing-xs)' }}>+</div>
-        <div className="text-sm">{label}</div>
-      </div>
-    </div>
+    </ListCard>
   );
 }
 
@@ -284,14 +162,16 @@ export default function AssumptionsRisks({ data, onChange }) {
 
   // Assumptions
   const addAssumption = () =>
-    update({ assumptions: [...assumptions, { id: genId(), text: '', label: 'Assumption' }] });
+    update({ assumptions: [...assumptions, { id: genId('item'), text: '', label: 'Assumption' }] });
   const removeAssumption = (id) => update({ assumptions: assumptions.filter((i) => i.id !== id) });
   const changeAssumption = (item) =>
     update({ assumptions: assumptions.map((i) => (i.id === item.id ? item : i)) });
 
   // Customer responsibilities
   const addResponsibility = () =>
-    update({ customerResponsibilities: [...customerResponsibilities, { id: genId(), text: '' }] });
+    update({
+      customerResponsibilities: [...customerResponsibilities, { id: genId('item'), text: '' }],
+    });
   const removeResponsibility = (id) =>
     update({ customerResponsibilities: customerResponsibilities.filter((i) => i.id !== id) });
   const changeResponsibility = (item) =>
@@ -304,7 +184,7 @@ export default function AssumptionsRisks({ data, onChange }) {
     update({
       risks: [
         ...risks,
-        { id: genId(), description: '', severity: 'Medium', owner: '', mitigation: '' },
+        { id: genId('item'), description: '', severity: 'Medium', owner: '', mitigation: '' },
       ],
     });
   const removeRisk = (id) => update({ risks: risks.filter((i) => i.id !== id) });
@@ -312,27 +192,17 @@ export default function AssumptionsRisks({ data, onChange }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <h2 className="text-2xl font-semibold mb-sm">Assumptions, Responsibilities & Risks</h2>
-        <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-          Document project assumptions, define customer responsibilities, and identify risks with
-          mitigation strategies.
-        </p>
-      </div>
+      <SectionHeader
+        title="Assumptions, Responsibilities & Risks"
+        description="Document project assumptions, define customer responsibilities, and identify risks with mitigation strategies."
+      />
 
       {/* Assumptions */}
       <SectionDivider
         title="Assumptions"
         description="List all assumptions underpinning the scope, timeline, and cost of this engagement."
       />
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {assumptions.map((item) => (
           <AssumptionCard
             key={item.id}
@@ -341,22 +211,20 @@ export default function AssumptionsRisks({ data, onChange }) {
             onRemove={() => removeAssumption(item.id)}
           />
         ))}
-        <AddCard label="Add Assumption" onClick={addAssumption} />
-      </div>
+        <AddCardButton
+          label="Add Assumption"
+          onClick={addAssumption}
+          width="200px"
+          minHeight="160px"
+        />
+      </HorizontalCardList>
 
       {/* Customer Responsibilities */}
       <SectionDivider
         title="Customer Responsibilities"
         description="Define the actions and obligations the customer must fulfil for the project to succeed."
       />
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {customerResponsibilities.map((item) => (
           <ResponsibilityCard
             key={item.id}
@@ -365,22 +233,20 @@ export default function AssumptionsRisks({ data, onChange }) {
             onRemove={() => removeResponsibility(item.id)}
           />
         ))}
-        <AddCard label="Add Responsibility" onClick={addResponsibility} />
-      </div>
+        <AddCardButton
+          label="Add Responsibility"
+          onClick={addResponsibility}
+          width="200px"
+          minHeight="160px"
+        />
+      </HorizontalCardList>
 
       {/* Risks */}
       <SectionDivider
         title="Risks"
         description="Identify potential risks to project delivery along with their severity and mitigation plans."
       />
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--spacing-lg)',
-          overflowX: 'auto',
-          paddingBottom: 'var(--spacing-md)',
-        }}
-      >
+      <HorizontalCardList>
         {risks.map((item) => (
           <RiskCard
             key={item.id}
@@ -389,8 +255,8 @@ export default function AssumptionsRisks({ data, onChange }) {
             onRemove={() => removeRisk(item.id)}
           />
         ))}
-        <AddCard label="Add Risk" onClick={addRisk} />
-      </div>
+        <AddCardButton label="Add Risk" onClick={addRisk} width="200px" minHeight="160px" />
+      </HorizontalCardList>
     </div>
   );
 }
