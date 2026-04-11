@@ -191,15 +191,25 @@ async def get_valid_send_back_targets(
         if stage:
             sbt = (stage.get("config") or {}).get("send_back_target", "draft")
             if sbt == "previous":
-                ordered = sorted(
-                    [s for s in wd.get("stages", []) if s.get("stage_key") != "rejected"],
-                    key=lambda s: s.get("stage_order", 0),
-                )
-                idx = next(
-                    (i for i, s in enumerate(ordered) if s["stage_key"] == current_stage),
-                    -1,
-                )
-                sbt = ordered[idx - 1]["stage_key"] if idx > 0 else "draft"
+                # Resolve "previous" by stage_order comparison rather than
+                # list-index arithmetic. A naive `ordered[idx - 1]` after
+                # filtering out "rejected" would silently shift indices when
+                # a custom workflow places "rejected" at a middle
+                # stage_order position, sending the SoW back to the wrong
+                # stage. Instead, pick the non-rejected stage with the
+                # greatest stage_order strictly less than the current one.
+                current_order = stage.get("stage_order", 0)
+                candidates = [
+                    s
+                    for s in wd.get("stages", [])
+                    if s.get("stage_key") not in ("rejected", current_stage)
+                    and s.get("stage_order", 0) < current_order
+                ]
+                if candidates:
+                    prev = max(candidates, key=lambda s: s.get("stage_order", 0))
+                    sbt = prev["stage_key"]
+                else:
+                    sbt = "draft"
             target_stage = _find_stage(wd, sbt)
             if target_stage and sbt not in seen:
                 targets.append(

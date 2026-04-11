@@ -571,8 +571,16 @@ async def get_sow_workflow(sow_id: int, current_user: CurrentUser) -> SoWWorkflo
 async def create_sow_workflow(
     sow_id: int, current_user: CurrentUser, template_id: int | None = None
 ) -> SoWWorkflowResponse:
-    """Attach a workflow instance to an existing SoW (e.g. for migration)."""
+    """Attach a workflow instance to an existing SoW (e.g. for migration).
+
+    Authorization: only the SoW author (or a ``system-admin``) may call this,
+    matching the author-only contract of ``PUT /api/workflow/sow/{id}``.
+    Without this guard any authenticated user could attach a workflow to any
+    SoW by guessing its integer ID.
+    """
     async with database.pg_pool.acquire() as conn, conn.transaction():
+        await require_author(conn, sow_id, current_user.id)
+
         sow = await conn.fetchrow("SELECT id, status FROM sow_documents WHERE id = $1", sow_id)
         if not sow:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
