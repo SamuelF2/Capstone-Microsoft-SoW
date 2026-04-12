@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -119,7 +119,24 @@ export default function DraftPage() {
           return;
         }
         const data = await res.json();
-        const content = data.content || {};
+        const content = { ...(data.content || {}) };
+        // The backend stores methodology in its own column, not inside the
+        // content JSONB.  Merge it into the in-memory sowData under the key
+        // the tab/registry + readiness checks already expect, so every tab
+        // resolves to its methodology-specific config instead of falling
+        // through to the "No content configured" placeholder.
+        if (!content.deliveryMethodology && data.methodology) {
+          content.deliveryMethodology = data.methodology;
+        }
+        // Mirror other top-level fields the header row renders directly
+        // from sowData (title, customer, opportunity, deal value, status).
+        if (!content.sowTitle && data.title) content.sowTitle = data.title;
+        if (!content.customerName && data.customer_name) content.customerName = data.customer_name;
+        if (!content.opportunityId && data.opportunity_id)
+          content.opportunityId = data.opportunity_id;
+        if (content.dealValue == null && data.deal_value != null)
+          content.dealValue = data.deal_value;
+        if (!content.status && data.status) content.status = data.status;
         // Snapshot the loaded content so the auto-save effect can detect
         // that the next sowData change came from the server (not the user)
         // and skip the redundant PATCH-back.
@@ -312,10 +329,7 @@ export default function DraftPage() {
   };
 
   const activeTabConfig = tabs[activeTab] || null;
-  const focusedSectionText = useMemo(
-    () => extractFocusedText(sowData, activeTabConfig?.key),
-    [sowData, activeTabConfig?.key]
-  );
+  const focusedSectionText = extractFocusedText(sowData, activeTabConfig?.key);
 
   return (
     <>
