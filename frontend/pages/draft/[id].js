@@ -12,7 +12,8 @@ import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPane
 import ActivityLog from '../../components/ActivityLog';
 import ContextSidebar from '../../components/ai-context/ContextSidebar';
 import AssistChat from '../../components/ai-assist/AssistChat';
-import SectionImprovePanel from '../../components/ai-assist/SectionImprovePanel';
+import SectionImproveModal from '../../components/ai-assist/SectionImproveModal';
+import SidebarConnector from '../../components/ai-assist/SidebarConnector';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
 import {
@@ -191,6 +192,8 @@ export default function DraftPage() {
   //   can cancel it before its own PATCH to prevent a save race.
   const lastServerContentRef = useRef(null);
   const debounceTimerRef = useRef(null);
+  const gridRef = useRef(null);
+  const sidebarRef = useRef(null);
 
   // Load SoW from backend
   useEffect(() => {
@@ -778,7 +781,9 @@ export default function DraftPage() {
 
         {/* Tab content + AI context sidebar */}
         <div
+          ref={gridRef}
           style={{
+            position: 'relative',
             maxWidth: 'var(--container-xl)',
             margin: '0 auto',
             padding: 'var(--spacing-2xl) var(--spacing-xl)',
@@ -788,6 +793,14 @@ export default function DraftPage() {
             alignItems: 'start',
           }}
         >
+          {/* SVG connector lines from subsection to sidebar */}
+          <SidebarConnector
+            containerRef={gridRef}
+            sidebarRef={sidebarRef}
+            focusedSubSection={focusedSubSection}
+            visible={improveBtnHover && !improveModalOpen}
+          />
+
           {/* Section editor — always visible */}
           <div
             style={{ minWidth: 0 }}
@@ -798,11 +811,11 @@ export default function DraftPage() {
             {improveBtnHover && focusedSubSection && (
               <style>{`
                 [data-subsection="${focusedSubSection}"] {
-                  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2),
-                              0 0 16px rgba(59, 130, 246, 0.08);
+                  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35),
+                              0 0 24px rgba(59, 130, 246, 0.12);
                   border-radius: var(--radius-lg);
-                  transition: box-shadow 0.2s ease;
-                  background-color: rgba(59, 130, 246, 0.015);
+                  transition: box-shadow 0.2s ease, background-color 0.2s ease;
+                  background-color: rgba(59, 130, 246, 0.07);
                 }
               `}</style>
             )}
@@ -827,6 +840,7 @@ export default function DraftPage() {
 
           {/* Sidebar column */}
           <div
+            ref={sidebarRef}
             style={{
               position: 'sticky',
               top: 'clamp(var(--spacing-md), calc(50vh - 300px), 30vh)',
@@ -835,52 +849,6 @@ export default function DraftPage() {
               gap: 'var(--spacing-md)',
             }}
           >
-            {/* Floating improve panel — anchored to sidebar, extends left */}
-            {improveModalOpen && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  right: 0,
-                  width: '560px',
-                  zIndex: 100,
-                }}
-              >
-                <SectionImprovePanel
-                  open={improveModalOpen}
-                  onClose={() => setImproveModalOpen(false)}
-                  onAccept={(value) => {
-                    const fieldKey = focusedSubSection
-                      ? getSubSectionFieldKey(focusedSubSection)
-                      : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0];
-                    if (fieldKey) {
-                      if (typeof value === 'object' && value !== null) {
-                        updateSection(fieldKey, hydrateIds(fieldKey, value));
-                      } else {
-                        updateSection(fieldKey, value);
-                      }
-                    }
-                  }}
-                  authFetch={authFetch}
-                  sowId={id}
-                  sectionLabel={
-                    (focusedSubSection && getSubSectionLabel(focusedSubSection)) ||
-                    activeTabConfig?.label
-                  }
-                  originalText={
-                    focusedSubSection
-                      ? extractSubSectionText(focusedSubSection, sowData)
-                      : focusedSectionText
-                  }
-                  sectionKey={
-                    focusedSubSection
-                      ? getSubSectionFieldKey(focusedSubSection)
-                      : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0]
-                  }
-                />
-              </div>
-            )}
-
             <div style={{ maxHeight: '80vh', overflowY: 'auto' }}>
               <ContextSidebar
                 authFetch={authFetch}
@@ -917,6 +885,39 @@ export default function DraftPage() {
             )}
           </div>
         </div>
+
+        {/* Centred "Improve with AI" modal */}
+        <SectionImproveModal
+          open={improveModalOpen}
+          onClose={() => setImproveModalOpen(false)}
+          onAccept={(value) => {
+            const fieldKey = focusedSubSection
+              ? getSubSectionFieldKey(focusedSubSection)
+              : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0];
+            if (fieldKey) {
+              if (typeof value === 'object' && value !== null) {
+                updateSection(fieldKey, hydrateIds(fieldKey, value));
+              } else {
+                updateSection(fieldKey, value);
+              }
+            }
+          }}
+          authFetch={authFetch}
+          sowId={id}
+          sectionLabel={
+            (focusedSubSection && getSubSectionLabel(focusedSubSection)) || activeTabConfig?.label
+          }
+          originalText={
+            focusedSubSection
+              ? extractSubSectionText(focusedSubSection, sowData)
+              : focusedSectionText
+          }
+          sectionKey={
+            focusedSubSection
+              ? getSubSectionFieldKey(focusedSubSection)
+              : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0]
+          }
+        />
 
         {/* Bottom navigation */}
         <div

@@ -1,10 +1,16 @@
 /**
- * SectionImproveModal — per-section "improve with AI" dialog.
+ * SectionImproveModal — centred "Improve with AI" dialog.
  *
- * Sends the current section text plus an optional instruction to
- * /api/ai/assist. When a sectionKey is provided and the ML layer returns
- * structured JSON, the modal renders a formatted preview and passes the
- * structured data (not flat text) through onAccept.
+ * Layout (top → bottom):
+ *   1. Header with title + close button
+ *   2. Intent pills row
+ *   3. Custom-instructions textarea + Generate button (same row)
+ *   4. Side-by-side: Original (left) | Suggested (right, plain text)
+ *   5. Footer: Cancel + Accept
+ *
+ * When a sectionKey with a registered schema is provided, the ML layer
+ * returns structured JSON; the modal renders a formatted preview and
+ * passes structured data through onAccept.
  */
 
 import { useEffect, useState } from 'react';
@@ -70,7 +76,6 @@ export default function SectionImproveModal({
     if (result.ok) {
       if (result.data?.structured) {
         setStructuredSuggestion(result.data.structured);
-        // Also keep a text fallback for the accept-disabled check
         setSuggestion('[structured]');
       } else {
         setSuggestion(result.data?.answer || result.data?.response || '');
@@ -91,55 +96,105 @@ export default function SectionImproveModal({
     onClose?.();
   };
 
-  // Render the suggestion panel content
-  const renderSuggestionContent = () => {
-    if (loading) return 'Generating…';
+  const hasSuggestion = !!(structuredSuggestion || (suggestion && suggestion !== '[structured]'));
+
+  // Render the right-column content
+  const renderSuggested = () => {
+    if (loading) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)' }}>
+          <span
+            style={{
+              display: 'inline-block',
+              width: 14,
+              height: 14,
+              border: '2px solid var(--color-border-default)',
+              borderTopColor: 'var(--color-accent-blue, #2563eb)',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }}
+          />
+          <span>Generating&hellip;</span>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      );
+    }
     if (structuredSuggestion) {
       const rendered = renderStructured(sectionKey, structuredSuggestion);
       if (rendered) return rendered;
-      // Fallback: pretty-print JSON
       return JSON.stringify(structuredSuggestion, null, 2);
     }
     if (suggestion && suggestion !== '[structured]') return suggestion;
-    return 'Click "Generate" to get an AI rewrite.';
+    return (
+      <span style={{ fontStyle: 'italic', opacity: 0.5 }}>
+        Click &ldquo;Generate&rdquo; to see AI suggestions
+      </span>
+    );
   };
-
-  const hasSuggestion = !!(structuredSuggestion || (suggestion && suggestion !== '[structured]'));
 
   return (
     <Modal
       open={open}
       onClose={loading ? null : onClose}
-      maxWidth="720px"
+      maxWidth="920px"
       ariaLabel="Improve section with AI"
     >
-      <h3
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div
         style={{
-          margin: '0 0 var(--spacing-sm)',
-          fontSize: 'var(--font-size-lg)',
-          fontWeight: 'var(--font-weight-semibold)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 'var(--spacing-md)',
         }}
       >
-        Improve with AI
-      </h3>
-      {sectionLabel && (
-        <p
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--spacing-xs)' }}>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: 'var(--font-size-lg)',
+              fontWeight: 'var(--font-weight-semibold)',
+            }}
+          >
+            Improve with AI
+          </h3>
+          {sectionLabel && (
+            <span
+              style={{
+                fontSize: 'var(--font-size-xs)',
+                color: 'var(--color-text-tertiary)',
+              }}
+            >
+              &mdash; {sectionLabel}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={loading}
           style={{
-            margin: '0 0 var(--spacing-md)',
-            fontSize: 'var(--font-size-xs)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
             color: 'var(--color-text-tertiary)',
+            fontSize: '20px',
+            lineHeight: 1,
+            padding: '2px 4px',
           }}
+          title="Close"
         >
-          Section: {sectionLabel}
-        </p>
-      )}
+          &times;
+        </button>
+      </div>
 
+      {/* ── Intent pills ───────────────────────────────────────── */}
       <div
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          gap: 'var(--spacing-xs)',
-          marginBottom: 'var(--spacing-md)',
+          gap: '6px',
+          marginBottom: 'var(--spacing-sm)',
         }}
       >
         {PROMPTS.map((p) => {
@@ -150,7 +205,7 @@ export default function SectionImproveModal({
               type="button"
               onClick={() => setIntent(p.key)}
               style={{
-                padding: '4px 10px',
+                padding: '4px 12px',
                 borderRadius: 'var(--radius-full)',
                 border: `1px solid ${active ? 'var(--color-accent-blue, #2563eb)' : 'var(--color-border-default)'}`,
                 background: active
@@ -159,6 +214,7 @@ export default function SectionImproveModal({
                 color: active ? '#fff' : 'var(--color-text-primary)',
                 fontSize: 'var(--font-size-xs)',
                 cursor: 'pointer',
+                lineHeight: '20px',
               }}
             >
               {p.label}
@@ -167,32 +223,52 @@ export default function SectionImproveModal({
         })}
       </div>
 
-      <textarea
-        value={custom}
-        onChange={(e) => setCustom(e.target.value)}
-        rows={2}
-        placeholder="Optional extra instructions…"
+      {/* ── Instructions + Generate (same row) ─────────────────── */}
+      <div
         style={{
-          width: '100%',
-          padding: 'var(--spacing-sm)',
+          display: 'flex',
+          gap: 'var(--spacing-sm)',
+          alignItems: 'stretch',
           marginBottom: 'var(--spacing-md)',
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--color-border-default)',
-          backgroundColor: 'var(--color-bg-secondary)',
-          color: 'var(--color-text-primary)',
-          fontSize: 'var(--font-size-sm)',
-          fontFamily: 'inherit',
-          resize: 'vertical',
-          boxSizing: 'border-box',
         }}
-      />
+      >
+        <textarea
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          rows={1}
+          placeholder="Optional extra instructions\u2026"
+          style={{
+            flex: 1,
+            padding: 'var(--spacing-xs) var(--spacing-sm)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border-default)',
+            backgroundColor: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-primary)',
+            fontSize: 'var(--font-size-sm)',
+            fontFamily: 'inherit',
+            resize: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={run}
+          disabled={loading || !originalText?.trim()}
+          style={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
+        >
+          {loading ? 'Generating\u2026' : hasSuggestion ? 'Regenerate' : 'Generate'}
+        </button>
+      </div>
 
+      {/* ── Error banner ───────────────────────────────────────── */}
       {error && (
         <div style={{ marginBottom: 'var(--spacing-md)' }}>
           <AIUnavailableBanner error={error} context="assist" onRetry={run} />
         </div>
       )}
 
+      {/* ── Side-by-side: Original | Suggested ─────────────────── */}
       <div
         style={{
           display: 'grid',
@@ -201,10 +277,11 @@ export default function SectionImproveModal({
           marginBottom: 'var(--spacing-lg)',
         }}
       >
+        {/* Original */}
         <div>
           <p
             style={{
-              margin: '0 0 4px',
+              margin: '0 0 6px',
               fontSize: '11px',
               fontWeight: 'var(--font-weight-semibold)',
               color: 'var(--color-text-tertiary)',
@@ -220,10 +297,10 @@ export default function SectionImproveModal({
               borderRadius: 'var(--radius-md)',
               border: '1px solid var(--color-border-default)',
               backgroundColor: 'var(--color-bg-secondary)',
-              fontSize: 'var(--font-size-xs)',
+              fontSize: 'var(--font-size-sm)',
               color: 'var(--color-text-primary)',
               whiteSpace: 'pre-wrap',
-              maxHeight: 240,
+              maxHeight: 340,
               overflowY: 'auto',
               lineHeight: 'var(--line-height-relaxed)',
             }}
@@ -231,10 +308,12 @@ export default function SectionImproveModal({
             {originalText || '(empty)'}
           </div>
         </div>
+
+        {/* Suggested */}
         <div>
           <p
             style={{
-              margin: '0 0 4px',
+              margin: '0 0 6px',
               fontSize: '11px',
               fontWeight: 'var(--font-weight-semibold)',
               color: 'var(--color-text-tertiary)',
@@ -250,50 +329,39 @@ export default function SectionImproveModal({
               borderRadius: 'var(--radius-md)',
               border: '1px solid var(--color-border-default)',
               backgroundColor: 'var(--color-bg-tertiary)',
-              fontSize: 'var(--font-size-xs)',
+              fontSize: 'var(--font-size-sm)',
               color: 'var(--color-text-primary)',
               whiteSpace: structuredSuggestion ? 'normal' : 'pre-wrap',
-              maxHeight: 240,
+              maxHeight: 340,
               overflowY: 'auto',
               lineHeight: 'var(--line-height-relaxed)',
-              fontStyle: hasSuggestion ? 'normal' : 'italic',
-              opacity: hasSuggestion ? 1 : 0.7,
             }}
           >
-            {renderSuggestionContent()}
+            {renderSuggested()}
           </div>
         </div>
       </div>
 
+      {/* ── Footer: Cancel + Accept ────────────────────────────── */}
       <div
         style={{
           display: 'flex',
-          justifyContent: 'space-between',
+          justifyContent: 'flex-end',
           alignItems: 'center',
           gap: 'var(--spacing-sm)',
         }}
       >
+        <button type="button" className="btn btn-secondary" onClick={onClose} disabled={loading}>
+          Cancel
+        </button>
         <button
           type="button"
-          className="btn btn-secondary"
-          onClick={run}
-          disabled={loading || !originalText?.trim()}
+          className="btn btn-primary"
+          onClick={handleAccept}
+          disabled={loading || !hasSuggestion}
         >
-          {hasSuggestion ? 'Regenerate' : 'Generate'}
+          Accept
         </button>
-        <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={loading}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleAccept}
-            disabled={loading || !hasSuggestion}
-          >
-            Accept
-          </button>
-        </div>
       </div>
     </Modal>
   );
