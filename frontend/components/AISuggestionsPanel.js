@@ -1,17 +1,34 @@
 /**
  * AISuggestionsPanel — displays AI analysis results (violations, risks,
- * approval routing, overall score).
+ * approval routing, overall score). Shows provenance (generated_at +
+ * model_version) and a "Recompute" link when results are present.
  *
  * Props
  * -----
- * analysisResult   { violations, risks, approval, checklist, suggestions, overall_score, summary }
+ * analysisResult   { violations, risks, approval, checklist, suggestions, overall_score, summary, generated_at, model_version }
  * collapsed        boolean — start collapsed (default false)
  * showRunButton    boolean — show "Run AI Analysis" button when no data yet
- * onRunAnalysis    () => void — called when run button is clicked
+ * onRunAnalysis    () => void — called when run / recompute is clicked
  * loading          boolean — show spinner while analysis is running
  */
 
 import { useState } from 'react';
+
+function formatGeneratedAt(iso) {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return null;
+  }
+}
 
 const SEVERITY_STYLES = {
   high: { color: 'var(--color-error)', bg: 'rgba(239,68,68,0.1)', label: 'High' },
@@ -192,6 +209,47 @@ export default function AISuggestionsPanel({
           {/* Results */}
           {hasData && !loading && (
             <>
+              {/* Provenance row */}
+              {(analysisResult.generated_at || analysisResult.model_version || onRunAnalysis) && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 'var(--spacing-sm)',
+                    marginBottom: 'var(--spacing-xs)',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--color-text-tertiary)',
+                    }}
+                  >
+                    {formatGeneratedAt(analysisResult.generated_at) &&
+                      `Generated ${formatGeneratedAt(analysisResult.generated_at)}`}
+                    {analysisResult.model_version && ` · ${analysisResult.model_version}`}
+                  </span>
+                  {onRunAnalysis && (
+                    <button
+                      type="button"
+                      onClick={onRunAnalysis}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: 'var(--color-accent-blue, #2563eb)',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Recompute
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Summary row */}
               <div
                 style={{

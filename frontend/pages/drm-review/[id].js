@@ -29,6 +29,8 @@ import DecisionModal from '../../components/review/DecisionModal';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
 import { roleLabel, STAGE_KEYS } from '../../lib/workflowStages';
+import { aiClient } from '../../lib/ai';
+import AIUnavailableBanner from '../../components/AIUnavailableBanner';
 
 const DECISION_COLORS = {
   approved: 'var(--color-success)',
@@ -494,6 +496,8 @@ export default function DrmReview() {
   const [modal, setModal] = useState(null); // null | 'approved' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
 
   // ── Loader: parallel-fetches sow + checklist + status + workflow ────────
   const load = useCallback(
@@ -520,6 +524,17 @@ export default function DrmReview() {
       // intentionally outside the returned payload so the hook owns the
       // server state and React owns the user-mutated state.
       setResponses(checklistData.saved_responses || []);
+
+      // Pull cached AI analysis from the canonical endpoint. The previous
+      // implementation read sow.ai_suggestion which doesn't exist on the
+      // /api/sow/{id} payload, so the panel was always empty.
+      const cached = await aiClient.cachedAnalysis(authFetch, id, { signal });
+      if (cached.ok) {
+        setAiAnalysis(cached.data || null);
+        setAiError(null);
+      } else {
+        setAiError(cached.error);
+      }
 
       return {
         sow: sowData,
@@ -702,15 +717,15 @@ export default function DrmReview() {
 
   async function handleRunAI() {
     setAiLoading(true);
-    try {
-      const res = await authFetch(`/api/sow/${id}/analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      await loadAll();
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, id);
+    setAiLoading(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setAiLoading(false);
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
     }
   }
 
@@ -737,7 +752,7 @@ export default function DrmReview() {
   const canAdvance = gatingMet && sow?.status === STAGE_KEYS.DRM_REVIEW;
   const alreadyApproved = sow?.status === 'approved';
 
-  const aiResult = sow?.ai_suggestion || null;
+  const aiResult = aiAnalysis;
 
   if (loading) {
     return (
@@ -1054,6 +1069,9 @@ export default function DrmReview() {
               </div>
 
               {/* AI panel */}
+              {aiError && (
+                <AIUnavailableBanner error={aiError} context="analysis" onRetry={handleRunAI} />
+              )}
               <AISuggestionsPanel
                 analysisResult={aiResult}
                 collapsed={true}

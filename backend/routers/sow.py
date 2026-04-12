@@ -64,6 +64,7 @@ from models import (
     SoWSummary,
     SoWUpdate,
 )
+from pydantic import BaseModel
 from services.ai import analyze_sow
 from utils.db_helpers import (
     create_assignment_with_prior,
@@ -1904,6 +1905,106 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
         )
 
     return result
+
+
+@router.get(
+    "/{sow_id}/ai-analyze",
+    response_model=AIAnalysisResult | None,
+    summary="Read the most recent cached AI analysis for a SoW",
+)
+async def get_cached_ai_analysis(sow_id: int, current_user: CurrentUser):
+    """Return the latest ``ai_suggestion`` row for this SoW without re-running.
+
+    Used by review pages on load to populate the AI panel without triggering
+    an expensive re-analysis. Returns ``null`` (200) when no analysis has
+    ever been run for this SoW.
+    """
+    async with database.pg_pool.acquire() as conn:
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        row = await conn.fetchrow(
+            """
+            SELECT s.ai_suggestion_id, a.validation_recommendation, a.risks
+            FROM sow_documents s
+            LEFT JOIN ai_suggestion a ON a.id = s.ai_suggestion_id
+            WHERE s.id = $1
+            """,
+            sow_id,
+        )
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+        if not row["ai_suggestion_id"]:
+            return None
+
+        # Reconstruct the typed result from the cached jsonb columns. The
+        # ai_analyze writer stores violations/checklist/suggestions/approval
+        # in `validation_recommendation` and risks in their own column.
+        rec = row["validation_recommendation"]
+        risks = row["risks"]
+        if isinstance(rec, str):
+            rec = json.loads(rec)
+        if isinstance(risks, str):
+            risks = json.loads(risks)
+        rec = rec or {}
+        return AIAnalysisResult(
+            violations=rec.get("violations", []),
+            risks=risks or [],
+            approval=rec.get("approval")
+            or {
+                "level": "Yellow",
+                "esap_type": "Type-2",
+                "reason": "",
+                "chain": [],
+            },
+            checklist=rec.get("checklist", []),
+            suggestions=rec.get("suggestions", []),
+            overall_score=rec.get("overall_score"),
+            summary=rec.get("summary"),
+        )
+
+
+# ── Skip AI Review (graceful degradation) ────────────────────────────────────
+
+
+class SkipAIReviewRequest(BaseModel):
+    """Body for the explicit AI-review skip endpoint."""
+
+    reason: str
+    acknowledged_unavailable: bool = False
+
+
+@router.post(
+    "/{sow_id}/skip-ai-review",
+    summary="Explicitly skip the AI review stage when the ML service is down",
+)
+async def skip_ai_review(
+    sow_id: int,
+    body: SkipAIReviewRequest,
+    current_user: CurrentUser,
+):
+    """Record an explicit skip of the AI review stage.
+
+    Stub: writes a ``sow_history`` entry with ``change_type='ai_skipped'``
+    so downstream reviewers can see the SoW was not AI-analyzed. The full
+    implementation will also unblock the transition guard from ai_review.
+    """
+    if not body.acknowledged_unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must acknowledge ML service is unavailable to skip AI review",
+        )
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        row = await conn.fetchrow("SELECT id FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+        await insert_history(
+            conn,
+            sow_id=sow_id,
+            user_id=current_user.id,
+            change_type="ai_skipped",
+            diff={"reason": body.reason},
+        )
+    return {"skipped": True}
 
 
 # ── Proceed past AI Review ───────────────────────────────────────────────────

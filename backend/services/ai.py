@@ -249,3 +249,95 @@ async def generate_drm_insights(sow_content: dict, reviewer_role: str) -> dict:
         },
     }
     return insights.get(reviewer_role, {"summary": "No specific insights.", "flags": []})
+
+
+# ── Orchestration scaffolding (stubbed) ──────────────────────────────────────
+#
+# These functions are the swap-in points for the ML GraphRAG service. They
+# return placeholder data today so the frontend can be wired against them
+# now; the bodies will be replaced with real fan-out + mapping once the ML
+# integration lands.
+
+
+class AIUnavailableError(Exception):
+    """Raised when the ML service is unreachable or a needed endpoint is missing."""
+
+    def __init__(self, message: str, *, retryable: bool = True):
+        self.retryable = retryable
+        super().__init__(message)
+
+
+async def sync_sow_to_kg(sow_row: dict) -> str | None:
+    """Push a SoW into Neo4j and return its ``kg_node_id``.
+
+    Stub: returns ``None`` to signal the KG ingest endpoint is not yet
+    available. Callers should treat this as the "corpus-only" degraded mode.
+    """
+    return None
+
+
+async def get_cached_analysis(sow_row: dict) -> dict | None:
+    """Read the latest cached AI analysis for a SoW.
+
+    Stub: looks up ``ai_suggestion_id`` on the row and returns ``None`` if
+    none exists. The full implementation will join ``ai_suggestion`` and
+    return a typed ``AIAnalysisResult``-shaped dict with ``generation_meta``.
+    """
+    return None
+
+
+async def retrieve_context(query: str, sow_id: int | None = None) -> dict:
+    """Wrap ML ``/context`` for the live draft sidebar.
+
+    Stub: returns an empty result envelope. The router-level ``/api/ai/context``
+    proxy is what currently feeds the sidebar.
+    """
+    return {
+        "query": query,
+        "sow_id": sow_id,
+        "sections": [],
+        "rules": [],
+        "banned_phrases": [],
+        "risks": [],
+        "deliverables": [],
+        "similar_sections": [],
+        "empty": True,
+    }
+
+
+async def generate_assist_response(
+    query: str,
+    sow_id: int | None = None,
+    history: list[dict] | None = None,
+) -> dict:
+    """Wrap ML ``/assist`` for the chat panel and per-section improve flow.
+
+    Stub: returns a placeholder answer envelope. The router-level
+    ``/api/ai/assist`` proxy is what currently feeds the chat.
+    """
+    return {
+        "answer": "",
+        "context": {"rules_applied": 0, "sections_referenced": 0},
+        "retrieved": {"sections": [], "rules": []},
+    }
+
+
+async def get_role_insights(sow_id: int, role: str) -> dict:
+    """Per-role narrative insights for the DRM PersonaDashboard.
+
+    Stub: returns an empty envelope. UI hides the section when ``summary``
+    is null and ``flags`` is empty.
+    """
+    return {"summary": None, "flags": []}
+
+
+async def get_document_prose(sow_id: int) -> str:
+    """Polished document prose for the Finalize step.
+
+    Stub: raises ``AIUnavailableError`` so the UI shows the "coming soon"
+    state. Will wrap ML ``/document/prose`` once shipped.
+    """
+    raise AIUnavailableError(
+        "Document prose generation is not yet available",
+        retryable=False,
+    )

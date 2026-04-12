@@ -4,6 +4,9 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { useAuth } from '../lib/auth';
 import { STAGE_KEYS } from '../lib/workflowStages';
+import { aiClient } from '../lib/ai';
+import AIUnavailableBanner from '../components/AIUnavailableBanner';
+import SkipAIReviewModal from '../components/SkipAIReviewModal';
 import {
   ViolationsSection,
   RisksSection,
@@ -13,6 +16,40 @@ import {
   SectionAnalysisSection,
   SimilarSowsSection,
 } from '../components/ai-review';
+
+// Convert the backend ai-analyze envelope into the shape the on-page
+// section components expect.
+function mapAnalysisToRecommendations(data) {
+  return {
+    violations: data.violations || [],
+    risks: data.risks || [],
+    approval: {
+      level: data.approval?.level || 'Yellow',
+      esapType: data.approval?.esap_type || 'Type-2',
+      reason: data.approval?.reason || '',
+      chain: data.approval?.chain || [],
+    },
+    checklist: (data.checklist || []).map((c) => ({
+      item: c.text,
+      required: c.required,
+      checked: false,
+    })),
+    suggestions: (data.suggestions || []).map((s) => ({
+      section: s.section,
+      line: '',
+      type: s.rationale?.includes('missing') ? 'add' : 'rewrite',
+      original: s.current_text || '',
+      suggested: s.suggested_text || '',
+      reason: s.rationale || '',
+    })),
+    sections: [],
+    missingKeywords: [],
+    overall_score: data.overall_score,
+    summary: data.summary,
+    generated_at: data.generated_at,
+    model_version: data.model_version,
+  };
+}
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
 
@@ -57,12 +94,14 @@ export default function AIReview() {
   const [errors, setErrors] = useState({ file: '', methodology: '' });
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [aiError, setAiError] = useState(null);
   const [showResults, setShowResults] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [recommendations, setRecommendations] = useState(null);
   const [currentSowId, setCurrentSowId] = useState(null);
   const [isProceeding, setIsProceeding] = useState(false);
-  const [aiUnavailable, setAiUnavailable] = useState(false);
+  const [showSkipModal, setShowSkipModal] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [similarSows, setSimilarSows] = useState([]);
   // Display name of the stage that follows ai_review in this SoW's workflow
   // snapshot.  Hardcoding "Internal Review" was wrong for any custom workflow
@@ -77,65 +116,64 @@ export default function AIReview() {
     const { signal } = ctrl;
     setCurrentSowId(sowId);
     setIsAnalyzing(true);
-    setAiUnavailable(false);
+    setAiError(null);
     setError(null);
 
-    authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST', signal })
-      .then(async (res) => {
-        if (!res.ok) {
-          const detail = await res.json().catch(() => ({}));
-          throw new Error(detail?.detail || `AI analysis failed (${res.status})`);
-        }
-        return res.json();
-      })
-      .then((data) => {
-        if (signal.aborted) return;
-        // Map API response to component format
-        setRecommendations({
-          violations: data.violations || [],
-          risks: data.risks || [],
-          approval: {
-            level: data.approval?.level || 'Yellow',
-            esapType: data.approval?.esap_type || 'Type-2',
-            reason: data.approval?.reason || '',
-            chain: data.approval?.chain || [],
-          },
-          checklist: (data.checklist || []).map((c) => ({
-            item: c.text,
-            required: c.required,
-            checked: false,
-          })),
-          suggestions: (data.suggestions || []).map((s) => ({
-            section: s.section,
-            line: '',
-            type: s.rationale?.includes('missing') ? 'add' : 'rewrite',
-            original: s.current_text || '',
-            suggested: s.suggested_text || '',
-            reason: s.rationale || '',
-          })),
-          sections: [],
-          missingKeywords: [],
-        });
+    (async () => {
+      const result = await aiClient.runAnalysis(authFetch, sowId, { signal });
+      if (signal.aborted) return;
+      if (!result.ok) {
+        setAiError(result.error);
         setIsAnalyzing(false);
-        setShowResults(true);
+        return;
+      }
+      setRecommendations(mapAnalysisToRecommendations(result.data));
+      setIsAnalyzing(false);
+      setShowResults(true);
 
-        // Fetch similar SoWs from the AI proxy (non-blocking)
-        authFetch(`/api/ai/sow/${sowId}/similar`, { signal })
-          .then((r) => (r.ok ? r.json() : []))
-          .then((data) => {
-            if (!signal.aborted) setSimilarSows(data);
-          })
-          .catch(() => {});
-      })
-      .catch((err) => {
-        if (err?.name === 'AbortError' || signal.aborted) return;
-        setAiUnavailable(true);
-        setError(err.message);
-        setIsAnalyzing(false);
-      });
+      const sim = await aiClient.similar(authFetch, sowId, { signal });
+      if (!signal.aborted && sim.ok) setSimilarSows(sim.data || []);
+    })();
 
     return () => ctrl.abort();
   }, [sowId, authFetch]);
+
+  // Retry handler for the AI unavailable banner — re-runs analysis without
+  // re-triggering the upload flow.
+  const handleRetryAnalysis = async () => {
+    const id = currentSowId || sowId;
+    if (!id) return;
+    setAiError(null);
+    setError(null);
+    setIsAnalyzing(true);
+    const result = await aiClient.runAnalysis(authFetch, id);
+    if (!result.ok) {
+      setAiError(result.error);
+      setIsAnalyzing(false);
+      return;
+    }
+    setRecommendations(mapAnalysisToRecommendations(result.data));
+    setIsAnalyzing(false);
+    setShowResults(true);
+    const sim = await aiClient.similar(authFetch, id);
+    if (sim.ok) setSimilarSows(sim.data || []);
+  };
+
+  // Confirm-skip handler from SkipAIReviewModal — POSTs the reason and
+  // forwards the user to all-sows.
+  const handleConfirmSkip = async (reason) => {
+    const id = currentSowId || sowId;
+    if (!id) return;
+    setSkipping(true);
+    const result = await aiClient.skipReview(authFetch, id, reason);
+    setSkipping(false);
+    if (!result.ok) {
+      setError(result.error.message);
+      return;
+    }
+    setShowSkipModal(false);
+    router.push('/all-sows');
+  };
 
   // Resolve the *actual* next stage out of ai_review from this SoW's
   // workflow snapshot so we can render an accurate button label.  Prefers
@@ -257,62 +295,35 @@ export default function AIReview() {
       setIsUploading(false);
       setIsAnalyzing(true);
 
-      const aiRes = await authFetch(`/api/sow/${sow.id}/ai-analyze`, { method: 'POST' });
-      if (!aiRes.ok) {
-        const detail = await aiRes.json().catch(() => ({}));
-        throw new Error(detail?.detail || `AI analysis failed (${aiRes.status})`);
+      const aiResult = await aiClient.runAnalysis(authFetch, sow.id);
+      if (!aiResult.ok) {
+        setAiError(aiResult.error);
+        setIsAnalyzing(false);
+        return;
       }
-      const aiData = await aiRes.json();
 
-      // Also parse for section analysis
-      let parseData = { sections: [], missingKeywords: [], violations: [] };
+      // Also parse for section analysis (optional companion call)
+      let parseData = { sections: [], missingKeywords: [] };
       try {
         const parseRes = await authFetch(`/api/sow/${sow.id}/parse`, { method: 'POST' });
         if (parseRes.ok) {
           parseData = await parseRes.json();
         }
       } catch {
-        // Parse is optional, AI analysis is the primary
+        // Parse is optional
       }
 
-      // Merge AI analysis with parse results
-      const data = {
-        sections: parseData.sections || [],
-        missingKeywords: parseData.missingKeywords || [],
-        violations: aiData.violations || [],
-        risks: aiData.risks || [],
-        approval: {
-          level: aiData.approval?.level || 'Yellow',
-          esapType: aiData.approval?.esap_type || 'Type-2',
-          reason: aiData.approval?.reason || '',
-          chain: aiData.approval?.chain || [],
-        },
-        checklist: (aiData.checklist || []).map((c) => ({
-          item: c.text,
-          required: c.required,
-          checked: false,
-        })),
-        suggestions: (aiData.suggestions || []).map((s) => ({
-          section: s.section,
-          line: '',
-          type: s.rationale?.includes('missing') ? 'add' : 'rewrite',
-          original: s.current_text || '',
-          suggested: s.suggested_text || '',
-          reason: s.rationale || '',
-        })),
-      };
+      const merged = mapAnalysisToRecommendations(aiResult.data);
+      merged.sections = parseData.sections || [];
+      merged.missingKeywords = parseData.missingKeywords || [];
 
-      setRecommendations(data);
+      setRecommendations(merged);
       setIsAnalyzing(false);
       setShowResults(true);
 
-      // Fetch similar SoWs from the AI proxy (non-blocking)
-      authFetch(`/api/ai/sow/${sow.id}/similar`)
-        .then((r) => (r.ok ? r.json() : []))
-        .then((similar) => setSimilarSows(similar))
-        .catch(() => {});
+      const sim = await aiClient.similar(authFetch, sow.id);
+      if (sim.ok) setSimilarSows(sim.data || []);
     } catch (err) {
-      setAiUnavailable(true);
       setError(err.message);
       setIsUploading(false);
       setIsAnalyzing(false);
@@ -347,24 +358,17 @@ export default function AIReview() {
           </div>
 
           {/* AI unavailable banner */}
-          {aiUnavailable && (
-            <div
-              style={{
-                marginBottom: 'var(--spacing-lg)',
-                padding: 'var(--spacing-md) var(--spacing-lg)',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'rgba(251,191,36,0.08)',
-                border: '1px solid rgba(251,191,36,0.3)',
-                color: 'var(--color-warning)',
-                fontSize: 'var(--font-size-sm)',
-              }}
-            >
-              AI analysis is temporarily unavailable. You can continue with manual review.
-            </div>
+          {aiError && (
+            <AIUnavailableBanner
+              error={aiError}
+              context="analysis"
+              onRetry={handleRetryAnalysis}
+              onSkip={() => setShowSkipModal(true)}
+            />
           )}
 
           {/* Error banner */}
-          {error && !aiUnavailable && (
+          {error && !aiError && (
             <div
               style={{
                 marginBottom: 'var(--spacing-lg)',
@@ -660,6 +664,13 @@ export default function AIReview() {
           )}
         </div>
       </div>
+
+      <SkipAIReviewModal
+        open={showSkipModal}
+        onClose={() => setShowSkipModal(false)}
+        onConfirm={handleConfirmSkip}
+        submitting={skipping}
+      />
     </>
   );
 }

@@ -4,6 +4,10 @@ AI / GraphRAG proxy router.
 Each endpoint checks GRAPHRAG_API_URL. If set, it forwards the request to
 the ML service via httpx. If not set (the default), it returns realistic stub
 data so the frontend can be wired up before the ML service is deployed.
+
+Endpoints marked "future" are stubs for ML routes that don't exist yet —
+the frontend wires against them today and they'll start returning live data
+once the ML service ships the matching routes.
 """
 
 from __future__ import annotations
@@ -11,7 +15,7 @@ from __future__ import annotations
 import httpx
 from auth import CurrentUser
 from config import GRAPHRAG_API_URL
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -202,24 +206,99 @@ STUB_SIMILAR = [
         "sow_id": "contoso-ccaas-platform",
         "title": "Contoso CCaaS Platform Migration",
         "similarity": 0.87,
+        "shared_clauses": 12,
         "methodology": "Cloud Adoption",
         "overlap_areas": ["infrastructure", "migration", "support"],
+        "outcome": "delivered",
     },
     {
         "sow_id": "contoso-data-analytics-platform",
         "title": "Contoso Data Analytics Platform",
         "similarity": 0.72,
+        "shared_clauses": 9,
         "methodology": "Agile Sprint Delivery",
         "overlap_areas": ["data", "analytics", "dashboard"],
+        "outcome": "delivered",
     },
     {
         "sow_id": "contoso-data-estate-modern",
         "title": "Contoso Data Estate Modernization",
         "similarity": 0.65,
+        "shared_clauses": 7,
         "methodology": "Cloud Adoption",
         "overlap_areas": ["modernization", "cloud", "migration"],
+        "outcome": "in-progress",
     },
 ]
+
+STUB_ASSIST_RESPONSE = {
+    "answer": (
+        "Based on the historical SoW corpus, this section should include explicit "
+        "acceptance criteria, a measurable SLA target, and a reference to the "
+        "customer's existing support agreement. Consider adding a sentence on "
+        "knowledge transfer responsibilities for the hypercare period."
+    ),
+    "context": {
+        "rules_applied": 3,
+        "sections_referenced": 4,
+    },
+    "retrieved": {
+        "sections": [
+            {"title": "Support Transition", "sow": "contoso-ccaas-platform", "score": 0.91},
+            {"title": "Hypercare", "sow": "contoso-data-estate-modern", "score": 0.83},
+        ],
+        "rules": [
+            {"name": "SLA Required", "category": "compliance"},
+            {"name": "Hypercare Defined", "category": "delivery"},
+        ],
+    },
+}
+
+STUB_INSIGHTS = {
+    "cpl": {
+        "summary": (
+            "Margin trends below practice target. Deal value places this in Type-2 ESAP. "
+            "Recommend a finance review before final approval."
+        ),
+        "flags": [
+            "Margin 4% below target",
+            "Fixed-fee structure with limited risk reserve",
+        ],
+    },
+    "cdp": {
+        "summary": (
+            "Account alignment verified. Customer has an active EA with room for "
+            "services growth across the next two quarters."
+        ),
+        "flags": [
+            "Customer has 2 active engagements",
+            "Strategic account — long-term relationship impact",
+        ],
+    },
+    "delivery-manager": {
+        "summary": (
+            "Resource plan has a single point of failure on the SA role. "
+            "Timeline is aggressive for the scope; consider a buffer sprint."
+        ),
+        "flags": [
+            "No backup SA identified",
+            "Holiday freeze overlaps Sprint 4",
+            "QA resource not allocated",
+        ],
+    },
+}
+
+STUB_SYNC = {
+    "kg_node_id": None,
+    "synced_at": None,
+    "status": "pending",
+    "detail": "Knowledge-graph ingest is not yet available — falling back to corpus mode.",
+}
+
+STUB_DOCUMENT_PROSE = {
+    "available": False,
+    "detail": "Document polish is not yet available from the ML service.",
+}
 
 STUB_APPROVAL = {
     "esap_type": "Type-2",
@@ -337,8 +416,21 @@ async def ai_risks(sow_id: str, _: CurrentUser = None):
 
 @router.get("/sow/{sow_id}/similar")
 async def ai_similar(sow_id: str, _: CurrentUser = None):
-    """Find similar historical SoWs."""
-    return await _proxy_or_stub("GET", f"/sows/{sow_id}/similar", STUB_SIMILAR)
+    """Find similar historical SoWs.
+
+    Real ML returns ``shared_clauses`` per match. The proxy normalizes by
+    deriving a ``similarity`` score (shared_clauses / max in set) so the
+    frontend has one consistent shape.
+    """
+    data = await _proxy_or_stub("GET", f"/sows/{sow_id}/similar", STUB_SIMILAR)
+    if isinstance(data, list) and data:
+        max_shared = max((d.get("shared_clauses", 0) for d in data), default=0) or 1
+        for d in data:
+            if "similarity" not in d:
+                d["similarity"] = round(d.get("shared_clauses", 0) / max_shared, 2)
+            d.setdefault("overlap_areas", [])
+            d.setdefault("outcome", None)
+    return data
 
 
 @router.get("/approval")
@@ -357,3 +449,136 @@ async def ai_approval(
 async def ai_graph_summary(_: CurrentUser = None):
     """Knowledge graph node/relationship counts."""
     return await _proxy_or_stub("GET", "/graph/summary", STUB_GRAPH_SUMMARY)
+
+
+# ── Future ML endpoints (stubbed) ────────────────────────────────────────────
+#
+# Each endpoint below proxies to an ML route that does not yet exist. Until
+# the ML team ships those routes, the proxy returns a graceful "not yet
+# available" payload so the frontend can wire UI today and have it light up
+# the moment ML adds them.
+
+
+@router.post("/sow/{sow_id}/sync")
+async def ai_sync_sow(sow_id: str, body: dict | None = None, _: CurrentUser = None):
+    """Push an app SoW into Neo4j and return its ``kg_node_id``.
+
+    Future ML route: ``POST /sows/ingest``. Returns a sentinel payload until
+    that route exists so callers can detect the degraded mode.
+    """
+    if GRAPHRAG_API_URL:
+        try:
+            async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=60.0) as client:
+                resp = await client.post("/sows/ingest", json=body or {"sow_id": sow_id})
+                if resp.status_code in (404, 501):
+                    return {**STUB_SYNC, "sow_id": sow_id}
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": f"ML sync failed: {exc}", "retryable": True},
+            ) from exc
+    return {**STUB_SYNC, "sow_id": sow_id}
+
+
+@router.delete("/sow/{sow_id}/sync")
+async def ai_unsync_sow(sow_id: str, _: CurrentUser = None):
+    """Drop an app SoW from the KG. Future ML route: ``DELETE /sows/{id}``."""
+    if GRAPHRAG_API_URL:
+        try:
+            async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=10.0) as client:
+                resp = await client.delete(f"/sows/{sow_id}")
+                if resp.status_code in (404, 501):
+                    return {"deleted": False, "detail": "Upstream delete not yet available"}
+                resp.raise_for_status()
+                return {"deleted": True}
+        except httpx.HTTPError:
+            return {"deleted": False, "detail": "Upstream delete failed"}
+    return {"deleted": False, "detail": "ML service not configured"}
+
+
+@router.post("/assist/stream")
+async def ai_assist_stream(body: dict, _: CurrentUser = None):
+    """SSE-streamed assist. Future ML route: ``POST /assist/stream``.
+
+    Until the streaming route exists, this returns 503 so the frontend
+    falls back to the non-streaming ``/assist`` path with a typing indicator.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "message": "Streaming assist is not yet available upstream",
+            "retryable": False,
+        },
+    )
+
+
+@router.get("/sow/{sow_id}/insights/{role}")
+async def ai_insights(sow_id: str, role: str, _: CurrentUser = None):
+    """Role-specific narrative insights for a reviewer.
+
+    Future ML route: ``GET /sows/{id}/insights/{role}``.
+    """
+    stub = STUB_INSIGHTS.get(role, {"summary": None, "flags": []})
+    if GRAPHRAG_API_URL:
+        try:
+            async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=10.0) as client:
+                resp = await client.get(f"/sows/{sow_id}/insights/{role}")
+                if resp.status_code in (404, 501):
+                    return stub
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError:
+            return stub
+    return stub
+
+
+@router.post("/document/prose")
+async def ai_document_prose(body: dict, _: CurrentUser = None):
+    """Polished prose generation from structured SoW data.
+
+    Future ML route: ``POST /document/prose``. Returns 503 with a clear
+    "coming soon" payload until the upstream route exists.
+    """
+    if GRAPHRAG_API_URL:
+        try:
+            async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=60.0) as client:
+                resp = await client.post("/document/prose", json=body)
+                if resp.status_code in (404, 501):
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={**STUB_DOCUMENT_PROSE, "retryable": False},
+                    )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": f"Document prose failed: {exc}", "retryable": True},
+            ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={**STUB_DOCUMENT_PROSE, "retryable": False},
+    )
+
+
+@router.get("/sows")
+async def ai_kg_sows(_: CurrentUser = None):
+    """List SoWs already ingested into the KG (admin/debug only)."""
+    return await _proxy_or_stub("GET", "/sows", [])
+
+
+@router.get("/schema/proposals")
+async def ai_schema_proposals(
+    sproposal_status: str | None = Query(None, alias="status"),
+    kind: str | None = None,
+    _: CurrentUser = None,
+):
+    """LLM-extracted schema-evolution proposals (admin only)."""
+    return await _proxy_or_stub(
+        "GET",
+        "/schema/proposals",
+        [],
+        params={"status": sproposal_status, "kind": kind},
+    )

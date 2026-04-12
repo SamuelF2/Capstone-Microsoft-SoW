@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -10,8 +10,39 @@ import WorkflowProgress from '../../components/WorkflowProgress';
 import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
 import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPanel';
 import ActivityLog from '../../components/ActivityLog';
+import ContextSidebar from '../../components/ai-context/ContextSidebar';
+import AssistChat from '../../components/ai-assist/AssistChat';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
+
+// Map a tab key (from draftTabs registry) to the sowData fields the AI
+// context sidebar should query against. Falls back to the tab key itself.
+const TAB_KEY_TO_SOW_FIELDS = {
+  overview: ['executiveSummary'],
+  scope: ['projectScope', 'cloudAdoptionScope'],
+  approach: ['agileApproach', 'productBacklog'],
+  deliverables: ['deliverables', 'phasesDeliverables'],
+  phases: ['phasesDeliverables'],
+  backlog: ['productBacklog'],
+  team: ['teamStructure'],
+  pricing: ['pricing'],
+  assumptions: ['assumptionsRisks'],
+  'assumptions-risks': ['assumptionsRisks'],
+  support: ['supportTransition'],
+  'support-transition': ['supportTransition'],
+};
+
+function extractFocusedText(sowData, tabKey) {
+  if (!sowData || !tabKey) return '';
+  const fields = TAB_KEY_TO_SOW_FIELDS[tabKey] || [tabKey];
+  const parts = [];
+  for (const f of fields) {
+    const v = sowData[f];
+    if (!v) continue;
+    parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+  }
+  return parts.join('\n\n');
+}
 
 // ─── Methodology badge colours ────────────────────────────────────────────────
 
@@ -150,17 +181,7 @@ export default function DraftPage() {
   };
 
   const [showConfirm, setShowConfirm] = useState(false);
-  const [similarSows, setSimilarSows] = useState([]);
   const [showActivity, setShowActivity] = useState(false);
-
-  // Fetch similar SoWs from AI proxy (non-blocking, silent fail)
-  useEffect(() => {
-    if (!id || !authFetch) return;
-    authFetch(`/api/ai/sow/${id}/similar`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setSimilarSows(data))
-      .catch(() => {});
-  }, [id, authFetch]);
 
   // ── Methodology-aware readiness checks ────────────────────────────────────
   const methodology = sowData?.deliveryMethodology;
@@ -289,6 +310,12 @@ export default function DraftPage() {
     bg: 'var(--color-bg-tertiary)',
     color: 'var(--color-text-secondary)',
   };
+
+  const activeTabConfig = tabs[activeTab] || null;
+  const focusedSectionText = useMemo(
+    () => extractFocusedText(sowData, activeTabConfig?.key),
+    [sowData, activeTabConfig?.key]
+  );
 
   return (
     <>
@@ -573,29 +600,44 @@ export default function DraftPage() {
           </div>
         </div>
 
-        {/* Tab content */}
+        {/* Tab content + AI context sidebar */}
         <div
           style={{
             maxWidth: 'var(--container-xl)',
             margin: '0 auto',
             padding: 'var(--spacing-2xl) var(--spacing-xl)',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) 320px',
+            gap: 'var(--spacing-xl)',
+            alignItems: 'start',
           }}
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, x: 12 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.2 }}
-            >
-              {tabs.length > 0 && tabs[activeTab] ? (
-                tabs[activeTab].render(sowData, updateSection)
-              ) : (
-                <p className="text-secondary">No content configured for this methodology.</p>
-              )}
-            </motion.div>
-          </AnimatePresence>
+          <div style={{ minWidth: 0 }}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: 0.2 }}
+              >
+                {tabs.length > 0 && tabs[activeTab] ? (
+                  tabs[activeTab].render(sowData, updateSection)
+                ) : (
+                  <p className="text-secondary">No content configured for this methodology.</p>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+
+          <div style={{ position: 'sticky', top: 'var(--spacing-md)' }}>
+            <ContextSidebar
+              authFetch={authFetch}
+              sowId={id}
+              focusedSectionText={focusedSectionText}
+              focusedSectionLabel={activeTabConfig?.label}
+            />
+          </div>
         </div>
 
         {/* Bottom navigation */}
@@ -719,88 +761,6 @@ export default function DraftPage() {
           </div>
         </div>
 
-        {/* Similar SoWs Panel */}
-        {similarSows.length > 0 && (
-          <div
-            style={{
-              maxWidth: 'var(--container-xl)',
-              margin: '0 auto',
-              padding: '0 var(--spacing-xl) var(--spacing-lg)',
-            }}
-          >
-            <div className="card">
-              <h3
-                className="text-base font-semibold"
-                style={{
-                  marginBottom: 'var(--spacing-md)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--spacing-sm)',
-                }}
-              >
-                <span style={{ color: 'var(--color-accent-purple-light)' }}>&#128279;</span>
-                Similar SoWs
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-                {similarSows.map((s, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: 'var(--spacing-sm) var(--spacing-md)',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--color-bg-tertiary)',
-                    }}
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{s.title}</p>
-                      {s.methodology && <p className="text-xs text-tertiary">{s.methodology}</p>}
-                      {s.overlap_areas?.length > 0 && (
-                        <div
-                          style={{
-                            display: 'flex',
-                            gap: 'var(--spacing-xs)',
-                            marginTop: 2,
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          {s.overlap_areas.map((a) => (
-                            <span
-                              key={a}
-                              style={{
-                                fontSize: 'var(--font-size-xs)',
-                                padding: '1px 6px',
-                                borderRadius: 'var(--radius-full)',
-                                backgroundColor: 'rgba(139,92,246,0.1)',
-                                color: 'var(--color-accent-purple-light)',
-                              }}
-                            >
-                              {a}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 'var(--font-size-sm)',
-                        fontWeight: 600,
-                        color: 'var(--color-accent-purple-light)',
-                        whiteSpace: 'nowrap',
-                        marginLeft: 'var(--spacing-md)',
-                      }}
-                    >
-                      {Math.round(s.similarity * 100)}% match
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Activity Log Panel */}
         <div
           style={{
@@ -833,6 +793,20 @@ export default function DraftPage() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Docked AI assistant */}
+        <div
+          style={{
+            position: 'fixed',
+            right: 'var(--spacing-lg)',
+            bottom: 'var(--spacing-lg)',
+            width: 360,
+            maxWidth: 'calc(100vw - var(--spacing-lg) * 2)',
+            zIndex: 900,
+          }}
+        >
+          <AssistChat authFetch={authFetch} sowId={id} />
         </div>
 
         {/* Confirmation modal */}

@@ -40,6 +40,8 @@ import DecisionModal from '../../../components/review/DecisionModal';
 import SoWContentPanel from '../../../components/sow/SoWContentPanel';
 import useAutoRefreshFetch from '../../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../../lib/format';
+import { aiClient } from '../../../lib/ai';
+import AIUnavailableBanner from '../../../components/AIUnavailableBanner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -72,6 +74,7 @@ export default function AssignmentReviewPage() {
   // User-mutated state — re-seeded from the loaded payload on every refresh.
   const [responses, setResponses] = useState([]);
   const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
   const [comments, setComments] = useState('');
   const [contentTab, setContentTab] = useState('Overview');
 
@@ -136,8 +139,13 @@ export default function AssignmentReviewPage() {
       const statusData = statusRes.ok ? await statusRes.json() : null;
 
       if (sowData.ai_suggestion_id) {
-        const aiRes = await authFetch(`/api/sow/${loadedSowId}/ai-analyze`, { signal });
-        if (aiRes.ok) setAiAnalysis(await aiRes.json());
+        const cached = await aiClient.cachedAnalysis(authFetch, loadedSowId, { signal });
+        if (cached.ok) {
+          setAiAnalysis(cached.data || null);
+          setAiError(null);
+        } else {
+          setAiError(cached.error);
+        }
       }
 
       return {
@@ -333,15 +341,15 @@ export default function AssignmentReviewPage() {
   async function handleRunAI() {
     if (!sowId) return;
     setRunningAI(true);
-    try {
-      const res = await authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      setAiAnalysis(await res.json());
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, sowId);
+    setRunningAI(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setRunningAI(false);
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
     }
   }
 
@@ -821,6 +829,13 @@ export default function AssignmentReviewPage() {
                       </div>
 
                       {/* AI suggestions */}
+                      {aiError && (
+                        <AIUnavailableBanner
+                          error={aiError}
+                          context="analysis"
+                          onRetry={handleRunAI}
+                        />
+                      )}
                       <AISuggestionsPanel
                         analysisResult={aiAnalysis}
                         collapsed={true}
