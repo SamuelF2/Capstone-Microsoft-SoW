@@ -37,6 +37,7 @@ import COATracker from '../../../components/COATracker';
 import AttachmentManager from '../../../components/AttachmentManager';
 import ActivityLog from '../../../components/ActivityLog';
 import DecisionModal from '../../../components/review/DecisionModal';
+import SendBackModal from '../../../components/review/SendBackModal';
 import SoWDocumentReader from '../../../components/sow/SoWDocumentReader';
 import useAutoRefreshFetch from '../../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../../lib/format';
@@ -89,7 +90,7 @@ export default function AssignmentReviewPage() {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runningAI, setRunningAI] = useState(false);
-  const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions'
+  const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [progressRefreshKey, setProgressRefreshKey] = useState(0);
   const [activeReviewTab, setActiveReviewTab] = useState('review');
@@ -345,6 +346,24 @@ export default function AssignmentReviewPage() {
     return gatewayStage;
   }, [workflow, sow, checklist]);
 
+  // ── Compute send-back targets from workflow on_send_back transitions ───
+  const sendBackTargets = useMemo(() => {
+    if (!workflow || !sow) return null;
+    const transitions = workflow.workflow_data?.transitions || [];
+    const stages = workflow.workflow_data?.stages || [];
+    const stageMap = Object.fromEntries(stages.map((s) => [s.stage_key, s]));
+    const targets = transitions
+      .filter((t) => t.from_stage === sow.status && t.condition === 'on_send_back')
+      .map((t) => ({
+        stage_key: t.to_stage,
+        display_name: stageMap[t.to_stage]?.display_name || t.to_stage,
+      }));
+    if (!targets.find((t) => t.stage_key === 'draft')) {
+      targets.push({ stage_key: 'draft', display_name: 'Draft' });
+    }
+    return targets;
+  }, [workflow, sow]);
+
   // ── Role & assignment gating (assignment-scoped) ───────────────────────
   // The "acting role" is the role on this specific assignment, NOT the
   // user's logged-in role.  This is the central fix that lets one user
@@ -461,6 +480,30 @@ export default function AssignmentReviewPage() {
     }
   }
 
+  // ── Send back (workflow-driven) ──────────────────────────────────────────
+  async function handleSendBack({ target_stage, comments: sbComments, action_items }) {
+    if (!sowId) return;
+    setSubmitting(true);
+    try {
+      const res = await authFetch(`/api/review/${sowId}/send-back`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_stage, comments: sbComments, action_items }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Send-back failed (${res.status})`);
+      }
+      setModal(null);
+      showToast('SoW sent back for revision');
+      setTimeout(() => router.push('/my-reviews'), 1500);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   // ── Approval gating ─────────────────────────────────────────────────────
   const requiredItems = checklist?.items?.filter((i) => i.required) || [];
   const checkedRequired = requiredItems.filter((i) =>
@@ -557,6 +600,14 @@ export default function AssignmentReviewPage() {
           onClose={() => setModal(null)}
           onSubmit={(extras) => handleSubmitDecision('approved-with-conditions', extras)}
           submitting={submitting}
+        />
+      )}
+      {modal === 'send-back' && (
+        <SendBackModal
+          onClose={() => setModal(null)}
+          onSubmit={handleSendBack}
+          submitting={submitting}
+          availableStages={sendBackTargets}
         />
       )}
 
@@ -1121,15 +1172,21 @@ export default function AssignmentReviewPage() {
                         </button>
 
                         <button
-                          className="btn btn-secondary"
+                          className="btn btn-sm"
                           style={{
+                            width: '100%',
+                            backgroundColor: 'rgba(245,158,11,0.1)',
                             color: 'var(--color-warning)',
-                            borderColor: 'var(--color-warning)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontSize: 'var(--font-size-sm)',
                           }}
-                          onClick={() => setModal('rejected')}
+                          onClick={() => setModal('send-back')}
                           disabled={submitting}
                         >
-                          Send Back to Draft
+                          Send Back
                         </button>
                       </div>
                     ) : (
@@ -1168,15 +1225,21 @@ export default function AssignmentReviewPage() {
                           )}
                         </div>
                         <button
-                          className="btn btn-secondary"
+                          className="btn btn-sm"
                           style={{
+                            width: '100%',
+                            backgroundColor: 'rgba(245,158,11,0.1)',
                             color: 'var(--color-warning)',
-                            borderColor: 'var(--color-warning)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontSize: 'var(--font-size-sm)',
                           }}
-                          onClick={() => setModal('rejected')}
+                          onClick={() => setModal('send-back')}
                           disabled={submitting}
                         >
-                          Send Back to Draft
+                          Send Back
                         </button>
                       </div>
                     )}
