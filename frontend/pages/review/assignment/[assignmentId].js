@@ -929,7 +929,7 @@ export default function AssignmentReviewPage() {
                     {/* Role card */}
                     <div
                       className="card"
-                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)', flexShrink: 0 }}
                     >
                       <p
                         style={{
@@ -995,7 +995,7 @@ export default function AssignmentReviewPage() {
                     </div>
 
                     {/* Checklist */}
-                    <div className="card" style={{ padding: 'var(--spacing-lg)' }}>
+                    <div className="card" style={{ padding: 'var(--spacing-lg)', flexShrink: 0 }}>
                       <h4
                         style={{
                           margin: '0 0 var(--spacing-md)',
@@ -1021,17 +1021,19 @@ export default function AssignmentReviewPage() {
                         onRetry={handleRunAI}
                       />
                     )}
-                    <AISuggestionsPanel
-                      analysisResult={aiAnalysis}
-                      collapsed={true}
-                      showRunButton={true}
-                      onRunAnalysis={handleRunAI}
-                      loading={runningAI}
-                    />
+                    <div style={{ flexShrink: 0 }}>
+                      <AISuggestionsPanel
+                        analysisResult={aiAnalysis}
+                        collapsed={true}
+                        showRunButton={true}
+                        onRunAnalysis={handleRunAI}
+                        loading={runningAI}
+                      />
+                    </div>
 
                     {/* Comments */}
                     {!isMyReviewDone && (
-                      <div className="card" style={{ padding: 'var(--spacing-lg)' }}>
+                      <div className="card" style={{ padding: 'var(--spacing-lg)', flexShrink: 0 }}>
                         <label
                           style={{
                             display: 'block',
@@ -1070,6 +1072,7 @@ export default function AssignmentReviewPage() {
                           display: 'flex',
                           flexDirection: 'column',
                           gap: 'var(--spacing-sm)',
+                          flexShrink: 0,
                         }}
                       >
                         <button
@@ -1128,6 +1131,7 @@ export default function AssignmentReviewPage() {
                           fontSize: 'var(--font-size-sm)',
                           color: 'var(--color-success)',
                           fontWeight: 'var(--font-weight-semibold)',
+                          flexShrink: 0,
                         }}
                       >
                         ✓ Your review is complete
