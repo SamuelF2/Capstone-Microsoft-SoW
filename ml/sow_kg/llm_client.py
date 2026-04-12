@@ -18,13 +18,20 @@ def get_client():
         return _client
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
     if not endpoint or not api_key:
         raise RuntimeError("AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY must be set in .env")
+    from urllib.parse import urlparse
+
     from openai import AzureOpenAI
 
+    # AzureOpenAI expects the bare host (e.g. https://foo.services.ai.azure.com).
+    # The .env may contain a full Foundry project path — strip it.
+    parsed = urlparse(endpoint)
+    azure_endpoint = f"{parsed.scheme}://{parsed.netloc}"
+
     _client = AzureOpenAI(
-        azure_endpoint=endpoint,
+        azure_endpoint=azure_endpoint,
         api_key=api_key,
         api_version=api_version,
     )

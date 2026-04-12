@@ -108,6 +108,7 @@ export default function AIReview() {
   // that renames or replaces that stage — we now look it up live so the
   // "Proceed" button label matches whatever the workflow actually does.
   const [nextStageLabel, setNextStageLabel] = useState(null);
+  const [isReturningToDraft, setIsReturningToDraft] = useState(false);
 
   // If arriving from draft submit-for-review (Path A), auto-trigger AI analysis
   useEffect(() => {
@@ -219,6 +220,26 @@ export default function AIReview() {
       setError(err.message);
     } finally {
       setIsProceeding(false);
+    }
+  };
+
+  // Return to draft for further editing
+  const handleReturnToDraft = async () => {
+    const id = currentSowId;
+    if (!id) return;
+    setIsReturningToDraft(true);
+    setError(null);
+    try {
+      const res = await authFetch(`/api/sow/${id}/return-to-draft`, { method: 'POST' });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.detail || `Failed to return to draft (${res.status})`);
+      }
+      router.push(`/draft/${id}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsReturningToDraft(false);
     }
   };
 
@@ -648,9 +669,17 @@ export default function AIReview() {
                       Back to All SoWs
                     </button>
                     <button
+                      className="btn btn-secondary"
+                      onClick={handleReturnToDraft}
+                      disabled={isReturningToDraft || isProceeding}
+                      style={{ opacity: isReturningToDraft ? 0.6 : 1 }}
+                    >
+                      {isReturningToDraft ? 'Returning…' : '← Back to Draft'}
+                    </button>
+                    <button
                       className="btn btn-primary"
                       onClick={handleProceedToReview}
-                      disabled={isProceeding}
+                      disabled={isProceeding || isReturningToDraft}
                       style={{ opacity: isProceeding ? 0.6 : 1 }}
                     >
                       {isProceeding

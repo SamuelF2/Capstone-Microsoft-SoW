@@ -86,10 +86,12 @@ export const aiClient = {
     if (sowId != null) params.set('sow_id', String(sowId));
     return call(authFetch, `/api/ai/context?${params.toString()}`, { signal });
   },
-  assist(authFetch, query, sowId = null, history = [], opts) {
+  assist(authFetch, query, sowId = null, history = [], { sectionKey, ...opts } = {}) {
+    const body = { query, sow_id: sowId, history };
+    if (sectionKey) body.section_key = sectionKey;
     return call(authFetch, '/api/ai/assist', {
       method: 'POST',
-      body: { query, sow_id: sowId, history },
+      body,
       ...opts,
     });
   },

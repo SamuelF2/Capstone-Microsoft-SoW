@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import TwoColumnGrid from './ui/TwoColumnGrid';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 function ScopeList({
   title,
@@ -113,7 +114,7 @@ function ScopeList({
             >
               ⠿
             </span>
-            <textarea
+            <HighlightedTextarea
               className="form-textarea"
               value={item.text}
               onChange={(e) => onTextChange(listKey, item.id, e.target.value)}

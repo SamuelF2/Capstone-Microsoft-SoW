@@ -47,6 +47,8 @@ export default function ContextSidebar({
   sowId,
   focusedSectionText,
   focusedSectionLabel,
+  onBannedPhrasesChange,
+  onFixPhrase,
 }) {
   const [loading, setLoading] = useState(false);
   const [context, setContext] = useState(null);
@@ -61,6 +63,7 @@ export default function ContextSidebar({
       setContext(null);
       setError(null);
       setLoading(false);
+      onBannedPhrasesChange?.([]);
       return undefined;
     }
 
@@ -78,9 +81,12 @@ export default function ContextSidebar({
         if (result.ok) {
           setContext(result.data);
           setRefreshedAt(Date.now());
+          const bp = result.data?.banned_phrases || result.data?.bannedPhrases || [];
+          onBannedPhrasesChange?.(bp);
         } else {
           setError(result.error);
           setContext(null);
+          onBannedPhrasesChange?.([]);
         }
       } catch (err) {
         if (err?.name !== 'AbortError') {
@@ -164,7 +170,7 @@ export default function ContextSidebar({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-xs)' }}>
           <RulesAccordion rules={rules} defaultOpen />
-          <BannedPhrasesAccordion phrases={phrases} defaultOpen />
+          <BannedPhrasesAccordion phrases={phrases} defaultOpen onFix={onFixPhrase} />
           <SimilarExamplesAccordion examples={similar} />
         </div>
       )}

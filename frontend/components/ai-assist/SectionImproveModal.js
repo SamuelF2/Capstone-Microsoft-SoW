@@ -2,15 +2,16 @@
  * SectionImproveModal — per-section "improve with AI" dialog.
  *
  * Sends the current section text plus an optional instruction to
- * /api/ai/assist (the ML "improve" route is not yet shipped, so we reuse
- * the assist endpoint with a structured prompt). Shows the suggestion
- * side-by-side with the original and lets the user accept or discard.
+ * /api/ai/assist. When a sectionKey is provided and the ML layer returns
+ * structured JSON, the modal renders a formatted preview and passes the
+ * structured data (not flat text) through onAccept.
  */
 
 import { useEffect, useState } from 'react';
 import Modal from '../Modal';
 import AIUnavailableBanner from '../AIUnavailableBanner';
 import { aiClient } from '../../lib/ai';
+import { getSchema, renderStructured } from '../../lib/sectionSchemas';
 
 const PROMPTS = [
   { key: 'tighten', label: 'Tighten wording' },
@@ -33,16 +34,21 @@ export default function SectionImproveModal({
   sowId,
   sectionLabel,
   originalText,
+  sectionKey,
 }) {
   const [intent, setIntent] = useState('tighten');
   const [custom, setCustom] = useState('');
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState('');
+  const [structuredSuggestion, setStructuredSuggestion] = useState(null);
   const [error, setError] = useState(null);
+
+  const hasSchema = !!getSchema(sectionKey);
 
   useEffect(() => {
     if (!open) {
       setSuggestion('');
+      setStructuredSuggestion(null);
       setError(null);
       setLoading(false);
       setCustom('');
@@ -55,21 +61,50 @@ export default function SectionImproveModal({
     setLoading(true);
     setError(null);
     setSuggestion('');
+    setStructuredSuggestion(null);
     const query = buildQuery(sectionLabel || 'this section', originalText, intent, custom);
-    const result = await aiClient.assist(authFetch, query, sowId, []);
+    const result = await aiClient.assist(authFetch, query, sowId, [], {
+      sectionKey: hasSchema ? sectionKey : undefined,
+    });
     setLoading(false);
     if (result.ok) {
-      setSuggestion(result.data?.answer || result.data?.response || '');
+      if (result.data?.structured) {
+        setStructuredSuggestion(result.data.structured);
+        // Also keep a text fallback for the accept-disabled check
+        setSuggestion('[structured]');
+      } else {
+        setSuggestion(result.data?.answer || result.data?.response || '');
+      }
     } else {
       setError(result.error);
     }
   };
 
   const handleAccept = () => {
-    if (!suggestion.trim()) return;
-    onAccept?.(suggestion.trim());
+    if (structuredSuggestion) {
+      onAccept?.(structuredSuggestion);
+    } else if (suggestion.trim()) {
+      onAccept?.(suggestion.trim());
+    } else {
+      return;
+    }
     onClose?.();
   };
+
+  // Render the suggestion panel content
+  const renderSuggestionContent = () => {
+    if (loading) return 'Generating…';
+    if (structuredSuggestion) {
+      const rendered = renderStructured(sectionKey, structuredSuggestion);
+      if (rendered) return rendered;
+      // Fallback: pretty-print JSON
+      return JSON.stringify(structuredSuggestion, null, 2);
+    }
+    if (suggestion && suggestion !== '[structured]') return suggestion;
+    return 'Click "Generate" to get an AI rewrite.';
+  };
+
+  const hasSuggestion = !!(structuredSuggestion || (suggestion && suggestion !== '[structured]'));
 
   return (
     <Modal
@@ -217,15 +252,15 @@ export default function SectionImproveModal({
               backgroundColor: 'var(--color-bg-tertiary)',
               fontSize: 'var(--font-size-xs)',
               color: 'var(--color-text-primary)',
-              whiteSpace: 'pre-wrap',
+              whiteSpace: structuredSuggestion ? 'normal' : 'pre-wrap',
               maxHeight: 240,
               overflowY: 'auto',
               lineHeight: 'var(--line-height-relaxed)',
-              fontStyle: suggestion ? 'normal' : 'italic',
-              opacity: suggestion ? 1 : 0.7,
+              fontStyle: hasSuggestion ? 'normal' : 'italic',
+              opacity: hasSuggestion ? 1 : 0.7,
             }}
           >
-            {loading ? 'Generating…' : suggestion || 'Click "Generate" to get an AI rewrite.'}
+            {renderSuggestionContent()}
           </div>
         </div>
       </div>
@@ -244,7 +279,7 @@ export default function SectionImproveModal({
           onClick={run}
           disabled={loading || !originalText?.trim()}
         >
-          {suggestion ? 'Regenerate' : 'Generate'}
+          {hasSuggestion ? 'Regenerate' : 'Generate'}
         </button>
         <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={loading}>
@@ -254,7 +289,7 @@ export default function SectionImproveModal({
             type="button"
             className="btn btn-primary"
             onClick={handleAccept}
-            disabled={loading || !suggestion.trim()}
+            disabled={loading || !hasSuggestion}
           >
             Accept
           </button>

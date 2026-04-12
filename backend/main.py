@@ -664,7 +664,7 @@ async def lifespan(app: FastAPI):
                 # Send-backs from later stages must target draft directly.
                 transitions = [
                     ("draft", "ai_review", "default"),
-                    ("ai_review", "internal_review", "default"),
+                    ("ai_review", "internal_review", "on_approve"),
                     ("internal_review", "drm_review", "on_approve"),
                     ("drm_review", "approved", "on_approve"),
                     ("approved", "finalized", "default"),

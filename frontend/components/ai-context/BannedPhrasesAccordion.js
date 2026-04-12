@@ -12,7 +12,7 @@ const SEVERITY_COLOR = {
   low: 'var(--color-success)',
 };
 
-export default function BannedPhrasesAccordion({ phrases = [], defaultOpen = true }) {
+export default function BannedPhrasesAccordion({ phrases = [], defaultOpen = true, onFix }) {
   return (
     <Accordion
       title="Banned Phrases"
@@ -67,16 +67,45 @@ export default function BannedPhrasesAccordion({ phrases = [], defaultOpen = tru
                   </p>
                 )}
                 {p.suggestion && (
-                  <p
+                  <div
                     style={{
                       margin: '2px 0 0',
-                      fontSize: '11px',
-                      color: 'var(--color-text-tertiary)',
-                      fontStyle: 'italic',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--spacing-xs)',
                     }}
                   >
-                    Try: {p.suggestion}
-                  </p>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '11px',
+                        color: 'var(--color-text-tertiary)',
+                        fontStyle: 'italic',
+                        flex: 1,
+                      }}
+                    >
+                      Try: {p.suggestion}
+                    </p>
+                    {onFix && (
+                      <button
+                        type="button"
+                        onClick={() => onFix(p.phrase, p.suggestion)}
+                        style={{
+                          padding: '1px 6px',
+                          fontSize: '10px',
+                          border: '1px solid var(--color-border-default)',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--color-bg-secondary)',
+                          color: 'var(--color-accent-blue, #2563eb)',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          fontWeight: 'var(--font-weight-medium)',
+                        }}
+                      >
+                        Fix
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             );

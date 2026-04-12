@@ -1,6 +1,7 @@
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 const emptyMember = () => ({
   id: genId('mem'),
@@ -156,7 +157,7 @@ export default function TeamStructure({ data, onChange }) {
           Describe how the solution will be transitioned to the customer's operations team after
           go-live.
         </p>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={supportTransitionPlan}
           onChange={(e) => update({ supportTransitionPlan: e.target.value })}

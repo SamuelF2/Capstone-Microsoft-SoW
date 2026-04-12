@@ -1,6 +1,7 @@
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 const emptyDeliverable = () => ({
   id: genId('del'),
@@ -32,7 +33,7 @@ function DeliverableCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Description
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.description}
           onChange={(e) => onChange({ ...item, description: e.target.value })}
@@ -46,7 +47,7 @@ function DeliverableCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Acceptance Criteria <span style={{ color: 'var(--color-error)' }}>*</span>
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.acceptanceCriteria}
           onChange={(e) => onChange({ ...item, acceptanceCriteria: e.target.value })}

@@ -1,6 +1,7 @@
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 const ASSUMPTION_LABELS = ['Assumption', 'Technical', 'Customer Responsibility', 'Other'];
 const SEVERITY_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
@@ -37,7 +38,7 @@ function AssumptionCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Description
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.text}
           onChange={(e) => onChange({ ...item, text: e.target.value })}
@@ -57,7 +58,7 @@ function ResponsibilityCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Responsibility
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.text}
           onChange={(e) => onChange({ ...item, text: e.target.value })}
@@ -77,7 +78,7 @@ function RiskCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Risk Description <span style={{ color: 'var(--color-error)' }}>*</span>
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.description}
           onChange={(e) => onChange({ ...item, description: e.target.value })}
@@ -127,7 +128,7 @@ function RiskCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Mitigation Strategy
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.mitigation}
           onChange={(e) => onChange({ ...item, mitigation: e.target.value })}

@@ -15,6 +15,8 @@ import AssistChat from '../../components/ai-assist/AssistChat';
 import SectionImproveModal from '../../components/ai-assist/SectionImproveModal';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
+import { hydrateIds } from '../../lib/sectionSchemas';
+import { BannedPhrasesProvider } from '../../contexts/BannedPhrasesContext';
 
 // Map a tab key (from draftTabs registry) to the sowData fields the AI
 // context sidebar should query against. Falls back to the tab key itself.
@@ -202,6 +204,61 @@ export default function DraftPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [improveModalOpen, setImproveModalOpen] = useState(false);
+  const [bannedPhrases, setBannedPhrases] = useState([]);
+
+  // Replace a banned phrase in the focused section's text fields.
+  const handleFixPhrase = (phrase, suggestion) => {
+    if (!phrase || suggestion == null) return;
+    const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
+    if (fields.length === 0) return;
+    const fieldKey = fields[0];
+    const current = sowData?.[fieldKey];
+    if (current == null) return;
+
+    const re = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const replaceInStr = (s) => (typeof s === 'string' ? s.replace(re, suggestion) : s);
+
+    if (typeof current === 'string') {
+      updateSection(fieldKey, replaceInStr(current));
+    } else if (typeof current === 'object' && !Array.isArray(current)) {
+      const updated = { ...current };
+      // Walk known text fields in structured sections
+      for (const key of Object.keys(updated)) {
+        const val = updated[key];
+        if (typeof val === 'string') {
+          updated[key] = replaceInStr(val);
+        } else if (Array.isArray(val)) {
+          updated[key] = val.map((item) => {
+            if (typeof item === 'string') return replaceInStr(item);
+            if (typeof item === 'object' && item !== null) {
+              const patched = { ...item };
+              for (const ik of Object.keys(patched)) {
+                if (typeof patched[ik] === 'string') patched[ik] = replaceInStr(patched[ik]);
+              }
+              return patched;
+            }
+            return item;
+          });
+        }
+      }
+      updateSection(fieldKey, updated);
+    } else if (Array.isArray(current)) {
+      updateSection(
+        fieldKey,
+        current.map((item) => {
+          if (typeof item === 'string') return replaceInStr(item);
+          if (typeof item === 'object' && item !== null) {
+            const patched = { ...item };
+            for (const ik of Object.keys(patched)) {
+              if (typeof patched[ik] === 'string') patched[ik] = replaceInStr(patched[ik]);
+            }
+            return patched;
+          }
+          return item;
+        })
+      );
+    }
+  };
 
   // ── Methodology-aware readiness checks ────────────────────────────────────
   const methodology = sowData?.deliveryMethodology;
@@ -656,21 +713,23 @@ export default function DraftPage() {
               </div>
             )}
 
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: 0.2 }}
-              >
-                {tabs.length > 0 && tabs[activeTab] ? (
-                  tabs[activeTab].render(sowData, updateSection)
-                ) : (
-                  <p className="text-secondary">No content configured for this methodology.</p>
-                )}
-              </motion.div>
-            </AnimatePresence>
+            <BannedPhrasesProvider phrases={bannedPhrases} fixPhrase={handleFixPhrase}>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {tabs.length > 0 && tabs[activeTab] ? (
+                    tabs[activeTab].render(sowData, updateSection)
+                  ) : (
+                    <p className="text-secondary">No content configured for this methodology.</p>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </BannedPhrasesProvider>
           </div>
 
           <div
@@ -686,6 +745,8 @@ export default function DraftPage() {
               sowId={id}
               focusedSectionText={focusedSectionText}
               focusedSectionLabel={activeTabConfig?.label}
+              onBannedPhrasesChange={setBannedPhrases}
+              onFixPhrase={handleFixPhrase}
             />
           </div>
         </div>
@@ -872,18 +933,25 @@ export default function DraftPage() {
         <SectionImproveModal
           open={improveModalOpen}
           onClose={() => setImproveModalOpen(false)}
-          onAccept={(text) => {
+          onAccept={(value) => {
             // Write the accepted AI suggestion back into the first SOW field
             // for the currently focused tab.
             const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
             if (fields.length > 0) {
-              updateSection(fields[0], text);
+              const fieldKey = fields[0];
+              if (typeof value === 'object' && value !== null) {
+                // Structured response — hydrate with client-side IDs
+                updateSection(fieldKey, hydrateIds(fieldKey, value));
+              } else {
+                updateSection(fieldKey, value);
+              }
             }
           }}
           authFetch={authFetch}
           sowId={id}
           sectionLabel={activeTabConfig?.label}
           originalText={focusedSectionText}
+          sectionKey={TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key]?.[0]}
         />
 
         {/* Confirmation modal */}

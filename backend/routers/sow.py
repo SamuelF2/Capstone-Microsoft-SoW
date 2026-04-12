@@ -1791,6 +1791,58 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
     return _row_to_response(dict(updated))
 
 
+@router.post(
+    "/{sow_id}/return-to-draft",
+    response_model=SoWResponse,
+    summary="Return from AI review back to draft for further editing",
+)
+async def return_to_draft(sow_id: int, current_user: CurrentUser) -> SoWResponse:
+    """Resolve the on_send_back transition from ``ai_review`` and move the
+    SoW back to draft status so the author can continue editing.
+
+    Requires the SoW to be in ``ai_review`` status.
+    """
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        if row["status"] != "ai_review":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW status is '{row['status']}', must be 'ai_review' to return to draft",
+            )
+
+        esap = row["esap_level"] or "type-3"
+
+        from services.workflow_engine import execute_transition, resolve_transition
+
+        target = await resolve_transition(conn, sow_id, "ai_review", "on_send_back")
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Workflow has no send-back transition from 'ai_review'. "
+                    "Edit the workflow to add an on_send_back edge before returning."
+                ),
+            )
+
+        await execute_transition(
+            conn,
+            sow_id,
+            target["stage_key"],
+            current_user.id,
+            esap,
+            reason="Returned to draft from AI review",
+        )
+
+        updated = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+
+    return _row_to_response(dict(updated))
+
+
 # ── Full-text search ──────────────────────────────────────────────────────────
 
 
