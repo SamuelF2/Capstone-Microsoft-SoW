@@ -1,5 +1,5 @@
 /**
- * SidebarConnector — draws JetBrains-style SVG connector lines from the
+ * SidebarConnector — draws SVG connector lines from the
  * focused subsection (in the content column) to the AI sidebar, spanning
  * the grid gap with smooth bezier curves.
  *

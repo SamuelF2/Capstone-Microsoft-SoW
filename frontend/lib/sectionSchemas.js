@@ -331,6 +331,12 @@ const SUB_SECTION_LABELS = {
   'assumptionsRisks:assumptions': 'Assumptions',
   'assumptionsRisks:customerResponsibilities': 'Customer Responsibilities',
   'assumptionsRisks:risks': 'Risks',
+  'agileApproach:deliveryApproach': 'Delivery Approach & Methodology',
+  'agileApproach:supportTransitionPlan': 'Support Transition Plan',
+  'agileApproach:sprints': 'Sprint Planning',
+  'productBacklog:items': 'Product Backlog',
+  'supportTransition:transitionPlan': 'Transition Plan',
+  'supportTransition:supportModel': 'Ongoing Support Model',
 };
 
 /**
@@ -403,6 +409,33 @@ export function extractSubSectionText(subSectionId, sowData) {
             `[${r.severity || 'Medium'}] ${r.description || ''}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`
         )
         .join('\n');
+
+    case 'agileApproach:deliveryApproach':
+      return value.deliveryApproach || '';
+    case 'agileApproach:supportTransitionPlan':
+      return value.supportTransitionPlan || '';
+    case 'agileApproach:sprints':
+      return (value.sprints || [])
+        .map(
+          (s) =>
+            `${s.name || 'Sprint'}${s.duration ? ` (${s.duration})` : ''}: ${s.goal || '(no goal)'}${s.stories ? `\n  Stories: ${s.stories}` : ''}`
+        )
+        .join('\n\n');
+
+    case 'productBacklog:items': {
+      const backlogItems = Array.isArray(value) ? value : [];
+      return backlogItems
+        .map(
+          (i) =>
+            `[${i.priority || 'Medium'}] ${i.epic || 'Item'}${i.storyPoints ? ` (${i.storyPoints} pts)` : ''}${i.userStory ? `\n  ${i.userStory}` : ''}${i.sprint ? `\n  Sprint: ${i.sprint}` : ''}`
+        )
+        .join('\n\n');
+    }
+
+    case 'supportTransition:transitionPlan':
+      return value.transitionPlan || '';
+    case 'supportTransition:supportModel':
+      return value.supportModel || '';
 
     default:
       return '';

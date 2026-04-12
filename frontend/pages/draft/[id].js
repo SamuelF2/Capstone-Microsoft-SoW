@@ -870,12 +870,15 @@ export default function DraftPage() {
                 onMouseLeave={() => setImproveBtnHover(false)}
                 style={{
                   width: '100%',
-                  display: 'inline-flex',
+                  display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 6,
                   fontSize: 'var(--font-size-sm)',
                   padding: 'var(--spacing-sm) var(--spacing-md)',
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                  textAlign: 'center',
                 }}
               >
                 <span style={{ fontSize: '14px' }}>&#10024;</span>
@@ -889,7 +892,10 @@ export default function DraftPage() {
         {/* Centred "Improve with AI" modal */}
         <SectionImproveModal
           open={improveModalOpen}
-          onClose={() => setImproveModalOpen(false)}
+          onClose={() => {
+            setImproveModalOpen(false);
+            setImproveBtnHover(false);
+          }}
           onAccept={(value) => {
             const fieldKey = focusedSubSection
               ? getSubSectionFieldKey(focusedSubSection)
