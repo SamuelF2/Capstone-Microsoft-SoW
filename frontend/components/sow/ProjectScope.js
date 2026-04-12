@@ -239,28 +239,32 @@ export default function ProjectScope({ data, onChange }) {
       />
 
       <TwoColumnGrid>
-        <ScopeList
-          title="In Scope"
-          items={inScope}
-          listKey="inScope"
-          onAdd={handleAdd}
-          onRemove={handleRemove}
-          onTextChange={handleTextChange}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        />
-        <ScopeList
-          title="Out of Scope"
-          items={outOfScope}
-          listKey="outOfScope"
-          onAdd={handleAdd}
-          onRemove={handleRemove}
-          onTextChange={handleTextChange}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        />
+        <div data-subsection="projectScope:inScope">
+          <ScopeList
+            title="In Scope"
+            items={inScope}
+            listKey="inScope"
+            onAdd={handleAdd}
+            onRemove={handleRemove}
+            onTextChange={handleTextChange}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          />
+        </div>
+        <div data-subsection="projectScope:outOfScope">
+          <ScopeList
+            title="Out of Scope"
+            items={outOfScope}
+            listKey="outOfScope"
+            onAdd={handleAdd}
+            onRemove={handleRemove}
+            onTextChange={handleTextChange}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          />
+        </div>
       </TwoColumnGrid>
     </div>
   );

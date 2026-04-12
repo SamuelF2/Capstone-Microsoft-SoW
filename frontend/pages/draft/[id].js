@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -15,7 +15,12 @@ import AssistChat from '../../components/ai-assist/AssistChat';
 import SectionImprovePanel from '../../components/ai-assist/SectionImprovePanel';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
-import { hydrateIds } from '../../lib/sectionSchemas';
+import {
+  hydrateIds,
+  getSubSectionLabel,
+  getSubSectionFieldKey,
+  extractSubSectionText,
+} from '../../lib/sectionSchemas';
 import { BannedPhrasesProvider } from '../../contexts/BannedPhrasesContext';
 
 // Map a tab key (from draftTabs registry) to the sowData fields the AI
@@ -290,6 +295,14 @@ export default function DraftPage() {
   const [improveModalOpen, setImproveModalOpen] = useState(false);
   const [improveBtnHover, setImproveBtnHover] = useState(false);
   const [bannedPhrases, setBannedPhrases] = useState([]);
+  const [focusedSubSection, setFocusedSubSection] = useState(null);
+
+  // Track which sub-section the user last interacted with via focus/click.
+  // Reads the closest data-subsection attribute from the event target.
+  const handleContentFocus = useCallback((e) => {
+    const el = e.target.closest?.('[data-subsection]');
+    if (el) setFocusedSubSection(el.getAttribute('data-subsection'));
+  }, []);
 
   // Replace a banned phrase in the focused section's text fields.
   const handleFixPhrase = (phrase, suggestion) => {
@@ -708,7 +721,11 @@ export default function DraftPage() {
             {tabs.map((tab, idx) => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(idx)}
+                onClick={() => {
+                  setActiveTab(idx);
+                  setFocusedSubSection(null);
+                  setImproveModalOpen(false);
+                }}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -771,83 +788,109 @@ export default function DraftPage() {
             alignItems: 'start',
           }}
         >
-          <div style={{ minWidth: 0 }}>
-            {improveModalOpen ? (
-              /* Inline diff panel replaces the section editor */
-              <SectionImprovePanel
-                open={improveModalOpen}
-                onClose={() => setImproveModalOpen(false)}
-                onAccept={(value) => {
-                  const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
-                  if (fields.length > 0) {
-                    const fieldKey = fields[0];
-                    if (typeof value === 'object' && value !== null) {
-                      updateSection(fieldKey, hydrateIds(fieldKey, value));
-                    } else {
-                      updateSection(fieldKey, value);
-                    }
-                  }
-                }}
-                authFetch={authFetch}
-                sowId={id}
-                sectionLabel={activeTabConfig?.label}
-                originalText={focusedSectionText}
-                sectionKey={TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key]?.[0]}
-              />
-            ) : (
-              /* Normal section editor */
-              <div
-                style={{
-                  borderRadius: 'var(--radius-lg)',
-                  transition: 'box-shadow 0.2s ease',
-                  boxShadow: improveBtnHover
-                    ? '0 0 0 2px rgba(59, 130, 246, 0.15), inset 0 0 0 1px rgba(59, 130, 246, 0.1)'
-                    : 'none',
-                  backgroundColor: improveBtnHover ? 'rgba(59, 130, 246, 0.02)' : 'transparent',
-                }}
-              >
-                <BannedPhrasesProvider phrases={bannedPhrases} fixPhrase={handleFixPhrase}>
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={activeTab}
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -12 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      {tabs.length > 0 && tabs[activeTab] ? (
-                        tabs[activeTab].render(sowData, updateSection)
-                      ) : (
-                        <p className="text-secondary">
-                          No content configured for this methodology.
-                        </p>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </BannedPhrasesProvider>
-              </div>
+          {/* Section editor — always visible */}
+          <div
+            style={{ minWidth: 0 }}
+            onFocusCapture={handleContentFocus}
+            onClickCapture={handleContentFocus}
+          >
+            {/* Sub-section highlight when hovering "Improve with AI" */}
+            {improveBtnHover && focusedSubSection && (
+              <style>{`
+                [data-subsection="${focusedSubSection}"] {
+                  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2),
+                              0 0 16px rgba(59, 130, 246, 0.08);
+                  border-radius: var(--radius-lg);
+                  transition: box-shadow 0.2s ease;
+                  background-color: rgba(59, 130, 246, 0.015);
+                }
+              `}</style>
             )}
+            <BannedPhrasesProvider phrases={bannedPhrases} fixPhrase={handleFixPhrase}>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {tabs.length > 0 && tabs[activeTab] ? (
+                    tabs[activeTab].render(sowData, updateSection)
+                  ) : (
+                    <p className="text-secondary">No content configured for this methodology.</p>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </BannedPhrasesProvider>
           </div>
 
+          {/* Sidebar column */}
           <div
             style={{
               position: 'sticky',
               top: 'clamp(var(--spacing-md), calc(50vh - 300px), 30vh)',
-              maxHeight: '80vh',
-              overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
               gap: 'var(--spacing-md)',
             }}
           >
-            <ContextSidebar
-              authFetch={authFetch}
-              sowId={id}
-              focusedSectionText={focusedSectionText}
-              focusedSectionLabel={activeTabConfig?.label}
-              onBannedPhrasesChange={setBannedPhrases}
-              onFixPhrase={handleFixPhrase}
-            />
+            {/* Floating improve panel — anchored to sidebar, extends left */}
+            {improveModalOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  width: '560px',
+                  zIndex: 100,
+                }}
+              >
+                <SectionImprovePanel
+                  open={improveModalOpen}
+                  onClose={() => setImproveModalOpen(false)}
+                  onAccept={(value) => {
+                    const fieldKey = focusedSubSection
+                      ? getSubSectionFieldKey(focusedSubSection)
+                      : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0];
+                    if (fieldKey) {
+                      if (typeof value === 'object' && value !== null) {
+                        updateSection(fieldKey, hydrateIds(fieldKey, value));
+                      } else {
+                        updateSection(fieldKey, value);
+                      }
+                    }
+                  }}
+                  authFetch={authFetch}
+                  sowId={id}
+                  sectionLabel={
+                    (focusedSubSection && getSubSectionLabel(focusedSubSection)) ||
+                    activeTabConfig?.label
+                  }
+                  originalText={
+                    focusedSubSection
+                      ? extractSubSectionText(focusedSubSection, sowData)
+                      : focusedSectionText
+                  }
+                  sectionKey={
+                    focusedSubSection
+                      ? getSubSectionFieldKey(focusedSubSection)
+                      : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0]
+                  }
+                />
+              </div>
+            )}
+
+            <div style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+              <ContextSidebar
+                authFetch={authFetch}
+                sowId={id}
+                focusedSectionText={focusedSectionText}
+                focusedSectionLabel={activeTabConfig?.label}
+                onBannedPhrasesChange={setBannedPhrases}
+                onFixPhrase={handleFixPhrase}
+              />
+            </div>
 
             {/* Improve with AI button — below context sidebar */}
             {activeTabConfig && focusedSectionText?.trim() && !improveModalOpen && (
@@ -868,7 +911,8 @@ export default function DraftPage() {
                 }}
               >
                 <span style={{ fontSize: '14px' }}>&#10024;</span>
-                Improve with AI
+                Improve{focusedSubSection ? ` ${getSubSectionLabel(focusedSubSection)}` : ''} with
+                AI
               </button>
             )}
           </div>

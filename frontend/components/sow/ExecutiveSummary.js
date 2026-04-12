@@ -11,7 +11,7 @@ export default function ExecutiveSummary({ data, onChange }) {
         description="Provide a concise, compelling overview of this engagement — its purpose, key objectives, and the value it delivers to the customer."
       />
 
-      <div className="card">
+      <div className="card" data-subsection="executiveSummary:content">
         <div className="form-group" style={{ marginBottom: 0 }}>
           <label className="form-label">
             Summary <span style={{ color: 'var(--color-error)' }}>*</span>

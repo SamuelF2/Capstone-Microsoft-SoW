@@ -102,23 +102,25 @@ export default function Deliverables({ data, onChange }) {
         description="Define the specific deliverables for this engagement, including acceptance criteria that must be met before sign-off."
       />
 
-      <HorizontalCardList>
-        {items.map((item) => (
-          <DeliverableCard
-            key={item.id}
-            item={item}
-            onChange={handleChange}
-            onRemove={() => handleRemove(item.id)}
-          />
-        ))}
-        <AddCardButton label="Add Deliverable" width="220px" onClick={handleAdd} />
-      </HorizontalCardList>
+      <div data-subsection="deliverables:items">
+        <HorizontalCardList>
+          {items.map((item) => (
+            <DeliverableCard
+              key={item.id}
+              item={item}
+              onChange={handleChange}
+              onRemove={() => handleRemove(item.id)}
+            />
+          ))}
+          <AddCardButton label="Add Deliverable" width="220px" onClick={handleAdd} />
+        </HorizontalCardList>
 
-      {items.length === 0 && (
-        <p className="text-sm text-secondary" style={{ marginTop: 'var(--spacing-md)' }}>
-          No deliverables added yet. Click "+ Add Deliverable" to get started.
-        </p>
-      )}
+        {items.length === 0 && (
+          <p className="text-sm text-secondary" style={{ marginTop: 'var(--spacing-md)' }}>
+            No deliverables added yet. Click &quot;+ Add Deliverable&quot; to get started.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

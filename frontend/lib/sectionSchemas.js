@@ -318,3 +318,93 @@ export function renderStructured(sectionKey, data) {
   const fn = RENDERERS[sectionKey];
   return fn ? fn(data) : null;
 }
+
+// ── Sub-section definitions ────────────────────────────────────────────────
+
+const SUB_SECTION_LABELS = {
+  'executiveSummary:content': 'Executive Summary',
+  'projectScope:inScope': 'In Scope',
+  'projectScope:outOfScope': 'Out of Scope',
+  'deliverables:items': 'Deliverables',
+  'teamStructure:members': 'Team Members',
+  'teamStructure:supportTransitionPlan': 'Support Transition Plan',
+  'assumptionsRisks:assumptions': 'Assumptions',
+  'assumptionsRisks:customerResponsibilities': 'Customer Responsibilities',
+  'assumptionsRisks:risks': 'Risks',
+};
+
+/**
+ * Get the human-readable label for a sub-section ID (e.g. "assumptionsRisks:risks" → "Risks").
+ */
+export function getSubSectionLabel(subSectionId) {
+  return SUB_SECTION_LABELS[subSectionId] || null;
+}
+
+/**
+ * Extract the sowData field key from a sub-section ID (e.g. "assumptionsRisks:risks" → "assumptionsRisks").
+ */
+export function getSubSectionFieldKey(subSectionId) {
+  if (!subSectionId) return null;
+  return subSectionId.split(':')[0];
+}
+
+/**
+ * Extract human-readable text for a specific sub-section from sowData.
+ * Used to send focused text to the AI improve flow.
+ */
+export function extractSubSectionText(subSectionId, sowData) {
+  if (!subSectionId || !sowData) return '';
+  const fieldKey = subSectionId.split(':')[0];
+  const value = sowData[fieldKey];
+  if (!value) return '';
+
+  switch (subSectionId) {
+    case 'executiveSummary:content':
+      return typeof value === 'string' ? value : value.content || '';
+
+    case 'projectScope:inScope':
+      return (value.inScope || []).map((i) => `- ${i.text || ''}`).join('\n');
+    case 'projectScope:outOfScope':
+      return (value.outOfScope || []).map((i) => `- ${i.text || ''}`).join('\n');
+
+    case 'deliverables:items': {
+      const items = Array.isArray(value) ? value : [];
+      return items
+        .map((d) => {
+          const parts = [];
+          if (d.name) parts.push(d.name);
+          if (d.description) parts.push(d.description);
+          if (d.acceptanceCriteria) parts.push(`Acceptance: ${d.acceptanceCriteria}`);
+          return parts.join('\n') || '';
+        })
+        .join('\n\n');
+    }
+
+    case 'teamStructure:members':
+      return (value.members || [])
+        .map(
+          (m) =>
+            `${m.role || 'Role'}: ${m.assignedPerson || 'TBD'} (${m.onshore || 0} onshore, ${m.offshore || 0} offshore)`
+        )
+        .join('\n');
+    case 'teamStructure:supportTransitionPlan':
+      return value.supportTransitionPlan || '';
+
+    case 'assumptionsRisks:assumptions':
+      return (value.assumptions || [])
+        .map((a) => `[${a.label || 'Assumption'}] ${a.text || ''}`)
+        .join('\n');
+    case 'assumptionsRisks:customerResponsibilities':
+      return (value.customerResponsibilities || []).map((r) => `- ${r.text || ''}`).join('\n');
+    case 'assumptionsRisks:risks':
+      return (value.risks || [])
+        .map(
+          (r) =>
+            `[${r.severity || 'Medium'}] ${r.description || ''}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`
+        )
+        .join('\n');
+
+    default:
+      return '';
+  }
+}
