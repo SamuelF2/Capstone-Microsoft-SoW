@@ -1119,34 +1119,65 @@ export default function AssignmentReviewPage() {
                         >
                           Approve with Conditions
                         </button>
+
+                        <button
+                          className="btn btn-secondary"
+                          style={{
+                            color: 'var(--color-warning)',
+                            borderColor: 'var(--color-warning)',
+                          }}
+                          onClick={() => setModal('rejected')}
+                          disabled={submitting}
+                        >
+                          Send Back to Draft
+                        </button>
                       </div>
                     ) : (
                       <div
                         style={{
-                          padding: 'var(--spacing-md)',
-                          borderRadius: 'var(--radius-md)',
-                          backgroundColor: 'rgba(74,222,128,0.1)',
-                          border: '1px solid rgba(74,222,128,0.3)',
-                          textAlign: 'center',
-                          fontSize: 'var(--font-size-sm)',
-                          color: 'var(--color-success)',
-                          fontWeight: 'var(--font-weight-semibold)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 'var(--spacing-sm)',
                           flexShrink: 0,
                         }}
                       >
-                        ✓ Your review is complete
-                        {checklist?.decision && (
-                          <div
-                            style={{
-                              marginTop: '4px',
-                              fontSize: 'var(--font-size-xs)',
-                              fontWeight: 'normal',
-                              color: 'var(--color-text-tertiary)',
-                            }}
-                          >
-                            Decision: {checklist.decision.replace(/-/g, ' ')}
-                          </div>
-                        )}
+                        <div
+                          style={{
+                            padding: 'var(--spacing-md)',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: 'rgba(74,222,128,0.1)',
+                            border: '1px solid rgba(74,222,128,0.3)',
+                            textAlign: 'center',
+                            fontSize: 'var(--font-size-sm)',
+                            color: 'var(--color-success)',
+                            fontWeight: 'var(--font-weight-semibold)',
+                          }}
+                        >
+                          ✓ Your review is complete
+                          {checklist?.decision && (
+                            <div
+                              style={{
+                                marginTop: '4px',
+                                fontSize: 'var(--font-size-xs)',
+                                fontWeight: 'normal',
+                                color: 'var(--color-text-tertiary)',
+                              }}
+                            >
+                              Decision: {checklist.decision.replace(/-/g, ' ')}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          className="btn btn-secondary"
+                          style={{
+                            color: 'var(--color-warning)',
+                            borderColor: 'var(--color-warning)',
+                          }}
+                          onClick={() => setModal('rejected')}
+                          disabled={submitting}
+                        >
+                          Send Back to Draft
+                        </button>
                       </div>
                     )}
                   </div>

@@ -30,6 +30,7 @@ const TAB_KEY_TO_SOW_FIELDS = {
   'assumptions-risks': ['assumptionsRisks'],
   support: ['supportTransition'],
   'support-transition': ['supportTransition'],
+  migration: ['migrationStrategy', 'workloadAssessment'],
 };
 
 function extractFocusedText(sowData, tabKey) {
@@ -644,7 +645,14 @@ export default function DraftPage() {
             </AnimatePresence>
           </div>
 
-          <div style={{ position: 'sticky', top: 'var(--spacing-md)' }}>
+          <div
+            style={{
+              position: 'sticky',
+              top: 'clamp(var(--spacing-md), calc(50vh - 300px), 30vh)',
+              maxHeight: '80vh',
+              overflowY: 'auto',
+            }}
+          >
             <ContextSidebar
               authFetch={authFetch}
               sowId={id}

@@ -129,7 +129,7 @@ function WorkloadCard({ item, onChange, onRemove }) {
 }
 
 export default function WorkloadAssessment({ data, onChange }) {
-  const workloads = data ?? [];
+  const workloads = Array.isArray(data) ? data : [];
 
   const patternCounts = MIGRATION_PATTERNS.reduce((acc, p) => {
     acc[p] = workloads.filter((w) => w.migrationPattern === p).length;
