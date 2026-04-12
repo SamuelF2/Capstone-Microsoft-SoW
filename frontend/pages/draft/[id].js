@@ -12,7 +12,7 @@ import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPane
 import ActivityLog from '../../components/ActivityLog';
 import ContextSidebar from '../../components/ai-context/ContextSidebar';
 import AssistChat from '../../components/ai-assist/AssistChat';
-import SectionImproveModal from '../../components/ai-assist/SectionImproveModal';
+import SectionImprovePanel from '../../components/ai-assist/SectionImprovePanel';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
 import { hydrateIds } from '../../lib/sectionSchemas';
@@ -36,6 +36,90 @@ const TAB_KEY_TO_SOW_FIELDS = {
   migration: ['migrationStrategy', 'workloadAssessment'],
 };
 
+/**
+ * Extract human-readable text from a structured section value.
+ * Avoids JSON.stringify, which produces garbage for objects and confuses
+ * the AI prompt / "Original" panel in the improve modal.
+ */
+function sectionToText(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+
+  // executiveSummary: { content: "..." }
+  if (typeof value.content === 'string') return value.content;
+
+  const lines = [];
+
+  // projectScope / cloudAdoptionScope: { inScope: [{text}], outOfScope: [{text}] }
+  if (Array.isArray(value.inScope) || Array.isArray(value.outOfScope)) {
+    if (value.inScope?.length) {
+      lines.push('In Scope:');
+      value.inScope.forEach((item) => lines.push(`- ${item.text || ''}`));
+    }
+    if (value.outOfScope?.length) {
+      lines.push('Out of Scope:');
+      value.outOfScope.forEach((item) => lines.push(`- ${item.text || ''}`));
+    }
+    return lines.join('\n');
+  }
+
+  // deliverables: [{ name, description, acceptanceCriteria, ... }]
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        const parts = [];
+        if (item.name) parts.push(item.name);
+        if (item.description) parts.push(item.description);
+        if (item.acceptanceCriteria) parts.push(`Acceptance: ${item.acceptanceCriteria}`);
+        if (item.text) parts.push(item.text);
+        return parts.join('\n') || JSON.stringify(item);
+      })
+      .join('\n\n');
+  }
+
+  // teamStructure: { members: [...], supportTransitionPlan: "..." }
+  if (Array.isArray(value.members)) {
+    value.members.forEach((m) => {
+      lines.push(
+        `${m.role || 'Role'}: ${m.assignedPerson || 'TBD'} (${m.onshore || 0} onshore, ${m.offshore || 0} offshore)`
+      );
+    });
+    if (value.supportTransitionPlan)
+      lines.push(`\nSupport Transition Plan:\n${value.supportTransitionPlan}`);
+    return lines.join('\n');
+  }
+
+  // assumptionsRisks: { assumptions: [...], customerResponsibilities: [...], risks: [...] }
+  if (Array.isArray(value.assumptions) || Array.isArray(value.risks)) {
+    if (value.assumptions?.length) {
+      lines.push('Assumptions:');
+      value.assumptions.forEach((a) =>
+        lines.push(`- [${a.label || 'Assumption'}] ${a.text || ''}`)
+      );
+    }
+    if (value.customerResponsibilities?.length) {
+      lines.push('Customer Responsibilities:');
+      value.customerResponsibilities.forEach((r) => lines.push(`- ${r.text || ''}`));
+    }
+    if (value.risks?.length) {
+      lines.push('Risks:');
+      value.risks.forEach((r) =>
+        lines.push(
+          `- [${r.severity || 'Medium'}] ${r.description || ''}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`
+        )
+      );
+    }
+    return lines.join('\n');
+  }
+
+  // Fallback: walk string properties (avoids numeric-key garbage from corrupted objects)
+  const textFields = Object.entries(value)
+    .filter(([k, v]) => typeof v === 'string' && !/^\d+$/.test(k))
+    .map(([, v]) => v);
+  return textFields.join('\n\n') || JSON.stringify(value);
+}
+
 function extractFocusedText(sowData, tabKey) {
   if (!sowData || !tabKey) return '';
   const fields = TAB_KEY_TO_SOW_FIELDS[tabKey] || [tabKey];
@@ -43,7 +127,7 @@ function extractFocusedText(sowData, tabKey) {
   for (const f of fields) {
     const v = sowData[f];
     if (!v) continue;
-    parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+    parts.push(sectionToText(v));
   }
   return parts.join('\n\n');
 }
@@ -204,6 +288,7 @@ export default function DraftPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [improveModalOpen, setImproveModalOpen] = useState(false);
+  const [improveBtnHover, setImproveBtnHover] = useState(false);
   const [bannedPhrases, setBannedPhrases] = useState([]);
 
   // Replace a banned phrase in the focused section's text fields.
@@ -687,49 +772,61 @@ export default function DraftPage() {
           }}
         >
           <div style={{ minWidth: 0 }}>
-            {/* Per-section Improve with AI button */}
-            {activeTabConfig && focusedSectionText?.trim() && (
+            {improveModalOpen ? (
+              /* Inline diff panel replaces the section editor */
+              <SectionImprovePanel
+                open={improveModalOpen}
+                onClose={() => setImproveModalOpen(false)}
+                onAccept={(value) => {
+                  const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
+                  if (fields.length > 0) {
+                    const fieldKey = fields[0];
+                    if (typeof value === 'object' && value !== null) {
+                      updateSection(fieldKey, hydrateIds(fieldKey, value));
+                    } else {
+                      updateSection(fieldKey, value);
+                    }
+                  }
+                }}
+                authFetch={authFetch}
+                sowId={id}
+                sectionLabel={activeTabConfig?.label}
+                originalText={focusedSectionText}
+                sectionKey={TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key]?.[0]}
+              />
+            ) : (
+              /* Normal section editor */
               <div
                 style={{
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                  marginBottom: 'var(--spacing-sm)',
+                  borderRadius: 'var(--radius-lg)',
+                  transition: 'box-shadow 0.2s ease',
+                  boxShadow: improveBtnHover
+                    ? '0 0 0 2px rgba(59, 130, 246, 0.15), inset 0 0 0 1px rgba(59, 130, 246, 0.1)'
+                    : 'none',
+                  backgroundColor: improveBtnHover ? 'rgba(59, 130, 246, 0.02)' : 'transparent',
                 }}
               >
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setImproveModalOpen(true)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: 'var(--font-size-xs)',
-                  }}
-                >
-                  <span style={{ fontSize: '14px' }}>&#10024;</span>
-                  Improve with AI
-                </button>
+                <BannedPhrasesProvider phrases={bannedPhrases} fixPhrase={handleFixPhrase}>
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={activeTab}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -12 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {tabs.length > 0 && tabs[activeTab] ? (
+                        tabs[activeTab].render(sowData, updateSection)
+                      ) : (
+                        <p className="text-secondary">
+                          No content configured for this methodology.
+                        </p>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </BannedPhrasesProvider>
               </div>
             )}
-
-            <BannedPhrasesProvider phrases={bannedPhrases} fixPhrase={handleFixPhrase}>
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={activeTab}
-                  initial={{ opacity: 0, x: 12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -12 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  {tabs.length > 0 && tabs[activeTab] ? (
-                    tabs[activeTab].render(sowData, updateSection)
-                  ) : (
-                    <p className="text-secondary">No content configured for this methodology.</p>
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            </BannedPhrasesProvider>
           </div>
 
           <div
@@ -738,6 +835,9 @@ export default function DraftPage() {
               top: 'clamp(var(--spacing-md), calc(50vh - 300px), 30vh)',
               maxHeight: '80vh',
               overflowY: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--spacing-md)',
             }}
           >
             <ContextSidebar
@@ -748,6 +848,29 @@ export default function DraftPage() {
               onBannedPhrasesChange={setBannedPhrases}
               onFixPhrase={handleFixPhrase}
             />
+
+            {/* Improve with AI button — below context sidebar */}
+            {activeTabConfig && focusedSectionText?.trim() && !improveModalOpen && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setImproveModalOpen(true)}
+                onMouseEnter={() => setImproveBtnHover(true)}
+                onMouseLeave={() => setImproveBtnHover(false)}
+                style={{
+                  width: '100%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  fontSize: 'var(--font-size-sm)',
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                }}
+              >
+                <span style={{ fontSize: '14px' }}>&#10024;</span>
+                Improve with AI
+              </button>
+            )}
           </div>
         </div>
 
@@ -928,31 +1051,6 @@ export default function DraftPage() {
             }}
           />
         </div>
-
-        {/* Section Improve Modal */}
-        <SectionImproveModal
-          open={improveModalOpen}
-          onClose={() => setImproveModalOpen(false)}
-          onAccept={(value) => {
-            // Write the accepted AI suggestion back into the first SOW field
-            // for the currently focused tab.
-            const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
-            if (fields.length > 0) {
-              const fieldKey = fields[0];
-              if (typeof value === 'object' && value !== null) {
-                // Structured response — hydrate with client-side IDs
-                updateSection(fieldKey, hydrateIds(fieldKey, value));
-              } else {
-                updateSection(fieldKey, value);
-              }
-            }
-          }}
-          authFetch={authFetch}
-          sowId={id}
-          sectionLabel={activeTabConfig?.label}
-          originalText={focusedSectionText}
-          sectionKey={TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key]?.[0]}
-        />
 
         {/* Confirmation modal */}
         {showConfirm && (
