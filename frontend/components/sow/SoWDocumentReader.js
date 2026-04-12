@@ -150,7 +150,7 @@ function isEmpty(val) {
  *
  * The recursive depth controls heading sizing for nested object keys.
  */
-function DocValue({ value, search, depth = 0, sectionKey, sectionRefs }) {
+function DocValue({ value, search, depth = 0, sectionKey, sectionRefs, sectionNumber }) {
   if (value == null || isEmpty(value)) return null;
 
   if (typeof value === 'string') {
@@ -200,7 +200,7 @@ function DocValue({ value, search, depth = 0, sectionKey, sectionRefs }) {
     if (entries.length === 0) return null;
     return (
       <div style={{ margin: '0 0 1em' }}>
-        {entries.map(([k, v]) => (
+        {entries.map(([k, v], index) => (
           <DocField
             key={k}
             fieldKey={k}
@@ -210,6 +210,8 @@ function DocValue({ value, search, depth = 0, sectionKey, sectionRefs }) {
             depth={depth + 1}
             sectionKey={sectionKey}
             sectionRefs={sectionRefs}
+            sectionNumber={sectionNumber}
+            number={index}
           />
         ))}
       </div>
@@ -241,7 +243,7 @@ function DocItem({ item, index, search, depth }) {
   return (
     <div
       style={{
-        margin: '0 0 0.85em',
+        margin: '0 20px 0.85em',
         padding: '0.7em 0.95em',
         borderLeft: '3px solid var(--color-border-default)',
         backgroundColor: 'var(--color-bg-secondary)',
@@ -354,7 +356,17 @@ function FieldRow({ label, value, search, depth }) {
  * When this is a top-level sub-section (depth === 1), registers an anchor
  * ref so the TOC scroll-spy and jump navigation work for sub-headers.
  */
-function DocField({ fieldKey, label, value, search, depth, sectionKey, sectionRefs }) {
+function DocField({
+  fieldKey,
+  label,
+  value,
+  search,
+  depth,
+  sectionKey,
+  sectionRefs,
+  sectionNumber,
+  number,
+}) {
   // Build an anchor id when this is a direct child of a top-level section,
   // matching the anchor format used in buildSectionList().
   const anchorId = depth === 1 && sectionKey ? `sow-section-${sectionKey}-${fieldKey}` : null;
@@ -376,18 +388,18 @@ function DocField({ fieldKey, label, value, search, depth, sectionKey, sectionRe
     >
       <h4
         style={{
-          margin: '0 0 0.4em',
-          fontSize: '0.95em',
+          margin: '30px 10px 0.4em',
+          fontSize: '1.15em',
           fontWeight: 'var(--font-weight-semibold)',
           color: 'var(--color-text-secondary)',
         }}
       >
-        {label}
+        {sectionNumber ? `${sectionNumber}.${number + 1}` : null} {label}
       </h4>
       {typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? (
         <p
           style={{
-            margin: '0 0 0.85em',
+            margin: '0px 20px 0.85em',
             lineHeight: 1.7,
             whiteSpace: 'pre-wrap',
             color: 'var(--color-text-primary)',
@@ -1032,6 +1044,7 @@ export default function SoWDocumentReader({ sow }) {
                   search={search}
                   sectionKey={s.key}
                   sectionRefs={sectionRefs}
+                  sectionNumber={idx + 1}
                 />
               </section>
             ))}
