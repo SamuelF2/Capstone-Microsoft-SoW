@@ -18,11 +18,16 @@ def get_client():
         return _client
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
     if not endpoint or not api_key:
         raise RuntimeError("AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY must be set in .env")
-    from openai import OpenAI
+    from openai import AzureOpenAI
 
-    _client = OpenAI(base_url=endpoint, api_key=api_key)
+    _client = AzureOpenAI(
+        azure_endpoint=endpoint,
+        api_key=api_key,
+        api_version=api_version,
+    )
     return _client
 
 
