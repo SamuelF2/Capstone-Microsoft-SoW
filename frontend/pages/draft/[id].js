@@ -12,6 +12,7 @@ import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPane
 import ActivityLog from '../../components/ActivityLog';
 import ContextSidebar from '../../components/ai-context/ContextSidebar';
 import AssistChat from '../../components/ai-assist/AssistChat';
+import SectionImproveModal from '../../components/ai-assist/SectionImproveModal';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
 
@@ -200,6 +201,7 @@ export default function DraftPage() {
 
   const [showConfirm, setShowConfirm] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
+  const [improveModalOpen, setImproveModalOpen] = useState(false);
 
   // ── Methodology-aware readiness checks ────────────────────────────────────
   const methodology = sowData?.deliveryMethodology;
@@ -628,6 +630,32 @@ export default function DraftPage() {
           }}
         >
           <div style={{ minWidth: 0 }}>
+            {/* Per-section Improve with AI button */}
+            {activeTabConfig && focusedSectionText?.trim() && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  marginBottom: 'var(--spacing-sm)',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setImproveModalOpen(true)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 'var(--font-size-xs)',
+                  }}
+                >
+                  <span style={{ fontSize: '14px' }}>&#10024;</span>
+                  Improve with AI
+                </button>
+              </div>
+            )}
+
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeTab}
@@ -828,8 +856,35 @@ export default function DraftPage() {
             zIndex: 900,
           }}
         >
-          <AssistChat authFetch={authFetch} sowId={id} />
+          <AssistChat
+            authFetch={authFetch}
+            sowId={id}
+            onInsert={(text) => {
+              const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
+              if (fields.length > 0) {
+                updateSection(fields[0], text);
+              }
+            }}
+          />
         </div>
+
+        {/* Section Improve Modal */}
+        <SectionImproveModal
+          open={improveModalOpen}
+          onClose={() => setImproveModalOpen(false)}
+          onAccept={(text) => {
+            // Write the accepted AI suggestion back into the first SOW field
+            // for the currently focused tab.
+            const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
+            if (fields.length > 0) {
+              updateSection(fields[0], text);
+            }
+          }}
+          authFetch={authFetch}
+          sowId={id}
+          sectionLabel={activeTabConfig?.label}
+          originalText={focusedSectionText}
+        />
 
         {/* Confirmation modal */}
         {showConfirm && (

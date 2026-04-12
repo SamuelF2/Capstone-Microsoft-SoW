@@ -498,6 +498,8 @@ export default function DrmReview() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiError, setAiError] = useState(null);
+  const [insightsData, setInsightsData] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
 
   // ── Loader: parallel-fetches sow + checklist + status + workflow ────────
   const load = useCallback(
@@ -609,6 +611,28 @@ export default function DrmReview() {
       })
       .finally(() => {
         if (!ctrl.signal.aborted) setSummaryLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [id, user, checklistRole, authFetch]);
+
+  // Load role-specific AI insights (gracefully degrades — returns empty if ML
+  // endpoint not yet shipped)
+  useEffect(() => {
+    if (!id || !user || !checklistRole) return;
+    const ctrl = new AbortController();
+    setInsightsLoading(true);
+    aiClient
+      .insights(authFetch, id, checklistRole, { signal: ctrl.signal })
+      .then((result) => {
+        if (!ctrl.signal.aborted) {
+          setInsightsData(result.ok ? result.data : null);
+        }
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setInsightsData(null);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setInsightsLoading(false);
       });
     return () => ctrl.abort();
   }, [id, user, checklistRole, authFetch]);
@@ -1010,6 +1034,98 @@ export default function DrmReview() {
                   summaryData={summaryData}
                   loading={summaryLoading}
                 />
+
+                {/* AI role-specific insights — hidden when endpoint not shipped */}
+                {insightsLoading && (
+                  <div
+                    style={{
+                      marginTop: 'var(--spacing-md)',
+                      padding: 'var(--spacing-md)',
+                      borderRadius: 'var(--radius-lg)',
+                      border: '1px solid var(--color-border-default)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--color-text-tertiary)',
+                      }}
+                    >
+                      Loading AI insights…
+                    </span>
+                  </div>
+                )}
+                {!insightsLoading && insightsData?.summary && (
+                  <div
+                    style={{
+                      marginTop: 'var(--spacing-md)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-lg)',
+                      overflow: 'hidden',
+                      backgroundColor: 'var(--color-bg-primary)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: 'var(--spacing-sm) var(--spacing-md)',
+                        borderBottom: '1px solid var(--color-border-default)',
+                        backgroundColor: 'var(--color-bg-secondary)',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 'var(--font-size-xs)',
+                          fontWeight: 'var(--font-weight-semibold)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          color: 'var(--color-text-tertiary)',
+                        }}
+                      >
+                        AI Insights
+                      </span>
+                    </div>
+                    <div style={{ padding: 'var(--spacing-md)' }}>
+                      <p
+                        style={{
+                          margin: '0 0 var(--spacing-sm)',
+                          fontSize: 'var(--font-size-sm)',
+                          color: 'var(--color-text-primary)',
+                          lineHeight: 'var(--line-height-relaxed)',
+                        }}
+                      >
+                        {insightsData.summary}
+                      </p>
+                      {Array.isArray(insightsData.flags) && insightsData.flags.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            marginTop: 'var(--spacing-xs)',
+                          }}
+                        >
+                          {insightsData.flags.map((flag, i) => (
+                            <div
+                              key={i}
+                              style={{
+                                fontSize: 'var(--font-size-xs)',
+                                color: 'var(--color-warning)',
+                                padding: '2px 0 2px 8px',
+                              }}
+                            >
+                              ⚠{' '}
+                              {typeof flag === 'string'
+                                ? flag
+                                : flag.message || JSON.stringify(flag)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

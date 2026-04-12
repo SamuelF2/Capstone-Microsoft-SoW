@@ -47,7 +47,7 @@ function mapAnalysisToRecommendations(data) {
     overall_score: data.overall_score,
     summary: data.summary,
     generated_at: data.generated_at,
-    model_version: data.model_version,
+    model_version: data.model_version || data.generation_meta?.model_version,
   };
 }
 

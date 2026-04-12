@@ -29,13 +29,14 @@ function ChatIcon({ size = 14 }) {
   );
 }
 
-function MessageBubble({ role, text }) {
+function MessageBubble({ role, text, onInsert, onCopy }) {
   const isUser = role === 'user';
   return (
     <div
       style={{
         display: 'flex',
-        justifyContent: isUser ? 'flex-end' : 'flex-start',
+        flexDirection: 'column',
+        alignItems: isUser ? 'flex-end' : 'flex-start',
       }}
     >
       <div
@@ -55,11 +56,67 @@ function MessageBubble({ role, text }) {
       >
         {text}
       </div>
+      {!isUser && (onInsert || onCopy) && (
+        <div
+          style={{
+            display: 'flex',
+            gap: '6px',
+            marginTop: '3px',
+          }}
+        >
+          {onInsert && (
+            <button
+              type="button"
+              onClick={() => onInsert(text)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '10px',
+                color: 'var(--color-accent-blue, #2563eb)',
+                padding: '1px 4px',
+                borderRadius: 'var(--radius-sm)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              Insert
+            </button>
+          )}
+          {onCopy && (
+            <button
+              type="button"
+              onClick={() => onCopy(text)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '10px',
+                color: 'var(--color-text-tertiary)',
+                padding: '1px 4px',
+                borderRadius: 'var(--radius-sm)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              Copy
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-export default function AssistChat({ authFetch, sowId, defaultOpen = false }) {
+export default function AssistChat({ authFetch, sowId, defaultOpen = false, onInsert }) {
   const [open, setOpen] = useState(defaultOpen);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -191,7 +248,19 @@ export default function AssistChat({ authFetch, sowId, defaultOpen = false }) {
           </p>
         )}
         {messages.map((m, i) => (
-          <MessageBubble key={i} role={m.role} text={m.text} />
+          <MessageBubble
+            key={i}
+            role={m.role}
+            text={m.text}
+            onInsert={m.role === 'assistant' ? onInsert : undefined}
+            onCopy={
+              m.role === 'assistant'
+                ? (txt) => {
+                    if (navigator.clipboard) navigator.clipboard.writeText(txt);
+                  }
+                : undefined
+            }
+          />
         ))}
         {pending && (
           <p

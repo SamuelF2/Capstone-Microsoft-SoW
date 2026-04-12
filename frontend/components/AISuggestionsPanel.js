@@ -210,7 +210,10 @@ export default function AISuggestionsPanel({
           {hasData && !loading && (
             <>
               {/* Provenance row */}
-              {(analysisResult.generated_at || analysisResult.model_version || onRunAnalysis) && (
+              {(analysisResult.generated_at ||
+                analysisResult.model_version ||
+                analysisResult.generation_meta?.model_version ||
+                onRunAnalysis) && (
                 <div
                   style={{
                     display: 'flex',
@@ -228,7 +231,9 @@ export default function AISuggestionsPanel({
                   >
                     {formatGeneratedAt(analysisResult.generated_at) &&
                       `Generated ${formatGeneratedAt(analysisResult.generated_at)}`}
-                    {analysisResult.model_version && ` · ${analysisResult.model_version}`}
+                    {(analysisResult.model_version ||
+                      analysisResult.generation_meta?.model_version) &&
+                      ` · ${analysisResult.model_version || analysisResult.generation_meta?.model_version}`}
                   </span>
                   {onRunAnalysis && (
                     <button

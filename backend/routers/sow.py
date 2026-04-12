@@ -65,7 +65,7 @@ from models import (
     SoWUpdate,
 )
 from pydantic import BaseModel
-from services.ai import analyze_sow
+from services.ai import AIUnavailableError, analyze_sow, get_cached_analysis
 from utils.db_helpers import (
     create_assignment_with_prior,
     insert_history,
@@ -1010,6 +1010,12 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
+        # Grab kg_node_id before deletion for KG cleanup
+        kg_node_id = await conn.fetchval(
+            "SELECT kg_node_id FROM sow_documents WHERE id = $1",
+            sow_id,
+        )
+
         # Record deletion before the CASCADE removes related rows.
         # The FK is ON DELETE SET NULL so the history row survives.
         await insert_history(
@@ -1023,6 +1029,14 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
     if result == "DELETE 0":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+    # Best-effort KG cleanup (fire-and-forget, don't block response)
+    if kg_node_id:
+        import asyncio
+
+        from services.ai import delete_sow_from_kg
+
+        asyncio.create_task(delete_sow_from_kg(kg_node_id))
 
     return {"deleted": sow_id}
 
@@ -1851,8 +1865,9 @@ async def search_sows(
 async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult:
     """Trigger AI analysis on a SoW and store results in ``ai_suggestion``.
 
-    Returns the full analysis result. The SoW must be in ``ai_review`` or
-    ``draft`` status (to allow optional pre-submission analysis).
+    Fans out parallel calls to the ML GraphRAG service via
+    ``services.ai.analyze_sow``. When the ML service is unavailable,
+    returns HTTP 503 with ``{message, retryable}``.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
@@ -1867,26 +1882,36 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
                 detail=f"SoW status is '{row['status']}', must be 'draft' or 'ai_review' for AI analysis",
             )
 
-        content = row["content"]
-        if isinstance(content, str):
-            content = json.loads(content)
-        content = content or {}
+        try:
+            result = await analyze_sow(conn, dict(row))
+        except AIUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": str(exc), "retryable": exc.retryable},
+            ) from exc
 
-        # Call AI service stub
-        result = await analyze_sow(content, row["methodology"] or "")
-
-        # Store in ai_suggestion table
+        # Persist in ai_suggestion table with provenance
+        rec_dump = result.model_dump(
+            include={
+                "violations",
+                "checklist",
+                "suggestions",
+                "approval",
+                "overall_score",
+                "summary",
+            }
+        )
         ai_id = await conn.fetchval(
             """
-            INSERT INTO ai_suggestion (flag, validation_recommendation, risks)
-            VALUES ($1, $2::jsonb, $3::jsonb)
+            INSERT INTO ai_suggestion (flag, validation_recommendation, risks, generated_at, generation_meta)
+            VALUES ($1, $2::jsonb, $3::jsonb, $4, $5::jsonb)
             RETURNING id
             """,
             result.approval.level,
-            json.dumps(
-                result.model_dump(include={"violations", "checklist", "suggestions", "approval"})
-            ),
+            json.dumps(rec_dump),
             json.dumps([r.model_dump() for r in result.risks]),
+            result.generated_at,
+            json.dumps(result.generation_meta) if result.generation_meta else None,
         )
 
         # Link to SoW
@@ -1901,7 +1926,11 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
             sow_id=sow_id,
             user_id=current_user.id,
             change_type="ai_analysis",
-            diff={"ai_suggestion_id": ai_id, "overall_score": result.overall_score},
+            diff={
+                "ai_suggestion_id": ai_id,
+                "overall_score": result.overall_score,
+                "endpoints_used": (result.generation_meta or {}).get("endpoints_used", []),
+            },
         )
 
     return result
@@ -1921,45 +1950,13 @@ async def get_cached_ai_analysis(sow_id: int, current_user: CurrentUser):
     """
     async with database.pg_pool.acquire() as conn:
         await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
-        row = await conn.fetchrow(
-            """
-            SELECT s.ai_suggestion_id, a.validation_recommendation, a.risks
-            FROM sow_documents s
-            LEFT JOIN ai_suggestion a ON a.id = s.ai_suggestion_id
-            WHERE s.id = $1
-            """,
-            sow_id,
-        )
-        if not row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
-        if not row["ai_suggestion_id"]:
-            return None
 
-        # Reconstruct the typed result from the cached jsonb columns. The
-        # ai_analyze writer stores violations/checklist/suggestions/approval
-        # in `validation_recommendation` and risks in their own column.
-        rec = row["validation_recommendation"]
-        risks = row["risks"]
-        if isinstance(rec, str):
-            rec = json.loads(rec)
-        if isinstance(risks, str):
-            risks = json.loads(risks)
-        rec = rec or {}
-        return AIAnalysisResult(
-            violations=rec.get("violations", []),
-            risks=risks or [],
-            approval=rec.get("approval")
-            or {
-                "level": "Yellow",
-                "esap_type": "Type-2",
-                "reason": "",
-                "chain": [],
-            },
-            checklist=rec.get("checklist", []),
-            suggestions=rec.get("suggestions", []),
-            overall_score=rec.get("overall_score"),
-            summary=rec.get("summary"),
-        )
+        # Verify SoW exists
+        exists = await conn.fetchval("SELECT 1 FROM sow_documents WHERE id = $1", sow_id)
+        if not exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        return await get_cached_analysis(conn, sow_id)
 
 
 # ── Skip AI Review (graceful degradation) ────────────────────────────────────
@@ -2045,6 +2042,23 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"SoW status is '{row['status']}', must be 'ai_review' to proceed",
             )
+
+        # Transition guard: require either a successful AI analysis or an
+        # explicit skip record so a frontend bypass can't accidentally skip
+        # the gate.
+        if row["ai_suggestion_id"] is None:
+            skipped = await conn.fetchval(
+                "SELECT 1 FROM history WHERE sow_id = $1 AND change_type = 'ai_skipped' LIMIT 1",
+                sow_id,
+            )
+            if not skipped:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "AI analysis required before proceeding. "
+                        "Run analysis or explicitly skip via the AI Review page."
+                    ),
+                )
 
         esap = row["esap_level"] or "type-3"
 
