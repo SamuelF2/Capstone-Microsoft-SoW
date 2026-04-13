@@ -96,6 +96,29 @@ SECTION_SCHEMAS: dict[str, dict] = {
             ],
         },
     },
+    "agileApproach": {
+        "description": (
+            "Agile delivery approach with sprint planning. "
+            "Each sprint has a name (e.g. 'Sprint 0 — Foundation'), "
+            "a goal describing what the sprint should achieve, "
+            "a duration (one of: '1 week', '2 weeks', '3 weeks', '4 weeks'), "
+            "and stories (multi-line text listing key user stories or features). "
+            "The deliveryApproach field describes the Agile methodology. "
+            "The supportTransitionPlan field describes the handover plan."
+        ),
+        "schema": {
+            "deliveryApproach": "string",
+            "supportTransitionPlan": "string",
+            "sprints": [
+                {
+                    "name": "string",
+                    "goal": "string",
+                    "duration": "string",
+                    "stories": "string",
+                }
+            ],
+        },
+    },
 }
 
 

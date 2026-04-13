@@ -236,7 +236,7 @@ export default function SectionImproveModal({
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
           rows={1}
-          placeholder="Optional extra instructions\u2026"
+          placeholder="Optional extra instructions"
           style={{
             flex: 1,
             padding: 'var(--spacing-xs) var(--spacing-sm)',
@@ -257,7 +257,7 @@ export default function SectionImproveModal({
           disabled={loading || !originalText?.trim()}
           style={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
         >
-          {loading ? 'Generating\u2026' : hasSuggestion ? 'Regenerate' : 'Generate'}
+          {loading ? 'Generating...' : hasSuggestion ? 'Regenerate' : 'Generate'}
         </button>
       </div>
 

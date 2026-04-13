@@ -71,6 +71,22 @@ const SCHEMAS = {
       ],
     },
   },
+  agileApproach: {
+    description:
+      'Agile delivery approach with sprint planning. Each sprint has name, goal, duration (one of: "1 week", "2 weeks", "3 weeks", "4 weeks"), and stories (multi-line text of key user stories or features). Also includes deliveryApproach and supportTransitionPlan text fields.',
+    schema: {
+      deliveryApproach: 'string',
+      supportTransitionPlan: 'string',
+      sprints: [
+        {
+          name: 'string',
+          goal: 'string',
+          duration: 'string',
+          stories: 'string',
+        },
+      ],
+    },
+  },
 };
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -160,6 +176,19 @@ const HYDRATORS = {
       owner: r.owner ?? '',
       mitigation: r.mitigation ?? '',
       id: genId('item'),
+    })),
+  }),
+
+  agileApproach: (data) => ({
+    ...data,
+    deliveryApproach: data?.deliveryApproach ?? '',
+    supportTransitionPlan: data?.supportTransitionPlan ?? '',
+    sprints: (data?.sprints ?? []).map((s) => ({
+      name: s.name ?? '',
+      goal: s.goal ?? '',
+      duration: s.duration ?? '2 weeks',
+      stories: s.stories ?? '',
+      id: genId('sprint'),
     })),
   }),
 };
@@ -304,6 +333,66 @@ const RENDERERS = {
           (r) =>
             `[${r.severity}] ${r.description}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`
         )
+      )}
+    </div>
+  ),
+
+  agileApproach: (data) => (
+    <div>
+      {(data?.sprints ?? []).length > 0 && (
+        <div>
+          <strong>Sprints</strong>
+          {data.sprints.map((s, i) => (
+            <div
+              key={i}
+              style={{
+                marginBottom: 'var(--spacing-md)',
+                padding: 'var(--spacing-sm)',
+                borderLeft: '3px solid var(--color-accent-blue)',
+                paddingLeft: 'var(--spacing-md)',
+              }}
+            >
+              <strong>{s.name || `Sprint ${i + 1}`}</strong>
+              {s.duration && (
+                <span
+                  className="text-sm text-secondary"
+                  style={{ marginLeft: 'var(--spacing-xs)' }}
+                >
+                  ({s.duration})
+                </span>
+              )}
+              {s.goal && (
+                <p className="text-sm" style={{ margin: 'var(--spacing-xs) 0' }}>
+                  {s.goal}
+                </p>
+              )}
+              {s.stories && (
+                <p
+                  className="text-sm text-secondary"
+                  style={{ margin: 'var(--spacing-xs) 0', whiteSpace: 'pre-wrap' }}
+                >
+                  <em>Stories:</em> {s.stories}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {data?.deliveryApproach && (
+        <div style={{ marginTop: 'var(--spacing-md)' }}>
+          <strong>Delivery Approach</strong>
+          <p className="text-sm" style={{ whiteSpace: 'pre-wrap', marginTop: 'var(--spacing-xs)' }}>
+            {data.deliveryApproach}
+          </p>
+        </div>
+      )}
+      {data?.supportTransitionPlan && (
+        <div style={{ marginTop: 'var(--spacing-md)' }}>
+          <strong>Support Transition Plan</strong>
+          <p className="text-sm" style={{ whiteSpace: 'pre-wrap', marginTop: 'var(--spacing-xs)' }}>
+            {data.supportTransitionPlan}
+          </p>
+        </div>
       )}
     </div>
   ),

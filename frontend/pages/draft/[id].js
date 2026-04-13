@@ -900,12 +900,36 @@ export default function DraftPage() {
             const fieldKey = focusedSubSection
               ? getSubSectionFieldKey(focusedSubSection)
               : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0];
-            if (fieldKey) {
-              if (typeof value === 'object' && value !== null) {
-                updateSection(fieldKey, hydrateIds(fieldKey, value));
+            if (!fieldKey) return;
+
+            // When a sub-section is focused (e.g. "agileApproach:sprints"),
+            // merge only the improved sub-field into the parent object instead
+            // of replacing the entire parent — this preserves sibling fields.
+            const subField = focusedSubSection ? focusedSubSection.split(':')[1] : null;
+
+            if (typeof value === 'object' && value !== null) {
+              const hydrated = hydrateIds(fieldKey, value);
+              if (
+                subField &&
+                typeof hydrated === 'object' &&
+                !Array.isArray(hydrated) &&
+                subField in hydrated
+              ) {
+                setSowData((prev) => ({
+                  ...prev,
+                  [fieldKey]: { ...prev[fieldKey], [subField]: hydrated[subField] },
+                }));
               } else {
-                updateSection(fieldKey, value);
+                updateSection(fieldKey, hydrated);
               }
+            } else if (subField) {
+              // Plain text for a sub-section — merge into parent object
+              setSowData((prev) => ({
+                ...prev,
+                [fieldKey]: { ...prev[fieldKey], [subField]: value },
+              }));
+            } else {
+              updateSection(fieldKey, value);
             }
           }}
           authFetch={authFetch}
