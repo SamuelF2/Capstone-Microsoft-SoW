@@ -7,6 +7,7 @@ shapes; importing from here keeps them in lockstep.
 """
 
 from __future__ import annotations
+from .. import database
 
 ROLE_DISPLAY_NAMES: dict[str, str] = {
     "solution-architect": "Solution Architect",
@@ -29,3 +30,21 @@ def humanize_role(role_key: str | None) -> str:
     if not role_key:
         return ""
     return ROLE_DISPLAY_NAMES.get(role_key) or role_key.replace("-", " ").title()
+
+
+
+async def humanize_role_async(role_key: str | None) -> str:
+    """DB-backed role display name lookup. Use this in async contexts."""
+    if not role_key:
+        return ""
+    try:
+        async with database.pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT display_name FROM role_definitions WHERE role_key = $1", role_key
+            )
+        if row:
+            return row["display_name"]
+    except Exception:
+        pass
+    # Fallback to static map for startup/degraded scenarios
+    return humanize_role(role_key)
