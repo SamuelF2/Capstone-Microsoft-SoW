@@ -29,6 +29,8 @@ import DecisionModal from '../../components/review/DecisionModal';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
 import { roleLabel, STAGE_KEYS } from '../../lib/workflowStages';
+import { aiClient } from '../../lib/ai';
+import AIUnavailableBanner from '../../components/AIUnavailableBanner';
 
 const DECISION_COLORS = {
   approved: 'var(--color-success)',
@@ -494,6 +496,10 @@ export default function DrmReview() {
   const [modal, setModal] = useState(null); // null | 'approved' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
+  const [insightsData, setInsightsData] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
 
   // ── Loader: parallel-fetches sow + checklist + status + workflow ────────
   const load = useCallback(
@@ -520,6 +526,17 @@ export default function DrmReview() {
       // intentionally outside the returned payload so the hook owns the
       // server state and React owns the user-mutated state.
       setResponses(checklistData.saved_responses || []);
+
+      // Pull cached AI analysis from the canonical endpoint. The previous
+      // implementation read sow.ai_suggestion which doesn't exist on the
+      // /api/sow/{id} payload, so the panel was always empty.
+      const cached = await aiClient.cachedAnalysis(authFetch, id, { signal });
+      if (cached.ok) {
+        setAiAnalysis(cached.data || null);
+        setAiError(null);
+      } else {
+        setAiError(cached.error);
+      }
 
       return {
         sow: sowData,
@@ -594,6 +611,28 @@ export default function DrmReview() {
       })
       .finally(() => {
         if (!ctrl.signal.aborted) setSummaryLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [id, user, checklistRole, authFetch]);
+
+  // Load role-specific AI insights (gracefully degrades — returns empty if ML
+  // endpoint not yet shipped)
+  useEffect(() => {
+    if (!id || !user || !checklistRole) return;
+    const ctrl = new AbortController();
+    setInsightsLoading(true);
+    aiClient
+      .insights(authFetch, id, checklistRole, { signal: ctrl.signal })
+      .then((result) => {
+        if (!ctrl.signal.aborted) {
+          setInsightsData(result.ok ? result.data : null);
+        }
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setInsightsData(null);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setInsightsLoading(false);
       });
     return () => ctrl.abort();
   }, [id, user, checklistRole, authFetch]);
@@ -702,15 +741,15 @@ export default function DrmReview() {
 
   async function handleRunAI() {
     setAiLoading(true);
-    try {
-      const res = await authFetch(`/api/sow/${id}/analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      await loadAll();
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, id);
+    setAiLoading(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setAiLoading(false);
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
     }
   }
 
@@ -737,7 +776,7 @@ export default function DrmReview() {
   const canAdvance = gatingMet && sow?.status === STAGE_KEYS.DRM_REVIEW;
   const alreadyApproved = sow?.status === 'approved';
 
-  const aiResult = sow?.ai_suggestion || null;
+  const aiResult = aiAnalysis;
 
   if (loading) {
     return (
@@ -995,6 +1034,98 @@ export default function DrmReview() {
                   summaryData={summaryData}
                   loading={summaryLoading}
                 />
+
+                {/* AI role-specific insights — hidden when endpoint not shipped */}
+                {insightsLoading && (
+                  <div
+                    style={{
+                      marginTop: 'var(--spacing-md)',
+                      padding: 'var(--spacing-md)',
+                      borderRadius: 'var(--radius-lg)',
+                      border: '1px solid var(--color-border-default)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--color-text-tertiary)',
+                      }}
+                    >
+                      Loading AI insights…
+                    </span>
+                  </div>
+                )}
+                {!insightsLoading && insightsData?.summary && (
+                  <div
+                    style={{
+                      marginTop: 'var(--spacing-md)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-lg)',
+                      overflow: 'hidden',
+                      backgroundColor: 'var(--color-bg-primary)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: 'var(--spacing-sm) var(--spacing-md)',
+                        borderBottom: '1px solid var(--color-border-default)',
+                        backgroundColor: 'var(--color-bg-secondary)',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 'var(--font-size-xs)',
+                          fontWeight: 'var(--font-weight-semibold)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          color: 'var(--color-text-tertiary)',
+                        }}
+                      >
+                        AI Insights
+                      </span>
+                    </div>
+                    <div style={{ padding: 'var(--spacing-md)' }}>
+                      <p
+                        style={{
+                          margin: '0 0 var(--spacing-sm)',
+                          fontSize: 'var(--font-size-sm)',
+                          color: 'var(--color-text-primary)',
+                          lineHeight: 'var(--line-height-relaxed)',
+                        }}
+                      >
+                        {insightsData.summary}
+                      </p>
+                      {Array.isArray(insightsData.flags) && insightsData.flags.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            marginTop: 'var(--spacing-xs)',
+                          }}
+                        >
+                          {insightsData.flags.map((flag, i) => (
+                            <div
+                              key={i}
+                              style={{
+                                fontSize: 'var(--font-size-xs)',
+                                color: 'var(--color-warning)',
+                                padding: '2px 0 2px 8px',
+                              }}
+                            >
+                              ⚠{' '}
+                              {typeof flag === 'string'
+                                ? flag
+                                : flag.message || JSON.stringify(flag)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1054,6 +1185,9 @@ export default function DrmReview() {
               </div>
 
               {/* AI panel */}
+              {aiError && (
+                <AIUnavailableBanner error={aiError} context="analysis" onRetry={handleRunAI} />
+              )}
               <AISuggestionsPanel
                 analysisResult={aiResult}
                 collapsed={true}

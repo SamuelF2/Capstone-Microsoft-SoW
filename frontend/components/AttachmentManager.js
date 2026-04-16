@@ -61,19 +61,89 @@ function Badge({ label, color }) {
   );
 }
 
-function fileIcon(originalName) {
-  const ext = (originalName || '').split('.').pop()?.toLowerCase();
-  const icons = {
-    pdf: '\u{1F4C4}',
-    docx: '\u{1F4DD}',
-    xlsx: '\u{1F4CA}',
-    csv: '\u{1F4CA}',
-    pptx: '\u{1F4CA}',
-    png: '\u{1F5BC}',
-    jpg: '\u{1F5BC}',
-    jpeg: '\u{1F5BC}',
+function FileIcon({ name, size = 18 }) {
+  const ext = (name || '').split('.').pop()?.toLowerCase();
+  const props = {
+    xmlns: 'http://www.w3.org/2000/svg',
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: '1.75',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true',
+    style: { flexShrink: 0 },
   };
-  return icons[ext] || '\u{1F4CE}';
+
+  if (ext === 'pdf') {
+    return (
+      <svg {...props}>
+        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <line x1="10" y1="9" x2="8" y2="9" />
+      </svg>
+    );
+  }
+
+  if (ext === 'docx') {
+    return (
+      <svg {...props}>
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+      </svg>
+    );
+  }
+
+  if (['xlsx', 'csv', 'pptx'].includes(ext)) {
+    return (
+      <svg {...props}>
+        <line x1="18" y1="20" x2="18" y2="10" />
+        <line x1="12" y1="20" x2="12" y2="4" />
+        <line x1="6" y1="20" x2="6" y2="14" />
+      </svg>
+    );
+  }
+
+  if (['png', 'jpg', 'jpeg'].includes(ext)) {
+    return (
+      <svg {...props}>
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <polyline points="21 15 16 10 5 21" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...props}>
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.49" />
+    </svg>
+  );
+}
+
+function UploadIcon({ size = 28 }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <polyline points="9 14 12 11 15 14" />
+    </svg>
+  );
 }
 
 export default function AttachmentManager({
@@ -90,8 +160,12 @@ export default function AttachmentManager({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [dragActive, setDragActive] = useState(false);
-  const [selectedDocType, setSelectedDocType] = useState('other');
-  const [description, setDescription] = useState('');
+  // Staged-but-not-yet-uploaded file. Holds the File plus the doc-type and
+  // description the user is filling in. The actual POST only fires when the
+  // user clicks the Upload button on the staging card.
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingDocType, setPendingDocType] = useState('other');
+  const [pendingDescription, setPendingDescription] = useState('');
   const fileInputRef = useRef(null);
 
   // ── Load attachments & requirements ────────────────────────────────────
@@ -139,19 +213,52 @@ export default function AttachmentManager({
     return () => ctrl.abort();
   }, [load]);
 
-  // ── Upload handler ─────────────────────────────────────────────────────
+  // ── Staging + upload ───────────────────────────────────────────────────
 
-  const handleUpload = async (file) => {
-    if (!file || !authFetch) return;
+  // Try to guess the most likely document type from a filename so the
+  // staging card lands on a sensible default instead of always "Other".
+  const guessDocType = useCallback((filename) => {
+    const lower = (filename || '').toLowerCase();
+    if (lower.includes('arch')) return 'solution-architecture';
+    if (lower.includes('staff')) return 'staffing-plan';
+    if (lower.includes('risk')) return 'risk-register';
+    if (lower.includes('test')) return 'test-plan';
+    if (lower.includes('security') || lower.includes('compliance')) return 'security-assessment';
+    if (lower.includes('migration')) return 'data-migration-plan';
+    if (lower.includes('training')) return 'training-plan';
+    if (lower.includes('srm') || lower.includes('presentation')) return 'srm-presentation';
+    return 'other';
+  }, []);
+
+  const stageFile = useCallback(
+    (file) => {
+      if (!file) return;
+      setError(null);
+      setPendingFile(file);
+      setPendingDocType(guessDocType(file.name));
+      setPendingDescription('');
+    },
+    [guessDocType]
+  );
+
+  const cancelStaged = useCallback(() => {
+    setPendingFile(null);
+    setPendingDocType('other');
+    setPendingDescription('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const confirmUpload = async () => {
+    if (!pendingFile || !authFetch) return;
     try {
       setUploading(true);
       setError(null);
 
       const formData = new FormData();
-      formData.append('file', file);
-      formData.append('document_type', selectedDocType);
+      formData.append('file', pendingFile);
+      formData.append('document_type', pendingDocType);
       if (stageKey) formData.append('stage_key', stageKey);
-      if (description.trim()) formData.append('description', description.trim());
+      if (pendingDescription.trim()) formData.append('description', pendingDescription.trim());
 
       const res = await authFetch(`/api/attachments/sow/${sowId}`, {
         method: 'POST',
@@ -163,8 +270,7 @@ export default function AttachmentManager({
         throw new Error(err.detail || 'Upload failed');
       }
 
-      setDescription('');
-      setSelectedDocType('other');
+      cancelStaged();
       await load();
       if (onUpload) onUpload();
     } catch (err) {
@@ -176,7 +282,7 @@ export default function AttachmentManager({
 
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
-    if (file) handleUpload(file);
+    if (file) stageFile(file);
   };
 
   // ── Drag & drop ────────────────────────────────────────────────────────
@@ -203,7 +309,7 @@ export default function AttachmentManager({
     e.stopPropagation();
     setDragActive(false);
     const file = e.dataTransfer?.files?.[0];
-    if (file) handleUpload(file);
+    if (file) stageFile(file);
   };
 
   // ── Download ───────────────────────────────────────────────────────────
@@ -321,7 +427,7 @@ export default function AttachmentManager({
           style={{
             padding: '12px 16px',
             borderBottom: '1px solid var(--color-border-default)',
-            backgroundColor: 'var(--color-bg-secondary, #fafbfc)',
+            // backgroundColor: 'var(--color-bg-secondary, #000000)',
           }}
         >
           <div
@@ -401,69 +507,38 @@ export default function AttachmentManager({
         <div
           style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-default)' }}
         >
-          {/* Document type + description row */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-            <select
-              value={selectedDocType}
-              onChange={(e) => setSelectedDocType(e.target.value)}
-              style={{
-                padding: '6px 10px',
-                borderRadius: '6px',
-                border: '1px solid var(--color-border-default)',
-                fontSize: 'var(--font-size-sm)',
-                flex: '0 0 200px',
-              }}
-            >
-              {Object.entries(DOCUMENT_TYPE_LABELS).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Description (optional)"
-              style={{
-                flex: 1,
-                padding: '6px 10px',
-                borderRadius: '6px',
-                border: '1px solid var(--color-border-default)',
-                fontSize: 'var(--font-size-sm)',
-              }}
-            />
-          </div>
-
-          {/* Drop zone */}
-          <div
-            onDragEnter={handleDragIn}
-            onDragLeave={handleDragOut}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              border: `2px dashed ${dragActive ? 'var(--color-primary)' : 'var(--color-border-default)'}`,
-              borderRadius: '8px',
-              padding: '20px',
-              textAlign: 'center',
-              cursor: 'pointer',
-              backgroundColor: dragActive ? 'var(--color-primary-bg, #eff6ff)' : 'transparent',
-              transition: 'all 0.2s',
-            }}
-          >
-            {uploading ? (
-              <span
-                style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}
+          {/* No file staged yet → show dropzone. Once a file is dropped or
+              chosen we swap in the staging card so the user can confirm what
+              kind of document it is before anything is sent. */}
+          {!pendingFile ? (
+            <>
+              <div
+                onDragEnter={handleDragIn}
+                onDragLeave={handleDragOut}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                style={{
+                  border: `2px dashed ${dragActive ? 'var(--color-primary)' : 'var(--color-border-default)'}`,
+                  borderRadius: '8px',
+                  padding: '24px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  backgroundColor: dragActive ? 'var(--color-primary-bg, #eff6ff)' : 'transparent',
+                  transition: 'all 0.2s',
+                }}
               >
-                Uploading...
-              </span>
-            ) : (
-              <>
+                <div style={{ marginBottom: '4px', color: 'var(--color-text-secondary)' }}>
+                  <UploadIcon size={28} />
+                </div>
                 <div
-                  style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}
+                  style={{
+                    color: 'var(--color-text-secondary)',
+                    fontSize: 'var(--font-size-sm)',
+                    fontWeight: 'var(--font-weight-medium)',
+                  }}
                 >
-                  Drag & drop a file here, or{' '}
+                  Drag & drop a document here, or{' '}
                   <span
                     style={{
                       color: 'var(--color-primary)',
@@ -480,11 +555,177 @@ export default function AttachmentManager({
                     marginTop: '4px',
                   }}
                 >
-                  PDF, DOCX, XLSX, CSV, PPTX, PNG, JPG — max 25 MB
+                  You'll choose the document type before uploading. PDF, DOCX, XLSX, CSV, PPTX, PNG,
+                  JPG — max 25 MB
                 </div>
-              </>
-            )}
-          </div>
+              </div>
+            </>
+          ) : (
+            <div
+              style={{
+                border: '1px solid var(--color-border-default)',
+                borderRadius: '8px',
+                padding: '14px 16px',
+                backgroundColor: 'var(--color-bg-secondary)',
+              }}
+            >
+              {/* File header */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginBottom: '12px',
+                }}
+              >
+                <FileIcon name={pendingFile.name} size={22} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: 'var(--font-weight-semibold)',
+                      fontSize: 'var(--font-size-sm)',
+                      color: 'var(--color-text-primary)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {pendingFile.name}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--color-text-tertiary)',
+                      marginTop: '2px',
+                    }}
+                  >
+                    {formatBytes(pendingFile.size)} · ready to upload
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={cancelStaged}
+                  disabled={uploading}
+                  title="Discard this file"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: uploading ? 'not-allowed' : 'pointer',
+                    color: 'var(--color-text-tertiary)',
+                    fontSize: '20px',
+                    lineHeight: 1,
+                    padding: '4px 8px',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Document type — required field */}
+              <div style={{ marginBottom: '10px' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--font-size-xs)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--color-text-secondary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    marginBottom: '4px',
+                  }}
+                >
+                  Document type
+                </label>
+                <select
+                  value={pendingDocType}
+                  onChange={(e) => setPendingDocType(e.target.value)}
+                  disabled={uploading}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-default)',
+                    fontSize: 'var(--font-size-sm)',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                >
+                  {Object.entries(DOCUMENT_TYPE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Description — optional */}
+              <div style={{ marginBottom: '12px' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--font-size-xs)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--color-text-secondary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    marginBottom: '4px',
+                  }}
+                >
+                  Description{' '}
+                  <span
+                    style={{
+                      color: 'var(--color-text-tertiary)',
+                      fontWeight: 'var(--font-weight-regular)',
+                      textTransform: 'none',
+                      letterSpacing: 0,
+                    }}
+                  >
+                    (optional)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={pendingDescription}
+                  onChange={(e) => setPendingDescription(e.target.value)}
+                  disabled={uploading}
+                  placeholder="Short note about this document..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border-default)',
+                    fontSize: 'var(--font-size-sm)',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    color: 'var(--color-text-primary)',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={cancelStaged}
+                  disabled={uploading}
+                  className="btn btn-secondary"
+                  style={{ padding: '6px 14px', fontSize: 'var(--font-size-sm)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmUpload}
+                  disabled={uploading}
+                  className="btn btn-primary"
+                  style={{ padding: '6px 14px', fontSize: 'var(--font-size-sm)' }}
+                >
+                  {uploading ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <input
             ref={fileInputRef}
             type="file"
@@ -523,9 +764,7 @@ export default function AttachmentManager({
                   fontSize: 'var(--font-size-sm)',
                 }}
               >
-                <span style={{ fontSize: '18px', flexShrink: 0 }}>
-                  {fileIcon(att.original_name)}
-                </span>
+                <FileIcon name={att.original_name} size={18} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{

@@ -27,6 +27,8 @@ import SoWContentPanel from '../../components/sow/SoWContentPanel';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
 import { STAGE_KEYS } from '../../lib/workflowStages';
+import { aiClient } from '../../lib/ai';
+import AIUnavailableBanner from '../../components/AIUnavailableBanner';
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,7 @@ export default function InternalReview() {
   // User-mutated state — re-seeded from the loaded payload on every refresh.
   const [responses, setResponses] = useState([]);
   const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
   const [comments, setComments] = useState('');
   const [contentTab, setContentTab] = useState('Overview');
 
@@ -75,11 +78,17 @@ export default function InternalReview() {
       }
       const statusData = statusRes.ok ? await statusRes.json() : null;
 
-      // Load AI analysis if linked — fire it from inside the loader so the
-      // hook tracks it under the same loading flag.
+      // Load cached AI analysis if linked. The cached GET endpoint returns
+      // null for SoWs that have never been analyzed, which is fine — the
+      // panel just stays empty until the reviewer hits "Run AI analysis".
       if (sowData.ai_suggestion_id) {
-        const aiRes = await authFetch(`/api/sow/${id}/ai-analyze`, { signal });
-        if (aiRes.ok) setAiAnalysis(await aiRes.json());
+        const cached = await aiClient.cachedAnalysis(authFetch, id, { signal });
+        if (cached.ok) {
+          setAiAnalysis(cached.data || null);
+          setAiError(null);
+        } else {
+          setAiError(cached.error);
+        }
       }
 
       return { sow: sowData, checklist: checkData, reviewStatus: statusData };
@@ -175,15 +184,15 @@ export default function InternalReview() {
 
   async function handleRunAI() {
     setRunningAI(true);
-    try {
-      const res = await authFetch(`/api/sow/${id}/ai-analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      setAiAnalysis(await res.json());
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, id);
+    setRunningAI(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setRunningAI(false);
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
     }
   }
 
@@ -500,6 +509,9 @@ export default function InternalReview() {
                   </div>
 
                   {/* AI Panel */}
+                  {aiError && (
+                    <AIUnavailableBanner error={aiError} context="analysis" onRetry={handleRunAI} />
+                  )}
                   <AISuggestionsPanel
                     analysisResult={aiAnalysis}
                     collapsed={true}

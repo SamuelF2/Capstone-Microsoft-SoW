@@ -66,12 +66,14 @@ class AssistRequest(BaseModel):
     history: list[dict] | None = None
     top_k: int = 5
     hop_depth: int = 2
+    section_key: str | None = None
 
 
 class AssistResponse(BaseModel):
     answer: str
     context: dict
     retrieved: dict
+    structured: dict | list | None = None
 
 
 class ContextResponse(BaseModel):
@@ -161,6 +163,7 @@ def post_assist(req: AssistRequest):
             history=req.history,
             top_k=req.top_k,
             hop_depth=req.hop_depth,
+            section_key=req.section_key,
         )
         return AssistResponse(**result)
     except Exception as e:
