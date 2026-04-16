@@ -7,7 +7,7 @@ shapes; importing from here keeps them in lockstep.
 """
 
 from __future__ import annotations
-from .. import database
+import database
 
 ROLE_DISPLAY_NAMES: dict[str, str] = {
     "solution-architect": "Solution Architect",
