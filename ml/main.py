@@ -9,6 +9,7 @@ Usage:
     uv run python main.py checklist --role solution-architect
 """
 
+import asyncio
 from pathlib import Path
 
 import click
@@ -17,6 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from sow_kg.db import get_driver, init_schema
 from sow_kg.enrich import run_enrichment, semantic_search
+from sow_kg.ingest_async import MAX_WORKERS, ingest_async
 from sow_kg.ingest_json import ingest_all_json
 from sow_kg.ingest_markdown import ingest_all_markdown
 from sow_kg.queries import (
@@ -42,7 +44,14 @@ def cli():
 @cli.command()
 @click.option("--data-dir", default=str(DATA_DIR), help="Directory containing source files")
 @click.option("--clear", is_flag=True, help="Clear all graph data before ingesting")
-def ingest(data_dir: str, clear: bool):
+@click.option("--no-cache", is_flag=True, help="Re-ingest all files even if unchanged")
+@click.option(
+    "--workers",
+    default=MAX_WORKERS,
+    show_default=True,
+    help="Max parallel worker threads (tune to Neo4j bolt pool size)",
+)
+def ingest(data_dir: str, clear: bool, workers: int, no_cache: bool):
     """Ingest all JSON rules and markdown documents into Neo4j."""
     data_path = Path(data_dir)
     driver = get_driver()
@@ -70,6 +79,21 @@ def ingest(data_dir: str, clear: bool):
         ).data()
 
     ingest_all_markdown(driver, data_path, banned_phrases)
+
+    report = asyncio.run(
+        ingest_async(
+            data_dir=data_path,
+            clear=clear,
+            use_cache=not no_cache,
+            max_workers=workers,
+        )
+    )
+
+    # Surface any failures prominently after the ingest summary table
+    if report.failed:
+        console.print(
+            "\n[bold red]⚠  {report.failed} file(s) failed — check output above for details[/]"
+        )
 
     console.print("\n")
     print_graph_summary(driver)
@@ -297,7 +321,6 @@ def search(query: str, index: str, top_k: int):
     for r in results:
         score = f"{r['score']:.4f}"
         props = r["props"]
-        # Pick the most readable preview field
         preview = (
             props.get("content")
             or props.get("description")
