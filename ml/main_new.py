@@ -16,6 +16,7 @@ Commands:
     promote-proposals   Auto-promote proposals above an evidence threshold
 """
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,8 +26,7 @@ from rich.panel import Panel
 from rich.table import Table
 from sow_kg.db import get_driver, init_schema
 from sow_kg.enrich import run_enrichment, semantic_search
-from sow_kg.ingest import get_banned_phrases, ingest_directory, ingest_file
-from sow_kg.ingest_csv import ingest_all_csv
+from sow_kg.ingest_async import ingest_async
 from sow_kg.ingest_json import ingest_all_json
 from sow_kg.queries import (
     find_similar_sows,
@@ -49,49 +49,58 @@ def cli():
 
 @cli.command()
 @click.option("--data-dir", default=str(DATA_DIR), show_default=True)
-@click.option("--file", default=None, help="Single file path (md/json/docx/pdf)")
-@click.option("--type", "doc_type", default=None, type=click.Choice(["sow", "guide"]))
-@click.option("--clear", is_flag=True)
-def ingest(data_dir: str, file: str, doc_type: str, clear: bool):
-    """Ingest rules and documents into Neo4j."""
+@click.option("--uri", default="bolt://localhost:7687")
+@click.option("--user", default="neo4j")
+@click.option(
+    "--password", default="capstone202620222Password"
+)  # Provide your actual password here
+@click.option("--clear", is_flag=True, help="Wipe graph before ingesting")
+@click.option("--no-cache", is_flag=True, help="Ignore content-hash cache")
+@click.option("--workers", default=8, help="Max parallel workers")
+def ingest(
+    data_dir: str, uri: str, user: str, password: str, clear: bool, no_cache: bool, workers: int
+):
+    """Unified Ingestion: Rules (Sync) -> Projects & SOWs (Async Parallel)"""
     data_path = Path(data_dir)
-    driver = get_driver()
 
-    console.print(
-        Panel.fit(
-            f"[bold]SOW Knowledge Graph Ingestion[/]\nSource: [cyan]{file or data_path}[/]",
-            title="SOW-KG",
+    # --- PHASE 0: SYNCHRONOUS SEEDING ---
+    # ingest_async ignores JSON rules and guide documents, so we handle them here.
+    # We use your existing drivers to establish the foundation.
+    driver = get_driver()  # Ensure your db.py uses the provided uri/user/password
+
+    if clear:
+        console.print("[bold red]⚠ Clearing graph data...[/]")
+        with driver.session() as session:
+            session.run("MATCH (n) DETACH DELETE n")
+
+    console.print("[bold]Phase 0: Initializing Schema & Rules[/]")
+    init_schema(driver)  # Sets up constraints and indexes
+    ingest_all_json(driver, data_path)  # Loads banned phrases and validation rules
+
+    # Optional: If you have general reference 'guide' docs, ingest them here
+    # ingest_directory(driver, data_path, doc_type="guide")
+
+    driver.close()
+
+    # --- PHASES 1 & 2: ASYNC PARALLEL ORCHESTRATION ---
+    # This calls ingest_async.py to handle CSV dependencies and parallel SOW loads.
+    # It manages its own ThreadPoolExecutor and connection pool.
+    asyncio.run(
+        ingest_async(
+            data_dir=data_path,
+            neo4j_uri=uri,
+            neo4j_user=user,
+            neo4j_password=password,
+            clear=False,  # Already handled in Phase 0
+            use_cache=not no_cache,
+            max_workers=workers,
         )
     )
 
-    if clear:
-        console.print("[yellow]Clearing graph[/]")
-        with driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
-        console.print("[green]Cleared[/]")
-
-    console.print("\n[bold]Initializing schema[/]")
-    init_schema(driver)
-    console.print("[green]Schema ready[/]")
-
-    ingest_all_json(driver, data_path)
-    ingest_all_csv(driver, data_path)
-
-    banned = get_banned_phrases(driver)
-
-    if file:
-        path = Path(file)
-        if not path.exists():
-            console.print(f"[red]File not found: {path}[/]")
-            driver.close()
-            return
-        ingest_file(driver, path, doc_type=doc_type, banned_phrases=banned)
-    else:
-        ingest_directory(driver, data_path, banned_phrases=banned)
-
-    console.print()
-    print_graph_summary(driver)
-    driver.close()
+    # --- FINAL WRAP-UP ---
+    final_driver = get_driver()
+    print_graph_summary(final_driver)  #
+    final_driver.close()
 
 
 @cli.command()
