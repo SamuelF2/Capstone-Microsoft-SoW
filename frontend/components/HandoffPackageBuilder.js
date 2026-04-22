@@ -10,7 +10,40 @@
  * readOnly        boolean   — true after SoW is finalized
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import useUnsavedChangesWarning from '../lib/hooks/useUnsavedChangesWarning';
+import useDraftAutosave from '../lib/hooks/useDraftAutosave';
+import UnsavedChangesModal from './UnsavedChangesModal';
+import RestoreDraftModal from './RestoreDraftModal';
+
+// Normalized signature used for dirty detection + draft/server diff.
+// Rows with no meaningful content are dropped so a lone empty placeholder row
+// doesn't flag the form as dirty.
+function handoffSignature(state) {
+  const team = (state?.deliveryTeam || [])
+    .filter((m) => m.role || m.name || m.email || m.allocation)
+    .map((m) => [m.role || '', m.name || '', m.email || '', m.allocation || '']);
+  const contacts = (state?.keyContacts || [])
+    .filter((c) => c.name || c.role || c.email || c.phone)
+    .map((c) => [c.name || '', c.role || '', c.email || '', c.phone || '']);
+  return JSON.stringify({
+    team,
+    contacts,
+    kickoffDate: state?.kickoffDate || '',
+    specialInstructions: state?.specialInstructions || '',
+    notes: state?.notes || '',
+  });
+}
+
+function signatureFromPackage(pkg) {
+  return handoffSignature({
+    deliveryTeam: pkg?.delivery_team || [],
+    keyContacts: pkg?.key_contacts || [],
+    kickoffDate: pkg?.kickoff_date || '',
+    specialInstructions: pkg?.special_instructions || '',
+    notes: pkg?.notes || '',
+  });
+}
 
 const TEAM_ROLE_OPTIONS = [
   'Project Manager',
@@ -386,6 +419,7 @@ function AutoIncludedSummary({ sowData, existingPackage }) {
 // ── Root export ───────────────────────────────────────────────────────────────
 
 export default function HandoffPackageBuilder({
+  sowId,
   sowData,
   existingPackage,
   onSave,
@@ -417,6 +451,99 @@ export default function HandoffPackageBuilder({
       if (d.notes) setNotes(d.notes);
     }
   }, [existingPackage]);
+
+  // ── Unsaved-changes guard + draft autosave ─────────────────────────────
+  // Dirty when the current local state diverges from the last-saved server
+  // package. Suppressed while the page is read-only (nothing to lose) or
+  // while a save is in flight (so the in-flight post-save state update
+  // doesn't briefly flash the modal).
+  const currentSig = useMemo(
+    () =>
+      handoffSignature({
+        deliveryTeam,
+        keyContacts,
+        kickoffDate,
+        specialInstructions,
+        notes,
+      }),
+    [deliveryTeam, keyContacts, kickoffDate, specialInstructions, notes]
+  );
+  const serverSig = useMemo(
+    () => signatureFromPackage(existingPackage?.package_data),
+    [existingPackage]
+  );
+  const hasChanges = !readOnly && !saving && currentSig !== serverSig;
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+  } = useUnsavedChangesWarning(hasChanges);
+
+  const draftData = useMemo(
+    () => ({ deliveryTeam, keyContacts, kickoffDate, specialInstructions, notes }),
+    [deliveryTeam, keyContacts, kickoffDate, specialInstructions, notes]
+  );
+  const { loadDraft, clearDraft } = useDraftAutosave({
+    key: sowId ? `handoff:sow:${sowId}` : null,
+    data: draftData,
+    enabled: hasChanges,
+  });
+
+  // Offer to restore a draft on mount if it differs from server state.
+  // Parent already gates the whole page on its loading flag, so by the time
+  // we mount the handoff fetch has resolved (to a package or to null).
+  const draftCheckedRef = useRef(false);
+  const [pendingDraft, setPendingDraft] = useState(null);
+
+  // Re-arm the draft check if the sowId changes without an unmount. Parent
+  // usually remounts per-id, but this keeps us correct if it ever swaps in
+  // place.
+  useEffect(() => {
+    draftCheckedRef.current = false;
+    setPendingDraft(null);
+  }, [sowId]);
+
+  useEffect(() => {
+    if (draftCheckedRef.current || !sowId) return;
+    draftCheckedRef.current = true;
+    const draft = loadDraft();
+    if (!draft) return;
+    const draftSig = handoffSignature(draft.data || {});
+    if (draftSig && draftSig !== serverSig) {
+      setPendingDraft(draft);
+    } else {
+      clearDraft();
+    }
+  }, [sowId, serverSig, loadDraft, clearDraft]);
+
+  // Clear the draft whenever the server package content changes — covers
+  // both fresh loads and post-save refreshes.
+  const prevServerSigRef = useRef(serverSig);
+  useEffect(() => {
+    if (prevServerSigRef.current !== serverSig) {
+      prevServerSigRef.current = serverSig;
+      // Only clear if we aren't sitting on a restored draft the user hasn't
+      // decided about yet — otherwise we'd wipe it from storage mid-prompt.
+      if (!pendingDraft) clearDraft();
+    }
+  }, [serverSig, clearDraft, pendingDraft]);
+
+  const handleRestoreDraft = useCallback(() => {
+    if (!pendingDraft?.data) return;
+    const d = pendingDraft.data;
+    if (Array.isArray(d.deliveryTeam)) setDeliveryTeam(d.deliveryTeam);
+    if (Array.isArray(d.keyContacts)) setKeyContacts(d.keyContacts);
+    if (typeof d.kickoffDate === 'string') setKickoffDate(d.kickoffDate);
+    if (typeof d.specialInstructions === 'string') setSpecialInstructions(d.specialInstructions);
+    if (typeof d.notes === 'string') setNotes(d.notes);
+    setPendingDraft(null);
+  }, [pendingDraft]);
+
+  const handleDiscardDraft = useCallback(() => {
+    setPendingDraft(null);
+    clearDraft();
+  }, [clearDraft]);
 
   function handleSave() {
     const validTeam = deliveryTeam.filter((m) => m.role || m.name || m.email);
@@ -508,17 +635,43 @@ export default function HandoffPackageBuilder({
       {/* Auto-included data */}
       <AutoIncludedSummary sowData={sowData} existingPackage={existingPackage} />
 
-      {/* Save button */}
+      {/* Save button + dirty indicator */}
       {!readOnly && (
-        <button
-          className="btn btn-primary"
-          onClick={handleSave}
-          disabled={saving}
-          style={{ alignSelf: 'flex-start' }}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--spacing-sm)',
+            alignSelf: 'flex-start',
+          }}
         >
-          {saving ? 'Saving…' : 'Save Handoff Package'}
-        </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={saving || !hasChanges}
+            style={{ opacity: saving || !hasChanges ? 0.6 : 1 }}
+          >
+            {saving ? 'Saving…' : 'Save Handoff Package'}
+          </button>
+          {hasChanges && !saving && (
+            <span className="text-xs" style={{ color: 'var(--color-warning)', fontWeight: 600 }}>
+              ● Unsaved changes
+            </span>
+          )}
+        </div>
       )}
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
+      <RestoreDraftModal
+        open={pendingDraft !== null}
+        savedAt={pendingDraft?.savedAt ?? null}
+        onRestore={handleRestoreDraft}
+        onDiscard={handleDiscardDraft}
+      />
     </div>
   );
 }

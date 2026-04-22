@@ -52,6 +52,7 @@ export default function StageSettingsPanel({
   nodes,
   edges,
   warnings,
+  hideWorkflowMeta = false,
 }) {
   let content;
   if (selectedEdge) {
@@ -74,7 +75,14 @@ export default function StageSettingsPanel({
       />
     );
   } else {
-    content = <WorkflowForm workflow={workflow} onChange={onWorkflowChange} warnings={warnings} />;
+    content = (
+      <WorkflowForm
+        workflow={workflow}
+        onChange={onWorkflowChange}
+        warnings={warnings}
+        hideWorkflowMeta={hideWorkflowMeta}
+      />
+    );
   }
 
   return (
@@ -95,31 +103,35 @@ export default function StageSettingsPanel({
 
 // ── Workflow-level form ────────────────────────────────────────────────────
 
-function WorkflowForm({ workflow, onChange, warnings }) {
+function WorkflowForm({ workflow, onChange, warnings, hideWorkflowMeta = false }) {
   return (
     <div>
-      <SectionTitle>Workflow</SectionTitle>
-      <Field label="Name">
-        <input
-          type="text"
-          className="form-input"
-          value={workflow.name || ''}
-          onChange={(e) => onChange({ name: e.target.value })}
-          placeholder="e.g. Fast-Track Review"
-        />
-      </Field>
-      <Field label="Description">
-        <textarea
-          className="form-input"
-          rows={3}
-          value={workflow.description || ''}
-          onChange={(e) => onChange({ description: e.target.value })}
-          placeholder="Optional — describe when to use this workflow"
-        />
-      </Field>
+      {!hideWorkflowMeta && (
+        <>
+          <SectionTitle>Workflow</SectionTitle>
+          <Field label="Name">
+            <input
+              type="text"
+              className="form-input"
+              value={workflow.name || ''}
+              onChange={(e) => onChange({ name: e.target.value })}
+              placeholder="e.g. Fast-Track Review"
+            />
+          </Field>
+          <Field label="Description">
+            <textarea
+              className="form-input"
+              rows={3}
+              value={workflow.description || ''}
+              onChange={(e) => onChange({ description: e.target.value })}
+              placeholder="Optional — describe when to use this workflow"
+            />
+          </Field>
+        </>
+      )}
 
       {/* Pipeline model explanation */}
-      <div style={{ marginTop: 'var(--spacing-lg)' }}>
+      <div style={{ marginTop: hideWorkflowMeta ? 0 : 'var(--spacing-lg)' }}>
         <SectionTitle>Pipeline Rules</SectionTitle>
         <div
           style={{

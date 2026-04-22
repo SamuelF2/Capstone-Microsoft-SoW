@@ -21,10 +21,14 @@
  *   onSaved  (workflow)=>void  — fired after a successful PUT
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../lib/auth';
-import useWorkflowEditorState from '../../lib/hooks/useWorkflowEditorState';
+import useWorkflowEditorState, { workflowSignature } from '../../lib/hooks/useWorkflowEditorState';
+import useUnsavedChangesWarning from '../../lib/hooks/useUnsavedChangesWarning';
+import useDraftAutosave from '../../lib/hooks/useDraftAutosave';
 import WorkflowFlowEditor from '../workflow/WorkflowFlowEditor';
+import UnsavedChangesModal from '../UnsavedChangesModal';
+import RestoreDraftModal from '../RestoreDraftModal';
 
 export default function LiveWorkflowEditor({ sowId, onSaved }) {
   const { authFetch } = useAuth();
@@ -86,6 +90,76 @@ export default function LiveWorkflowEditor({ sowId, onSaved }) {
     const updated = await save();
     if (updated && typeof onSaved === 'function') onSaved(updated);
   }, [save, onSaved]);
+
+  // Warn before leaving when there are unsaved changes (tab close or in-app nav).
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+  } = useUnsavedChangesWarning(hasChanges);
+
+  // Auto-save the graph structure to localStorage so unexpected crashes
+  // don't lose work between manual saves. Only the stages/transitions
+  // shape is persisted — no deal values, no customer data.
+  const { loadDraft, clearDraft } = useDraftAutosave({
+    key: sowId ? `workflow:sow:${sowId}` : null,
+    data: workflow?.workflow_data ?? null,
+    enabled: hasChanges,
+  });
+
+  // Offer to restore a draft from a previous session if it differs from the
+  // freshly-loaded server state. Runs once per mount, after load completes.
+  const draftCheckedRef = useRef(false);
+  const [pendingDraft, setPendingDraft] = useState(null);
+
+  // If the caller swaps sowId without unmounting, re-arm the draft check
+  // against the new key. Next.js dynamic-segment navigation usually remounts,
+  // so this is belt-and-suspenders for code paths that swap the prop
+  // imperatively.
+  useEffect(() => {
+    draftCheckedRef.current = false;
+    setPendingDraft(null);
+  }, [sowId]);
+
+  useEffect(() => {
+    if (draftCheckedRef.current || loading || !workflow) return;
+    draftCheckedRef.current = true;
+    const draft = loadDraft();
+    if (!draft) return;
+    const draftSig = workflowSignature({ workflow_data: draft.data });
+    const serverSig = workflowSignature(workflow);
+    if (draftSig && draftSig !== serverSig) {
+      setPendingDraft(draft);
+    } else {
+      // Draft matches what the server returned — stale; clear it.
+      clearDraft();
+    }
+  }, [loading, workflow, loadDraft, clearDraft]);
+
+  // Clear the draft after any successful save.
+  const prevSavedAtRef = useRef(null);
+  useEffect(() => {
+    if (savedAt && savedAt !== prevSavedAtRef.current) {
+      clearDraft();
+    }
+    prevSavedAtRef.current = savedAt;
+  }, [savedAt, clearDraft]);
+
+  const handleRestoreDraft = useCallback(() => {
+    if (!pendingDraft) return;
+    // Bump loaded_at so WorkflowFlowEditor's init effect (keyed on id:loaded_at)
+    // re-seeds its internal nodes/edges from the draft — without this, patching
+    // only workflow_data leaves the canvas showing the server state.
+    setWorkflow((prev) =>
+      prev ? { ...prev, workflow_data: pendingDraft.data, loaded_at: Date.now() } : prev
+    );
+    setPendingDraft(null);
+  }, [pendingDraft, setWorkflow]);
+
+  const handleDiscardDraft = useCallback(() => {
+    setPendingDraft(null);
+    clearDraft();
+  }, [clearDraft]);
 
   // ── Render ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -230,10 +304,23 @@ export default function LiveWorkflowEditor({ sowId, onSaved }) {
         <WorkflowFlowEditor
           workflow={workflow}
           onChange={setWorkflow}
-          readOnly={false}
+          readOnly={saving}
           getWorkflowDataRef={getWorkflowDataRef}
+          hideWorkflowMeta
         />
       </div>
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
+      <RestoreDraftModal
+        open={pendingDraft !== null}
+        savedAt={pendingDraft?.savedAt ?? null}
+        onRestore={handleRestoreDraft}
+        onDiscard={handleDiscardDraft}
+      />
     </div>
   );
 }

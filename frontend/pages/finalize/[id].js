@@ -823,6 +823,7 @@ export default function FinalizePage() {
           <div style={{ marginBottom: 'var(--spacing-xl)' }}>
             <StepCard number={2} title="Handoff Package" done={handoffReady}>
               <HandoffPackageBuilder
+                sowId={id}
                 sowData={sow}
                 existingPackage={handoffPackage}
                 onSave={handleSaveHandoff}

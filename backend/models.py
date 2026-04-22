@@ -374,6 +374,7 @@ class ReviewChecklistResponse(BaseModel):
     focus_areas: list[str]
     items: list[ChecklistItemModel]
     saved_responses: list[dict[str, Any]] | None = None
+    comments: str | None = None
 
 
 class ReviewProgressPayload(BaseModel):
