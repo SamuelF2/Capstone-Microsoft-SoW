@@ -17,13 +17,19 @@
  *     the user can clone them into their own template via "Save as copy".
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useAuth } from '../../../lib/auth';
 import Spinner from '../../../components/Spinner';
 import WorkflowFlowEditor from '../../../components/workflow/WorkflowFlowEditor';
-import useWorkflowEditorState from '../../../lib/hooks/useWorkflowEditorState';
+import UnsavedChangesModal from '../../../components/UnsavedChangesModal';
+import RestoreDraftModal from '../../../components/RestoreDraftModal';
+import useWorkflowEditorState, {
+  workflowSignature,
+} from '../../../lib/hooks/useWorkflowEditorState';
+import useUnsavedChangesWarning from '../../../lib/hooks/useUnsavedChangesWarning';
+import useDraftAutosave from '../../../lib/hooks/useDraftAutosave';
 import { emptyWorkflowData } from '../../../lib/workflowEditor';
 
 export default function WorkflowEditPage() {
@@ -96,9 +102,100 @@ export default function WorkflowEditPage() {
     saving,
     saveError,
     savedAt,
+    hasChanges,
     getWorkflowDataRef,
     save: saveWorkflow,
   } = useWorkflowEditorState({ loader, persist, deps: [id, user] });
+
+  // Warn before leaving when there are unsaved changes (tab close or in-app nav).
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+  } = useUnsavedChangesWarning(hasChanges);
+
+  // Auto-save the graph structure to localStorage so unexpected crashes
+  // don't lose work. Disabled on shared-library templates — the user can't
+  // overwrite those anyway ("Save as copy" routes through a new id).
+  const autosaveEnabled = hasChanges && !!workflow && !workflow.is_system;
+  const autosaveKey = id ? `workflow:template:${id}` : null;
+  const { loadDraft, clearDraft } = useDraftAutosave({
+    key: autosaveKey,
+    data: workflow?.workflow_data ?? null,
+    enabled: autosaveEnabled,
+  });
+
+  // Offer to restore a previous session's draft once, after the initial load.
+  const draftCheckedRef = useRef(false);
+  const [pendingDraft, setPendingDraft] = useState(null);
+
+  // Re-arm the draft check if the route id changes without an unmount. The
+  // /workflows/new → /workflows/{id} shallow-replace on first save is the
+  // main case; dropping any pending-draft state here keeps us from showing a
+  // stale prompt for the previous id.
+  useEffect(() => {
+    draftCheckedRef.current = false;
+    setPendingDraft(null);
+  }, [id]);
+
+  useEffect(() => {
+    if (draftCheckedRef.current || loading || !workflow) return;
+    draftCheckedRef.current = true;
+    const draft = loadDraft();
+    if (!draft) return;
+    const draftSig = workflowSignature({ workflow_data: draft.data });
+    const serverSig = workflowSignature(workflow);
+    if (draftSig && draftSig !== serverSig) {
+      setPendingDraft(draft);
+    } else {
+      clearDraft();
+    }
+  }, [loading, workflow, loadDraft, clearDraft]);
+
+  // Clear the draft on any successful save.
+  const prevSavedAtRef = useRef(null);
+  useEffect(() => {
+    if (savedAt && savedAt !== prevSavedAtRef.current) {
+      clearDraft();
+    }
+    prevSavedAtRef.current = savedAt;
+  }, [savedAt, clearDraft]);
+
+  // After a first-save of a new template, the URL transitions from
+  // /workflows/new to /workflows/{id} via shallow replace. `clearDraft`
+  // above only wipes the current (now numeric) key — so we explicitly wipe
+  // the orphaned 'new' draft here, or a later visit to /workflows/new
+  // would surface a stale restore prompt for work that now lives at /{id}.
+  const prevIdRef = useRef(id);
+  useEffect(() => {
+    const prev = prevIdRef.current;
+    if (prev === 'new' && id && id !== 'new') {
+      try {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem('draft:workflow:template:new');
+        }
+      } catch {
+        // ignore
+      }
+    }
+    prevIdRef.current = id;
+  }, [id]);
+
+  const handleRestoreDraft = useCallback(() => {
+    if (!pendingDraft) return;
+    // Bump loaded_at so WorkflowFlowEditor's init effect (keyed on id:loaded_at)
+    // re-seeds its internal nodes/edges from the draft — without this, patching
+    // only workflow_data leaves the canvas showing the server state.
+    setWorkflow((prev) =>
+      prev ? { ...prev, workflow_data: pendingDraft.data, loaded_at: Date.now() } : prev
+    );
+    setPendingDraft(null);
+  }, [pendingDraft, setWorkflow]);
+
+  const handleDiscardDraft = useCallback(() => {
+    setPendingDraft(null);
+    clearDraft();
+  }, [clearDraft]);
 
   // ── Permission derivation ─────────────────────────────────────────────────
   // Backend enforces is_system; ownership mismatch is surfaced client-side
@@ -254,8 +351,16 @@ export default function WorkflowEditPage() {
                 flexShrink: 0,
               }}
             >
-              {savedAt && !saving && (
+              {savedAt && !hasChanges && !saving && (
                 <span className="text-xs text-tertiary">Saved {savedAt.toLocaleTimeString()}</span>
+              )}
+              {hasChanges && !saving && (
+                <span
+                  className="text-xs"
+                  style={{ color: 'var(--color-warning)', fontWeight: 600 }}
+                >
+                  ● Unsaved changes
+                </span>
               )}
               {readOnly ? (
                 <button
@@ -334,12 +439,24 @@ export default function WorkflowEditPage() {
             <WorkflowFlowEditor
               workflow={workflow}
               onChange={setWorkflow}
-              readOnly={readOnly}
+              readOnly={readOnly || saving}
               getWorkflowDataRef={getWorkflowDataRef}
             />
           </div>
         </div>
       </div>
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
+      <RestoreDraftModal
+        open={pendingDraft !== null}
+        savedAt={pendingDraft?.savedAt ?? null}
+        onRestore={handleRestoreDraft}
+        onDiscard={handleDiscardDraft}
+      />
     </>
   );
 }

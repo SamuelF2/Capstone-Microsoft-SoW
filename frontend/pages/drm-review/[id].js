@@ -26,11 +26,24 @@ import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
 import ActivityLog from '../../components/ActivityLog';
 import DecisionModal from '../../components/review/DecisionModal';
+import UnsavedChangesModal from '../../components/UnsavedChangesModal';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
+import useUnsavedChangesWarning from '../../lib/hooks/useUnsavedChangesWarning';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
 import { roleLabel, STAGE_KEYS } from '../../lib/workflowStages';
 import { aiClient } from '../../lib/ai';
 import AIUnavailableBanner from '../../components/AIUnavailableBanner';
+
+// DRM comments are entered in the DecisionModal at submit time, not at the page
+// level — so dirty detection only hashes checklist responses. Sorted by id so
+// server-returned order variations don't register as drift.
+function responsesSignature(responses) {
+  return JSON.stringify(
+    (responses || [])
+      .map((x) => [x.id, !!x.checked, x.notes || ''])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+  );
+}
 
 const DECISION_COLORS = {
   approved: 'var(--color-success)',
@@ -487,6 +500,12 @@ export default function DrmReview() {
   // Local UI state — checklist responses are mutated by the user, so they
   // live outside the loaded payload (they get re-seeded on every refresh).
   const [responses, setResponses] = useState([]);
+  // Baseline signature of responses as last loaded / saved — used for dirty
+  // detection to drive the unsaved-changes modal and Save button state.
+  // Kept in state (not a ref) so clearing the baseline on save triggers the
+  // `hasChanges` memo to recompute — otherwise the Unsaved-changes indicator
+  // would linger with a stale cached value until another state change.
+  const [baselineSig, setBaselineSig] = useState('');
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
@@ -525,7 +544,9 @@ export default function DrmReview() {
       // Reseed checklist responses from the freshly loaded data — this is
       // intentionally outside the returned payload so the hook owns the
       // server state and React owns the user-mutated state.
-      setResponses(checklistData.saved_responses || []);
+      const saved = checklistData.saved_responses || [];
+      setResponses(saved);
+      setBaselineSig(responsesSignature(saved));
 
       // Pull cached AI analysis from the canonical endpoint. The previous
       // implementation read sow.ai_suggestion which doesn't exist on the
@@ -565,6 +586,28 @@ export default function DrmReview() {
   const checklistRole = data?.checklistRole ?? '';
   const reviewStatus = data?.reviewStatus ?? null;
   const workflowData = data?.workflowData ?? null;
+
+  // ── Dirty detection ─────────────────────────────────────────────────────
+  // Declared above the save/submit/send-back handlers so `allowNextNavigation`
+  // isn't a forward-reference via closure. Skipped when the current user's
+  // review is already done (the page is read-only in that branch) and while
+  // the initial load is still in flight (baseline hasn't been seeded yet).
+  const myDrmAssignment = (reviewStatus?.assignments || []).find(
+    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.reviewer_role === checklistRole
+  );
+  const isMyDone = myDrmAssignment?.status === 'completed';
+
+  const hasChanges = useMemo(
+    () => !isMyDone && !loading && responsesSignature(responses) !== baselineSig,
+    [isMyDone, loading, responses, baselineSig]
+  );
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+    allowNextNavigation,
+  } = useUnsavedChangesWarning(hasChanges);
 
   // Compute send-back targets from workflow on_send_back transitions
   const sendBackTargets = useMemo(() => {
@@ -639,6 +682,10 @@ export default function DrmReview() {
 
   async function handleSaveProgress() {
     setSaving(true);
+    // Snapshot the signature of what we're ACTUALLY sending — if the user
+    // keeps editing during the round-trip, those newer edits stay dirty
+    // instead of being silently marked clean on success.
+    const payloadSig = responsesSignature(responses);
     try {
       const res = await authFetch(`/api/review/${id}/save-progress`, {
         method: 'POST',
@@ -646,6 +693,10 @@ export default function DrmReview() {
         body: JSON.stringify({ checklist_responses: responses, comments: '' }),
       });
       if (!res.ok) throw new Error('Save failed');
+      // Reset dirty baseline to what we just successfully persisted.  loadAll()
+      // below will overwrite it again with the server response, but doing it
+      // here first avoids a transient "unsaved" flash while the reload runs.
+      setBaselineSig(payloadSig);
       showToast('Progress saved');
       await loadAll();
     } catch (err) {
@@ -657,6 +708,7 @@ export default function DrmReview() {
 
   async function handleDecisionSubmit({ decision, comments, conditions }) {
     setSubmitting(true);
+    const payloadSig = responsesSignature(responses);
     try {
       const res = await authFetch(`/api/review/${id}/submit`, {
         method: 'POST',
@@ -667,12 +719,18 @@ export default function DrmReview() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `Submit failed (${res.status})`);
       }
+      // Clear dirty state immediately so the post-submit redirect isn't
+      // intercepted by the unsaved-changes modal.
+      setBaselineSig(payloadSig);
       const resBody = await res.json().catch(() => ({}));
       setModal(null);
 
       if (resBody.auto_advanced) {
         showToast('Review submitted — automatically advanced to next stage');
-        setTimeout(() => router.push('/drm-dashboard'), 1500);
+        setTimeout(() => {
+          allowNextNavigation();
+          router.push('/drm-dashboard');
+        }, 1500);
         return;
       }
 
@@ -710,7 +768,9 @@ export default function DrmReview() {
         throw new Error(err.detail || `Send-back failed (${res.status})`);
       }
       setModal(null);
+      setBaselineSig(responsesSignature(responses));
       showToast('SoW sent back for revision');
+      allowNextNavigation();
       router.replace('/drm-dashboard');
     } catch (err) {
       showToast(err.message, 'error');
@@ -761,12 +821,6 @@ export default function DrmReview() {
     reviewStatus?.assignments?.some(
       (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.status === 'completed'
     ) ?? false;
-
-  // More precise: is the current user's assignment done?
-  const myDrmAssignment = (reviewStatus?.assignments || []).find(
-    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.reviewer_role === checklistRole
-  );
-  const isMyDone = myDrmAssignment?.status === 'completed';
 
   const requiredIds = checklistItems.filter((i) => i.required).map((i) => i.id);
   const checkedIds = responses.filter((r) => r.checked).map((r) => r.id);
@@ -851,6 +905,12 @@ export default function DrmReview() {
           availableStages={sendBackTargets}
         />
       )}
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
 
       <div
         style={{
@@ -1209,11 +1269,26 @@ export default function DrmReview() {
                     gap: 'var(--spacing-sm)',
                   }}
                 >
+                  {hasChanges && !saving && (
+                    <span
+                      className="text-xs"
+                      style={{
+                        color: 'var(--color-warning)',
+                        fontWeight: 600,
+                        textAlign: 'center',
+                      }}
+                    >
+                      ● Unsaved changes
+                    </span>
+                  )}
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={handleSaveProgress}
-                    disabled={saving}
-                    style={{ width: '100%' }}
+                    disabled={saving || !hasChanges}
+                    style={{
+                      width: '100%',
+                      opacity: saving || !hasChanges ? 0.6 : 1,
+                    }}
                   >
                     {saving ? 'Saving…' : 'Save Progress'}
                   </button>

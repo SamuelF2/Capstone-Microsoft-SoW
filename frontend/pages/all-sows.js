@@ -17,6 +17,7 @@ import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
 import { formatDeal as formatDealValue, formatDate } from '../lib/format';
 import { routeForStage, stageColor, STAGE_KEYS } from '../lib/workflowStages';
+import useLocalStoragePref from '../lib/hooks/useLocalStoragePref';
 
 /**
  * Render a Postgres ts_headline() snippet safely.
@@ -126,8 +127,13 @@ export default function AllSoWs() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
   const [search, setSearch] = useState('');
-  const [filterMethod, setFilterMethod] = useState('All');
-  const [filterStatus, setFilterStatus] = useState('All');
+  // Filter selections persist across sessions — users generally pick a
+  // methodology / stage focus and expect it to stick. Search text stays
+  // transient on purpose (returning after a week to a stale search term
+  // feels broken). Keyed under a `prefs:` namespace so we can spot-migrate
+  // or clear it without touching other storage.
+  const [filterMethod, setFilterMethod] = useLocalStoragePref('prefs:all-sows:filterMethod', 'All');
+  const [filterStatus, setFilterStatus] = useLocalStoragePref('prefs:all-sows:filterStatus', 'All');
   const [searchResults, setSearchResults] = useState(null); // null = not searching
   const debounceTimer = useRef(null);
 

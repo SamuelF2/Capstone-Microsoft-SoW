@@ -1,9 +1,59 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../lib/auth';
+import useUnsavedChangesWarning from '../lib/hooks/useUnsavedChangesWarning';
+import useDraftAutosave from '../lib/hooks/useDraftAutosave';
 import WorkflowTemplateSelector from '../components/WorkflowTemplateSelector';
+import UnsavedChangesModal from '../components/UnsavedChangesModal';
+import RestoreDraftModal from '../components/RestoreDraftModal';
+
+const INITIAL_FORM = {
+  sowTitle: '',
+  opportunityId: '',
+  workOrderNumber: '',
+  dealValue: '',
+  estimatedMargin: '',
+  customerName: '',
+  customerLegalName: '',
+  deliveryMethodology: '',
+  cycle: '1',
+};
+
+function formSignature(form) {
+  return JSON.stringify({
+    sowTitle: form.sowTitle || '',
+    opportunityId: form.opportunityId || '',
+    workOrderNumber: form.workOrderNumber || '',
+    dealValue: form.dealValue || '',
+    estimatedMargin: form.estimatedMargin || '',
+    customerName: form.customerName || '',
+    customerLegalName: form.customerLegalName || '',
+    deliveryMethodology: form.deliveryMethodology || '',
+    cycle: form.cycle || '1',
+  });
+}
+
+// Subset we're willing to write to localStorage. Pricing (dealValue,
+// estimatedMargin) and customer identity (customerName, customerLegalName)
+// are deliberately excluded — they're either regulated-adjacent (deal
+// economics) or PII (legal entity names) and don't belong in a store that
+// any page-level JS can read. The user just retypes them on restore; the
+// high-value protection is not losing the title / opportunity id / chosen
+// methodology after a crash.
+function draftFromForm(form) {
+  return {
+    sowTitle: form.sowTitle || '',
+    opportunityId: form.opportunityId || '',
+    workOrderNumber: form.workOrderNumber || '',
+    deliveryMethodology: form.deliveryMethodology || '',
+    cycle: form.cycle || '1',
+  };
+}
+
+const INITIAL_FORM_SIG = formSignature(INITIAL_FORM);
+const INITIAL_DRAFT_SIG = JSON.stringify(draftFromForm(INITIAL_FORM));
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -26,17 +76,7 @@ export default function CreateNew() {
   const { authFetch } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({
-    sowTitle: '',
-    opportunityId: '',
-    workOrderNumber: '',
-    dealValue: '',
-    estimatedMargin: '',
-    customerName: '',
-    customerLegalName: '',
-    deliveryMethodology: '',
-    cycle: '1',
-  });
+  const [form, setForm] = useState(INITIAL_FORM);
   const [touched, setTouched] = useState({});
 
   // Content template selection
@@ -49,6 +89,60 @@ export default function CreateNew() {
 
   // Workflow template selection
   const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState(null);
+
+  // ── Unsaved-changes guard + draft autosave ─────────────────────────────
+  // Dirty when any text field diverges from the initial blank form. Template
+  // selections are deliberately NOT tracked — they're a one-click choice and
+  // the methodology-fetch effect would clobber a restored selectedTemplateId
+  // anyway. Suppressed while submitting so the post-create redirect goes
+  // through cleanly.
+  const hasChanges = useMemo(
+    () => !isSubmitting && formSignature(form) !== INITIAL_FORM_SIG,
+    [form, isSubmitting]
+  );
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+  } = useUnsavedChangesWarning(hasChanges);
+
+  // Stable reference so the autosave hook's effect only re-runs when the
+  // persisted subset actually changes (not when dealValue etc. are edited).
+  const draftData = useMemo(() => draftFromForm(form), [form]);
+
+  const { loadDraft, clearDraft } = useDraftAutosave({
+    key: 'sow:new',
+    data: draftData,
+    enabled: hasChanges,
+  });
+
+  const draftCheckedRef = useRef(false);
+  const [pendingDraft, setPendingDraft] = useState(null);
+  useEffect(() => {
+    if (draftCheckedRef.current) return;
+    draftCheckedRef.current = true;
+    const draft = loadDraft();
+    if (!draft) return;
+    const draftSig = JSON.stringify(draft.data || {});
+    if (draftSig && draftSig !== INITIAL_DRAFT_SIG) {
+      setPendingDraft(draft);
+    } else {
+      clearDraft();
+    }
+  }, [loadDraft, clearDraft]);
+
+  const handleRestoreDraft = useCallback(() => {
+    if (!pendingDraft?.data) return;
+    // Merge restored fields over INITIAL_FORM so any missing keys stay blank.
+    setForm({ ...INITIAL_FORM, ...pendingDraft.data });
+    setPendingDraft(null);
+  }, [pendingDraft]);
+
+  const handleDiscardDraft = useCallback(() => {
+    setPendingDraft(null);
+    clearDraft();
+  }, [clearDraft]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -173,6 +267,7 @@ export default function CreateNew() {
         localStorage.setItem('sow-registry', JSON.stringify(registry));
       }
 
+      clearDraft();
       router.push(`/draft/${id}`);
     } catch (err) {
       setError(err.message);
@@ -798,6 +893,18 @@ export default function CreateNew() {
           </div>
         </div>
       )}
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
+      <RestoreDraftModal
+        open={pendingDraft !== null}
+        savedAt={pendingDraft?.savedAt ?? null}
+        onRestore={handleRestoreDraft}
+        onDiscard={handleDiscardDraft}
+      />
     </>
   );
 }

@@ -31,6 +31,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../lib/auth';
+import useUnsavedChangesWarning from '../../lib/hooks/useUnsavedChangesWarning';
+import UnsavedChangesModal from '../UnsavedChangesModal';
+
+// Stable signature for dirty detection — only the (stage, role, user) tuple
+// matters; display names and emails are derived and change after save.
+function slotsSignature(slots) {
+  return JSON.stringify(
+    (slots || [])
+      .map((s) => [s.stage_key, s.role_key, s.user_id || null])
+      .sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]))
+  );
+}
 
 export default function ReviewerAssignmentPanel({
   sowId,
@@ -51,6 +63,12 @@ export default function ReviewerAssignmentPanel({
   // Roles we've already requested (fetched or in-flight).  Held as a ref so
   // re-renders don't re-trigger the preload effect after every state update.
   const requestedRolesRef = useRef(new Set());
+  // Baseline signature of slots as last loaded or successfully saved — used
+  // to detect whether the user has pending unsaved selections.  Kept in state
+  // (not a ref) so clearing it on save triggers the `hasChanges` memo to
+  // recompute — otherwise the Unsaved-changes UI would linger with a stale
+  // cached value until another slot change nudged the memo.
+  const [baselineSig, setBaselineSig] = useState('');
 
   // ── Initial load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -68,7 +86,9 @@ export default function ReviewerAssignmentPanel({
         }
         const data = await r.json();
         if (signal.aborted) return;
-        setSlots(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setSlots(list);
+        setBaselineSig(slotsSignature(list));
       })
       .catch((e) => {
         if (e?.name === 'AbortError' || signal.aborted) return;
@@ -139,6 +159,19 @@ export default function ReviewerAssignmentPanel({
 
   const unfilledCount = useMemo(() => slots.filter((s) => !s.user_id).length, [slots]);
 
+  // Dirty vs last load/save — disables Save when clean and drives the modal.
+  // Suppressed in readOnly mode since no mutation path is exposed.
+  const hasChanges = useMemo(
+    () => !readOnly && slotsSignature(slots) !== baselineSig,
+    [readOnly, slots, baselineSig]
+  );
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+  } = useUnsavedChangesWarning(hasChanges);
+
   // ── Mutators ────────────────────────────────────────────────────────────
   const updateSlot = (stage_key, role_key, user_id) => {
     setSaveMessage(null);
@@ -180,7 +213,12 @@ export default function ReviewerAssignmentPanel({
         throw new Error(text || `Save failed (${r.status})`);
       }
       const updated = await r.json();
-      setSlots(Array.isArray(updated) ? updated : []);
+      const list = Array.isArray(updated) ? updated : [];
+      setSlots(list);
+      // Baseline from the server-returned list (not the sent payload): the
+      // server re-derives display names/emails on each save, so trusting its
+      // response keeps the signature stable across subsequent compares.
+      setBaselineSig(slotsSignature(list));
       setSaveMessage({ kind: 'ok', text: 'Reviewers saved.' });
       if (typeof onSaved === 'function') onSaved();
     } catch (e) {
@@ -258,15 +296,33 @@ export default function ReviewerAssignmentPanel({
           </p>
         </div>
         {!readOnly && (
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-            style={{ fontSize: 'var(--font-size-xs)', padding: '4px 14px' }}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--spacing-sm)',
+              flexShrink: 0,
+            }}
           >
-            {saving ? 'Saving…' : 'Save reviewers'}
-          </button>
+            {hasChanges && !saving && (
+              <span className="text-xs" style={{ color: 'var(--color-warning)', fontWeight: 600 }}>
+                ● Unsaved changes
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={saving || !hasChanges}
+              style={{
+                fontSize: 'var(--font-size-xs)',
+                padding: '4px 14px',
+                opacity: saving || !hasChanges ? 0.6 : 1,
+              }}
+            >
+              {saving ? 'Saving…' : 'Save reviewers'}
+            </button>
+          </div>
         )}
       </div>
 
@@ -430,6 +486,12 @@ export default function ReviewerAssignmentPanel({
           </div>
         ))}
       </div>
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
     </div>
   );
 }

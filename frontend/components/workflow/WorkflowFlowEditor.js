@@ -71,6 +71,9 @@ export default function WorkflowFlowEditor({
   onChange,
   readOnly = false,
   getWorkflowDataRef,
+  // Live SoW workflows have no server-side name/description — hide those
+  // inputs so the user isn't offered an affordance the backend ignores.
+  hideWorkflowMeta = false,
 }) {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -656,6 +659,7 @@ export default function WorkflowFlowEditor({
         nodes={nodes}
         edges={edges}
         warnings={warnings}
+        hideWorkflowMeta={hideWorkflowMeta}
       />
     </div>
   );

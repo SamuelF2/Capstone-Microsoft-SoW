@@ -37,12 +37,23 @@ import COATracker from '../../../components/COATracker';
 import AttachmentManager from '../../../components/AttachmentManager';
 import ActivityLog from '../../../components/ActivityLog';
 import DecisionModal from '../../../components/review/DecisionModal';
+import UnsavedChangesModal from '../../../components/UnsavedChangesModal';
 import SendBackModal from '../../../components/review/SendBackModal';
 import SoWDocumentReader from '../../../components/sow/SoWDocumentReader';
 import useAutoRefreshFetch from '../../../lib/hooks/useAutoRefreshFetch';
+import useUnsavedChangesWarning from '../../../lib/hooks/useUnsavedChangesWarning';
 import { formatDeal, esapBadgeStyle } from '../../../lib/format';
 import { aiClient } from '../../../lib/ai';
 import AIUnavailableBanner from '../../../components/AIUnavailableBanner';
+
+function reviewSignature(responses, comments) {
+  return JSON.stringify({
+    r: (responses || [])
+      .map((x) => [x.id, !!x.checked, x.notes || ''])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    c: comments || '',
+  });
+}
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -201,6 +212,13 @@ export default function AssignmentReviewPage() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
+  // Dirty baseline — refreshed from server state on every successful load or
+  // save. Held in state (not a ref) so setting it on save triggers a re-render
+  // and the `hasChanges` memo recomputes — otherwise the Unsaved-changes UI
+  // would linger after a successful save until the next responses/comments
+  // change poked the memo.
+  const [baselineSig, setBaselineSig] = useState('');
+
   // ── Loader: assignment checklist → sow + workflow + status ──────────────
   // The two-stage shape lives inside the loader so the hook only sees one
   // function.  The signal is forwarded through every fetch so cancellation
@@ -220,7 +238,13 @@ export default function AssignmentReviewPage() {
         throw new Error(`Checklist load failed (${checklistRes.status})`);
       }
       const checkData = await checklistRes.json();
-      setResponses(checkData.saved_responses || []);
+      const savedResponses = checkData.saved_responses || [];
+      const savedComments = checkData.comments || '';
+      setResponses(savedResponses);
+      setComments(savedComments);
+      // Seed dirty baseline from the server truth so reloading/refreshing
+      // leaves us in a clean state.
+      setBaselineSig(reviewSignature(savedResponses, savedComments));
 
       const loadedSowId = checkData.sow_id;
 
@@ -376,10 +400,35 @@ export default function AssignmentReviewPage() {
   const isStageCurrent =
     currentStage && checklist && matchingAssignmentKeys(currentStage).has(checklist.stage);
 
+  // ── Dirty detection ─────────────────────────────────────────────────────
+  // Declared above the save/submit handlers so `allowNextNavigation` isn't a
+  // forward-reference via closure. Only warns when the page is actually
+  // editable — done assignments, the initial load, and callers without
+  // review access have no local state worth protecting.
+  const hasChanges = useMemo(
+    () =>
+      canReview &&
+      !isMyReviewDone &&
+      !loading &&
+      reviewSignature(responses, comments) !== baselineSig,
+    [canReview, isMyReviewDone, loading, responses, comments, baselineSig]
+  );
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+    allowNextNavigation,
+  } = useUnsavedChangesWarning(hasChanges);
+
   // ── Save progress (assignment-scoped) ──────────────────────────────────
   async function handleSaveProgress() {
     if (!canReview) return;
     setSaving(true);
+    // Snapshot the signature of what we're ACTUALLY sending — if the user
+    // keeps editing during the round-trip, those newer edits stay dirty
+    // instead of being silently marked clean on success.
+    const payloadSig = reviewSignature(responses, comments);
     try {
       const res = await authFetch(`/api/review/assignment/${assignmentId}/save-progress`, {
         method: 'POST',
@@ -393,6 +442,7 @@ export default function AssignmentReviewPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || 'Save failed');
       }
+      setBaselineSig(payloadSig);
       showToast('Progress saved');
       await refreshProgress();
     } catch (err) {
@@ -406,6 +456,8 @@ export default function AssignmentReviewPage() {
   async function handleSubmitDecision(decision, extras = {}) {
     if (!canReview) return;
     setSubmitting(true);
+    const submittedComments = extras.comments || comments || '';
+    const payloadSig = reviewSignature(responses, submittedComments);
     try {
       const res = await authFetch(`/api/review/assignment/${assignmentId}/submit`, {
         method: 'POST',
@@ -421,6 +473,8 @@ export default function AssignmentReviewPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `Submission failed (${res.status})`);
       }
+      // Clear dirty state first so the post-submit redirects aren't intercepted.
+      setBaselineSig(payloadSig);
       const resBody = await res.json().catch(() => ({}));
       setModal(null);
 
@@ -438,7 +492,10 @@ export default function AssignmentReviewPage() {
 
       if (resBody.auto_advanced) {
         showToast('Review submitted — automatically advanced to next stage');
-        setTimeout(() => router.push('/my-reviews'), 1500);
+        setTimeout(() => {
+          allowNextNavigation();
+          router.push('/my-reviews');
+        }, 1500);
         return;
       }
 
@@ -455,7 +512,10 @@ export default function AssignmentReviewPage() {
       await refreshProgress();
 
       if (decision === 'rejected') {
-        setTimeout(() => router.push('/my-reviews'), 1500);
+        setTimeout(() => {
+          allowNextNavigation();
+          router.push('/my-reviews');
+        }, 1500);
       }
     } catch (err) {
       showToast(err.message, 'error');
@@ -610,6 +670,12 @@ export default function AssignmentReviewPage() {
           availableStages={sendBackTargets}
         />
       )}
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
 
       {/* The page is bound to the viewport (no outer scroll) so the SoW
           reader and review panel can each manage their own scroll within
@@ -1129,11 +1195,28 @@ export default function AssignmentReviewPage() {
                         <button
                           className="btn btn-secondary"
                           onClick={handleSaveProgress}
-                          disabled={saving}
-                          title="Saves your current checklist without submitting your decision"
+                          disabled={saving || !hasChanges}
+                          title={
+                            !hasChanges && !saving
+                              ? 'No unsaved changes'
+                              : 'Saves your current checklist without submitting your decision'
+                          }
+                          style={{ opacity: saving || !hasChanges ? 0.6 : 1 }}
                         >
                           {saving ? 'Saving...' : 'Save Progress'}
                         </button>
+                        {hasChanges && !saving && (
+                          <span
+                            className="text-xs"
+                            style={{
+                              color: 'var(--color-warning)',
+                              fontWeight: 600,
+                              textAlign: 'center',
+                            }}
+                          >
+                            ● Unsaved changes
+                          </span>
+                        )}
 
                         <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
                           <button
