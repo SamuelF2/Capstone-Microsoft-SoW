@@ -1,6 +1,7 @@
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 const emptyDeliverable = () => ({
   id: genId('del'),
@@ -32,7 +33,7 @@ function DeliverableCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Description
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.description}
           onChange={(e) => onChange({ ...item, description: e.target.value })}
@@ -46,7 +47,7 @@ function DeliverableCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Acceptance Criteria <span style={{ color: 'var(--color-error)' }}>*</span>
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.acceptanceCriteria}
           onChange={(e) => onChange({ ...item, acceptanceCriteria: e.target.value })}
@@ -101,23 +102,25 @@ export default function Deliverables({ data, onChange }) {
         description="Define the specific deliverables for this engagement, including acceptance criteria that must be met before sign-off."
       />
 
-      <HorizontalCardList>
-        {items.map((item) => (
-          <DeliverableCard
-            key={item.id}
-            item={item}
-            onChange={handleChange}
-            onRemove={() => handleRemove(item.id)}
-          />
-        ))}
-        <AddCardButton label="Add Deliverable" width="220px" onClick={handleAdd} />
-      </HorizontalCardList>
+      <div data-subsection="deliverables:items">
+        <HorizontalCardList>
+          {items.map((item) => (
+            <DeliverableCard
+              key={item.id}
+              item={item}
+              onChange={handleChange}
+              onRemove={() => handleRemove(item.id)}
+            />
+          ))}
+          <AddCardButton label="Add Deliverable" width="220px" onClick={handleAdd} />
+        </HorizontalCardList>
 
-      {items.length === 0 && (
-        <p className="text-sm text-secondary" style={{ marginTop: 'var(--spacing-md)' }}>
-          No deliverables added yet. Click "+ Add Deliverable" to get started.
-        </p>
-      )}
+        {items.length === 0 && (
+          <p className="text-sm text-secondary" style={{ marginTop: 'var(--spacing-md)' }}>
+            No deliverables added yet. Click &quot;+ Add Deliverable&quot; to get started.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

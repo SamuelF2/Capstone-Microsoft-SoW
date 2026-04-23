@@ -23,7 +23,7 @@
  *    is a system-admin.  Read-only when `assignment_status === 'completed'`.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -37,9 +37,12 @@ import COATracker from '../../../components/COATracker';
 import AttachmentManager from '../../../components/AttachmentManager';
 import ActivityLog from '../../../components/ActivityLog';
 import DecisionModal from '../../../components/review/DecisionModal';
-import SoWContentPanel from '../../../components/sow/SoWContentPanel';
+import SendBackModal from '../../../components/review/SendBackModal';
+import SoWDocumentReader from '../../../components/sow/SoWDocumentReader';
 import useAutoRefreshFetch from '../../../lib/hooks/useAutoRefreshFetch';
 import { formatDeal, esapBadgeStyle } from '../../../lib/format';
+import { aiClient } from '../../../lib/ai';
+import AIUnavailableBanner from '../../../components/AIUnavailableBanner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -48,6 +51,15 @@ const TERMINAL_STATUSES_REDIRECT = {
   finalized: (id) => `/finalize/${id}`,
   draft: (id) => `/draft/${id}`,
 };
+
+// Resizable split-pane defaults. The reviewer can drag the divider between
+// the SoW reader and the review controls; that ratio is persisted to
+// localStorage so the next visit picks up where they left off.
+const SPLIT_DEFAULT_LEFT_PCT = 66.67;
+const SPLIT_MIN_LEFT_PCT = 30;
+const SPLIT_MAX_LEFT_PCT = 80;
+const SPLIT_DIVIDER_PX = 12;
+const SPLIT_STORAGE_KEY = 'reviewAssignment.splitLeftPct';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -72,17 +84,117 @@ export default function AssignmentReviewPage() {
   // User-mutated state — re-seeded from the loaded payload on every refresh.
   const [responses, setResponses] = useState([]);
   const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
   const [comments, setComments] = useState('');
-  const [contentTab, setContentTab] = useState('Overview');
 
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runningAI, setRunningAI] = useState(false);
-  const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions'
+  const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [progressRefreshKey, setProgressRefreshKey] = useState(0);
   const [activeReviewTab, setActiveReviewTab] = useState('review');
   const [coaSummary, setCoaSummary] = useState(null);
+
+  // ── Resizable split (SoW reader | review panel) ────────────────────────
+  // ``leftPct`` is the percentage of the split row given to the SoW reader.
+  // We initialize with the default and overwrite from localStorage in an
+  // effect so SSR and the first client render agree.
+  //
+  // The layout uses a CSS grid (`${leftPct}fr ${dividerPx}px ${100-leftPct}fr`)
+  // so the divider's pixel width never overflows the container — that
+  // overflow is what was causing the right column to twitch during drag.
+  // The grid template lives in a ref-tracked latest-leftPct so the mousemove
+  // handler can update layout without re-binding the listener every frame.
+  const [leftPct, setLeftPct] = useState(SPLIT_DEFAULT_LEFT_PCT);
+  const leftPctRef = useRef(SPLIT_DEFAULT_LEFT_PCT);
+  const splitContainerRef = useRef(null);
+  const dragStateRef = useRef(null);
+
+  useEffect(() => {
+    leftPctRef.current = leftPct;
+  }, [leftPct]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SPLIT_STORAGE_KEY);
+      if (stored != null) {
+        const n = Number(stored);
+        if (!Number.isNaN(n)) {
+          setLeftPct(Math.max(SPLIT_MIN_LEFT_PCT, Math.min(SPLIT_MAX_LEFT_PCT, n)));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const startResize = useCallback((e) => {
+    e.preventDefault();
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    dragStateRef.current = {
+      rectLeft: rect.left,
+      // Available space is the container width minus the fixed divider; the
+      // fr columns split *that* number, not the whole container, so the
+      // percentage we compute has to use the same denominator.
+      avail: rect.width - SPLIT_DIVIDER_PX,
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  // Re-bound only on mount: the move/up handlers read from refs so a state
+  // change to leftPct doesn't tear down and re-add window listeners mid-drag.
+  useEffect(() => {
+    let raf = null;
+    let pending = null;
+    function flush() {
+      raf = null;
+      if (pending != null) {
+        setLeftPct(pending);
+        pending = null;
+      }
+    }
+    function onMove(ev) {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      // Cursor sits over the *middle* of the divider, so subtract half its
+      // width to get the desired left-column edge.
+      const leftEdge = ev.clientX - drag.rectLeft - SPLIT_DIVIDER_PX / 2;
+      const pct = (leftEdge / drag.avail) * 100;
+      const clamped = Math.max(SPLIT_MIN_LEFT_PCT, Math.min(SPLIT_MAX_LEFT_PCT, pct));
+      // Coalesce mousemove → at most one setState per animation frame so a
+      // fast drag never produces a backlog of renders mid-flight.
+      pending = clamped;
+      if (raf == null) raf = window.requestAnimationFrame(flush);
+    }
+    function onUp() {
+      if (!dragStateRef.current) return;
+      dragStateRef.current = null;
+      if (raf != null) {
+        window.cancelAnimationFrame(raf);
+        raf = null;
+        if (pending != null) setLeftPct(pending);
+        pending = null;
+      }
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(SPLIT_STORAGE_KEY, String(leftPctRef.current));
+      } catch {
+        /* ignore */
+      }
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (raf != null) window.cancelAnimationFrame(raf);
+    };
+  }, []);
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
@@ -136,8 +248,13 @@ export default function AssignmentReviewPage() {
       const statusData = statusRes.ok ? await statusRes.json() : null;
 
       if (sowData.ai_suggestion_id) {
-        const aiRes = await authFetch(`/api/sow/${loadedSowId}/ai-analyze`, { signal });
-        if (aiRes.ok) setAiAnalysis(await aiRes.json());
+        const cached = await aiClient.cachedAnalysis(authFetch, loadedSowId, { signal });
+        if (cached.ok) {
+          setAiAnalysis(cached.data || null);
+          setAiError(null);
+        } else {
+          setAiError(cached.error);
+        }
       }
 
       return {
@@ -228,6 +345,24 @@ export default function AssignmentReviewPage() {
     }
     return gatewayStage;
   }, [workflow, sow, checklist]);
+
+  // ── Compute send-back targets from workflow on_send_back transitions ───
+  const sendBackTargets = useMemo(() => {
+    if (!workflow || !sow) return null;
+    const transitions = workflow.workflow_data?.transitions || [];
+    const stages = workflow.workflow_data?.stages || [];
+    const stageMap = Object.fromEntries(stages.map((s) => [s.stage_key, s]));
+    const targets = transitions
+      .filter((t) => t.from_stage === sow.status && t.condition === 'on_send_back')
+      .map((t) => ({
+        stage_key: t.to_stage,
+        display_name: stageMap[t.to_stage]?.display_name || t.to_stage,
+      }));
+    if (!targets.find((t) => t.stage_key === 'draft')) {
+      targets.push({ stage_key: 'draft', display_name: 'Draft' });
+    }
+    return targets;
+  }, [workflow, sow]);
 
   // ── Role & assignment gating (assignment-scoped) ───────────────────────
   // The "acting role" is the role on this specific assignment, NOT the
@@ -333,15 +468,39 @@ export default function AssignmentReviewPage() {
   async function handleRunAI() {
     if (!sowId) return;
     setRunningAI(true);
-    try {
-      const res = await authFetch(`/api/sow/${sowId}/ai-analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      setAiAnalysis(await res.json());
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, sowId);
+    setRunningAI(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
+    }
+  }
+
+  // ── Send back (workflow-driven) ──────────────────────────────────────────
+  async function handleSendBack({ target_stage, comments: sbComments, action_items }) {
+    if (!sowId) return;
+    setSubmitting(true);
+    try {
+      const res = await authFetch(`/api/review/${sowId}/send-back`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_stage, comments: sbComments, action_items }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Send-back failed (${res.status})`);
+      }
+      setModal(null);
+      showToast('SoW sent back for revision');
+      setTimeout(() => router.push('/my-reviews'), 1500);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
-      setRunningAI(false);
+      setSubmitting(false);
     }
   }
 
@@ -443,27 +602,42 @@ export default function AssignmentReviewPage() {
           submitting={submitting}
         />
       )}
+      {modal === 'send-back' && (
+        <SendBackModal
+          onClose={() => setModal(null)}
+          onSubmit={handleSendBack}
+          submitting={submitting}
+          availableStages={sendBackTargets}
+        />
+      )}
 
+      {/* The page is bound to the viewport (no outer scroll) so the SoW
+          reader and review panel can each manage their own scroll within
+          the space that's actually available. The split row uses
+          `flex: 1; min-height: 0`, which lets it shrink to whatever
+          remains after the header + banners, eliminating the need for the
+          old hardcoded `calc(100vh - 320px)` height that miscounted when
+          banners were visible. */}
       <div
         style={{
-          minHeight: 'calc(100vh - 80px)',
+          height: 'calc(100vh - 80px)',
+          minHeight: '600px',
           backgroundColor: 'var(--color-bg-primary)',
           display: 'flex',
           flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
-        {/* ── Sticky top section ──────────────────────────────────────── */}
+        {/* ── Top section (header, progress, tabs) ─────────────────────── */}
         <div
           style={{
-            position: 'sticky',
-            top: 0,
-            zIndex: 50,
+            flexShrink: 0,
             backgroundColor: 'var(--color-bg-primary)',
             borderBottom: '1px solid var(--color-border-default)',
             padding: 'var(--spacing-md) var(--spacing-xl) 0',
           }}
         >
-          <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+          <div style={{ width: '100%' }}>
             {/* Compact header row */}
             <div
               style={{
@@ -628,199 +802,277 @@ export default function AssignmentReviewPage() {
         </div>
 
         {/* ── Tab content ──────────────────────────────────────────────── */}
-        <div style={{ flex: 1, padding: 'var(--spacing-xl)' }}>
-          <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-            {/* ── Review tab ─────────────────────────────────────────── */}
-            {activeReviewTab === 'review' && (
-              <>
-                {/* Out-of-stage banner: assignment is for an earlier stage that
-                    has already been advanced past. The user can still see what
-                    they did but can't make changes. */}
-                {!isStageCurrent && checklist && currentStage && (
-                  <div
-                    style={{
-                      padding: 'var(--spacing-md) var(--spacing-lg)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid rgba(245,158,11,0.3)',
-                      backgroundColor: 'rgba(245,158,11,0.08)',
-                      marginBottom: 'var(--spacing-lg)',
-                      fontSize: 'var(--font-size-sm)',
-                      color: 'var(--color-warning)',
-                    }}
-                  >
-                    This assignment is for the <strong>{checklist.stage}</strong> stage. The SoW has
-                    since moved to <strong>{currentStage.display_name}</strong>.
-                  </div>
-                )}
-
-                {/* Reviewer instructions */}
-                {currentStage?.config?.reviewer_instructions && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: 'var(--spacing-sm)',
-                      padding: 'var(--spacing-sm) var(--spacing-md)',
-                      marginBottom: 'var(--spacing-lg)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid var(--color-info-border, #93c5fd)',
-                      backgroundColor: 'var(--color-info-bg, #eff6ff)',
-                      color: 'var(--color-info-text, #1e40af)',
-                      fontSize: 'var(--text-sm)',
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    <span style={{ flexShrink: 0 }}>ℹ</span>
-                    <span>{currentStage.config.reviewer_instructions}</span>
-                  </div>
-                )}
-
-                {/* Two-column body */}
+        {/* The tab content area is a flex column that consumes the rest of
+            the viewport. Each tab decides how to use that space — the
+            review tab puts the split row in `flex: 1` so it shrinks/grows
+            with the available height; the others wrap their content in
+            an internally-scrolling container. */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            padding: 'var(--spacing-md) var(--spacing-xl) var(--spacing-md)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* ── Review tab ─────────────────────────────────────────── */}
+          {activeReviewTab === 'review' && (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              {/* Out-of-stage banner: assignment is for an earlier stage that
+                  has already been advanced past. The user can still see what
+                  they did but can't make changes. `flex-shrink: 0` so it
+                  always shows at full height and the split row absorbs the
+                  remaining space. */}
+              {!isStageCurrent && checklist && currentStage && (
                 <div
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: showChecklist ? '3fr 2fr' : '1fr',
-                    gap: 'var(--spacing-lg)',
-                    alignItems: 'start',
+                    flexShrink: 0,
+                    padding: 'var(--spacing-sm) var(--spacing-lg)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid rgba(245,158,11,0.3)',
+                    backgroundColor: 'rgba(245,158,11,0.08)',
+                    marginBottom: 'var(--spacing-md)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-warning)',
                   }}
                 >
-                  {/* Left: SoW content */}
+                  This assignment is for the <strong>{checklist.stage}</strong> stage. The SoW has
+                  since moved to <strong>{currentStage.display_name}</strong>.
+                </div>
+              )}
+
+              {/* Reviewer instructions */}
+              {currentStage?.config?.reviewer_instructions && (
+                <div
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    gap: 'var(--spacing-sm)',
+                    padding: 'var(--spacing-sm) var(--spacing-md)',
+                    marginBottom: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--color-info-border, #93c5fd)',
+                    backgroundColor: 'var(--color-info-bg, #eff6ff)',
+                    color: 'var(--color-info-text, #1e40af)',
+                    fontSize: 'var(--text-sm)',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>ℹ</span>
+                  <span>{currentStage.config.reviewer_instructions}</span>
+                </div>
+              )}
+
+              {/* Resizable split: SoW reader (left) | review controls (right).
+                  Uses CSS grid with fr units so the divider's pixel width
+                  is subtracted from the available space *before* the ratio
+                  is applied — this is what stops the right column from
+                  twitching as the user drags. The row is `flex: 1; min-height: 0`
+                  in the surrounding flex column, so it always fills the
+                  remaining viewport space below any banners and never gets
+                  cut off the bottom of the screen. Each column has its own
+                  internal scroll so the reader and checklist scroll
+                  independently, and `scrollbar-gutter: stable` reserves
+                  scrollbar space so a scrollbar appearing mid-drag doesn't
+                  reflow the content. */}
+              <div
+                ref={splitContainerRef}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: showChecklist
+                    ? `${leftPct}fr ${SPLIT_DIVIDER_PX}px ${100 - leftPct}fr`
+                    : '1fr',
+                  alignItems: 'stretch',
+                  flex: 1,
+                  minHeight: 0,
+                }}
+              >
+                {/* Left: SoW reader */}
+                <div
+                  className="card"
+                  style={{
+                    padding: 0,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minWidth: 0,
+                    minHeight: 0,
+                  }}
+                >
+                  <SoWDocumentReader sow={sow} />
+                </div>
+
+                {/* Drag handle */}
+                {showChecklist && (
                   <div
-                    className="card"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize panels"
+                    onMouseDown={startResize}
+                    onDoubleClick={() => {
+                      setLeftPct(SPLIT_DEFAULT_LEFT_PCT);
+                      try {
+                        localStorage.setItem(SPLIT_STORAGE_KEY, String(SPLIT_DEFAULT_LEFT_PCT));
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    title="Drag to resize · double-click to reset"
                     style={{
-                      padding: 0,
-                      overflow: 'hidden',
-                      minHeight: '500px',
+                      cursor: 'col-resize',
                       display: 'flex',
-                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      position: 'relative',
+                      // Disable text selection within the divider so the
+                      // user can't accidentally highlight the page while
+                      // grabbing it.
+                      userSelect: 'none',
                     }}
                   >
                     <div
                       style={{
-                        padding: 'var(--spacing-md) var(--spacing-xl)',
-                        borderBottom: '1px solid var(--color-border-default)',
-                        fontSize: 'var(--font-size-sm)',
-                        fontWeight: 'var(--font-weight-semibold)',
-                        color: 'var(--color-text-secondary)',
-                        flexShrink: 0,
+                        width: '4px',
+                        height: '44px',
+                        borderRadius: '2px',
+                        backgroundColor: 'var(--color-border-default)',
+                        transition: 'background-color 0.15s',
                       }}
+                    />
+                  </div>
+                )}
+
+                {/* Right: review panel — encapsulated as a card so it
+                    visually mirrors the SoW reader on the left and clearly
+                    bounds its own scroll area. The wrapper itself is the
+                    scroll container, so the AI Recommendations section,
+                    checklist, and comments can all expand to whatever
+                    height they need and the column scrolls inside its
+                    own border instead of pushing the page. */}
+                {showChecklist && (
+                  <div
+                    className="custom-scrollbar"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--spacing-md)',
+                      minWidth: 0,
+                      minHeight: 0,
+                      overflowY: 'auto',
+                      // Reserve scrollbar space so the scrollbar
+                      // appearing/disappearing during a resize drag never
+                      // reflows the content (the source of the jitter).
+                      scrollbarGutter: 'stable',
+                      padding: 'var(--spacing-md)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-lg)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                    }}
+                  >
+                    {/* Role card */}
+                    <div
+                      className="card"
+                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)', flexShrink: 0 }}
                     >
-                      SoW Content{' '}
-                      <span
+                      <p
                         style={{
+                          margin: '0 0 2px',
                           fontSize: 'var(--font-size-xs)',
-                          fontWeight: 'normal',
                           color: 'var(--color-text-tertiary)',
                         }}
                       >
-                        (read-only)
-                      </span>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <SoWContentPanel
-                        sow={sow}
-                        activeTab={contentTab}
-                        onTabChange={setContentTab}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Right: review panel */}
-                  {showChecklist && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 'var(--spacing-md)',
-                      }}
-                    >
-                      {/* Role card */}
-                      <div
-                        className="card"
-                        style={{ padding: 'var(--spacing-md) var(--spacing-lg)' }}
+                        Reviewing as
+                      </p>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontWeight: 'var(--font-weight-semibold)',
+                          color: 'var(--color-text-primary)',
+                        }}
                       >
-                        <p
-                          style={{
-                            margin: '0 0 2px',
-                            fontSize: 'var(--font-size-xs)',
-                            color: 'var(--color-text-tertiary)',
-                          }}
-                        >
-                          Reviewing as
-                        </p>
-                        <p
-                          style={{
-                            margin: 0,
-                            fontWeight: 'var(--font-weight-semibold)',
-                            color: 'var(--color-text-primary)',
-                          }}
-                        >
-                          {checklist.display_name || roleLabel(actingRole)}
-                          {isSystemAdmin && (
-                            <span
-                              style={{
-                                marginLeft: 8,
-                                padding: '2px 8px',
-                                borderRadius: 'var(--radius-full)',
-                                backgroundColor: 'rgba(124,58,237,0.1)',
-                                color: 'var(--color-accent-purple, #7c3aed)',
-                                fontSize: '10px',
-                                fontWeight: 'var(--font-weight-semibold)',
-                                letterSpacing: '0.3px',
-                                textTransform: 'uppercase',
-                              }}
-                            >
-                              ★ Admin
-                            </span>
-                          )}
-                        </p>
-                        {checklist.focus_areas?.length > 0 && (
-                          <div
+                        {checklist.display_name || roleLabel(actingRole)}
+                        {isSystemAdmin && (
+                          <span
                             style={{
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              gap: '4px',
-                              marginTop: 'var(--spacing-xs)',
+                              marginLeft: 8,
+                              padding: '2px 8px',
+                              borderRadius: 'var(--radius-full)',
+                              backgroundColor: 'rgba(124,58,237,0.1)',
+                              color: 'var(--color-accent-purple, #7c3aed)',
+                              fontSize: '10px',
+                              fontWeight: 'var(--font-weight-semibold)',
+                              letterSpacing: '0.3px',
+                              textTransform: 'uppercase',
                             }}
                           >
-                            {checklist.focus_areas.map((fa, idx) => (
-                              <span
-                                key={idx}
-                                style={{
-                                  padding: '2px 8px',
-                                  borderRadius: 'var(--radius-full)',
-                                  backgroundColor: 'var(--color-bg-tertiary)',
-                                  border: '1px solid var(--color-border-default)',
-                                  fontSize: '11px',
-                                  color: 'var(--color-text-secondary)',
-                                }}
-                              >
-                                {fa}
-                              </span>
-                            ))}
-                          </div>
+                            ★ Admin
+                          </span>
                         )}
-                      </div>
-
-                      {/* Checklist */}
-                      <div className="card" style={{ padding: 'var(--spacing-lg)' }}>
-                        <h4
+                      </p>
+                      {checklist.focus_areas?.length > 0 && (
+                        <div
                           style={{
-                            margin: '0 0 var(--spacing-md)',
-                            fontSize: 'var(--font-size-sm)',
-                            fontWeight: 'var(--font-weight-semibold)',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '4px',
+                            marginTop: 'var(--spacing-xs)',
                           }}
                         >
-                          Review Checklist
-                        </h4>
-                        <ReviewChecklist
-                          items={checklist.items}
-                          responses={responses}
-                          onChange={setResponses}
-                          readOnly={isMyReviewDone}
-                        />
-                      </div>
+                          {checklist.focus_areas.map((fa, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: 'var(--radius-full)',
+                                backgroundColor: 'var(--color-bg-tertiary)',
+                                border: '1px solid var(--color-border-default)',
+                                fontSize: '11px',
+                                color: 'var(--color-text-secondary)',
+                              }}
+                            >
+                              {fa}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
-                      {/* AI suggestions */}
+                    {/* Checklist */}
+                    <div className="card" style={{ padding: 'var(--spacing-lg)', flexShrink: 0 }}>
+                      <h4
+                        style={{
+                          margin: '0 0 var(--spacing-md)',
+                          fontSize: 'var(--font-size-sm)',
+                          fontWeight: 'var(--font-weight-semibold)',
+                        }}
+                      >
+                        Review Checklist
+                      </h4>
+                      <ReviewChecklist
+                        items={checklist.items}
+                        responses={responses}
+                        onChange={setResponses}
+                        readOnly={isMyReviewDone}
+                      />
+                    </div>
+
+                    {/* AI suggestions */}
+                    {aiError && (
+                      <AIUnavailableBanner
+                        error={aiError}
+                        context="analysis"
+                        onRetry={handleRunAI}
+                      />
+                    )}
+                    <div style={{ flexShrink: 0 }}>
                       <AISuggestionsPanel
                         analysisResult={aiAnalysis}
                         collapsed={true}
@@ -828,96 +1080,124 @@ export default function AssignmentReviewPage() {
                         onRunAnalysis={handleRunAI}
                         loading={runningAI}
                       />
+                    </div>
 
-                      {/* Comments */}
-                      {!isMyReviewDone && (
-                        <div className="card" style={{ padding: 'var(--spacing-lg)' }}>
-                          <label
-                            style={{
-                              display: 'block',
-                              fontSize: 'var(--font-size-sm)',
-                              fontWeight: 'var(--font-weight-semibold)',
-                              marginBottom: 'var(--spacing-xs)',
-                            }}
-                          >
-                            Comments
-                          </label>
-                          <textarea
-                            value={comments}
-                            onChange={(e) => setComments(e.target.value)}
-                            placeholder="Add overall comments for this review..."
-                            rows={3}
-                            style={{
-                              width: '100%',
-                              padding: 'var(--spacing-sm)',
-                              borderRadius: 'var(--radius-md)',
-                              border: '1px solid var(--color-border-default)',
-                              backgroundColor: 'var(--color-bg-secondary)',
-                              color: 'var(--color-text-primary)',
-                              fontSize: 'var(--font-size-sm)',
-                              fontFamily: 'inherit',
-                              resize: 'vertical',
-                              boxSizing: 'border-box',
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {/* Action buttons */}
-                      {!isMyReviewDone ? (
-                        <div
+                    {/* Comments */}
+                    {!isMyReviewDone && (
+                      <div className="card" style={{ padding: 'var(--spacing-lg)', flexShrink: 0 }}>
+                        <label
                           style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 'var(--spacing-sm)',
+                            display: 'block',
+                            fontSize: 'var(--font-size-sm)',
+                            fontWeight: 'var(--font-weight-semibold)',
+                            marginBottom: 'var(--spacing-xs)',
                           }}
                         >
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleSaveProgress}
-                            disabled={saving}
-                            title="Saves your current checklist without submitting your decision"
-                          >
-                            {saving ? 'Saving...' : 'Save Progress'}
-                          </button>
+                          Comments
+                        </label>
+                        <textarea
+                          value={comments}
+                          onChange={(e) => setComments(e.target.value)}
+                          placeholder="Add overall comments for this review..."
+                          rows={3}
+                          style={{
+                            width: '100%',
+                            padding: 'var(--spacing-sm)',
+                            borderRadius: 'var(--radius-md)',
+                            border: '1px solid var(--color-border-default)',
+                            backgroundColor: 'var(--color-bg-secondary)',
+                            color: 'var(--color-text-primary)',
+                            fontSize: 'var(--font-size-sm)',
+                            fontFamily: 'inherit',
+                            resize: 'vertical',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+                    )}
 
-                          <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-                            <button
-                              className="btn btn-primary"
-                              style={{ flex: 1 }}
-                              onClick={() => handleSubmitDecision('approved')}
-                              disabled={!canApprove || submitting}
-                              title={
-                                !canApprove
-                                  ? `Check all required items first (${checkedRequired.length}/${requiredItems.length})`
-                                  : ''
-                              }
-                            >
-                              Approve ✓
-                            </button>
-                            <button
-                              className="btn btn-secondary"
-                              style={{
-                                flex: 1,
-                                color: 'var(--color-error)',
-                                borderColor: 'var(--color-error)',
-                              }}
-                              onClick={() => setModal('rejected')}
-                              disabled={submitting}
-                            >
-                              Reject ✗
-                            </button>
-                          </div>
+                    {/* Action buttons */}
+                    {!isMyReviewDone ? (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 'var(--spacing-sm)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <button
+                          className="btn btn-secondary"
+                          onClick={handleSaveProgress}
+                          disabled={saving}
+                          title="Saves your current checklist without submitting your decision"
+                        >
+                          {saving ? 'Saving...' : 'Save Progress'}
+                        </button>
 
+                        <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
                           <button
-                            className="btn btn-secondary"
-                            onClick={() => setModal('approved-with-conditions')}
+                            className="btn btn-primary"
+                            style={{ flex: 1 }}
+                            onClick={() => handleSubmitDecision('approved')}
                             disabled={!canApprove || submitting}
+                            title={
+                              !canApprove
+                                ? `Check all required items first (${checkedRequired.length}/${requiredItems.length})`
+                                : ''
+                            }
                           >
-                            Approve with Conditions
+                            Approve ✓
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              flex: 1,
+                              color: 'var(--color-error)',
+                              borderColor: 'var(--color-error)',
+                            }}
+                            onClick={() => setModal('rejected')}
+                            disabled={submitting}
+                          >
+                            Reject ✗
                           </button>
                         </div>
-                      ) : (
+
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => setModal('approved-with-conditions')}
+                          disabled={!canApprove || submitting}
+                        >
+                          Approve with Conditions
+                        </button>
+
+                        <button
+                          className="btn btn-sm"
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'rgba(245,158,11,0.1)',
+                            color: 'var(--color-warning)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                          onClick={() => setModal('send-back')}
+                          disabled={submitting}
+                        >
+                          Send Back
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 'var(--spacing-sm)',
+                          flexShrink: 0,
+                        }}
+                      >
                         <div
                           style={{
                             padding: 'var(--spacing-md)',
@@ -944,15 +1224,45 @@ export default function AssignmentReviewPage() {
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+                        <button
+                          className="btn btn-sm"
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'rgba(245,158,11,0.1)',
+                            color: 'var(--color-warning)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                          onClick={() => setModal('send-back')}
+                          disabled={submitting}
+                        >
+                          Send Back
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-            {/* ── Attachments tab ────────────────────────────────────── */}
-            {activeReviewTab === 'attachments' && sow && currentStage && (
+          {/* ── Attachments tab ────────────────────────────────────── */}
+          {/* Non-review tabs each get their own scroll container so the
+              page-level layout (which is locked to the viewport height)
+              doesn't push content off the bottom of the screen. */}
+          {activeReviewTab === 'attachments' && sow && currentStage && (
+            <div
+              className="custom-scrollbar"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
+              }}
+            >
               <AttachmentManager
                 sowId={sow.id}
                 stageKey={currentStage.stage_key}
@@ -960,25 +1270,45 @@ export default function AssignmentReviewPage() {
                 showRequirements={true}
                 authFetch={authFetch}
               />
-            )}
+            </div>
+          )}
 
-            {/* ── Conditions tab ─────────────────────────────────────── */}
-            {activeReviewTab === 'conditions' && sow && (
+          {/* ── Conditions tab ─────────────────────────────────────── */}
+          {activeReviewTab === 'conditions' && sow && (
+            <div
+              className="custom-scrollbar"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
+              }}
+            >
               <COATracker
                 sowId={sow.id}
                 authFetch={authFetch}
                 readOnly={!canReview}
                 onStatusChange={() => setProgressRefreshKey((k) => k + 1)}
               />
-            )}
+            </div>
+          )}
 
-            {/* ── Activity tab ───────────────────────────────────────── */}
-            {activeReviewTab === 'activity' && sow && (
+          {/* ── Activity tab ───────────────────────────────────────── */}
+          {activeReviewTab === 'activity' && sow && (
+            <div
+              className="custom-scrollbar"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
+              }}
+            >
               <div className="card" style={{ padding: 'var(--spacing-lg)' }}>
                 <ActivityLog sowId={sow.id} />
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </>

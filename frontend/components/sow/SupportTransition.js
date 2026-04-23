@@ -17,43 +17,47 @@ export default function SupportTransition({ data, onChange }) {
       />
 
       <TwoColumnGrid style={{ marginBottom: 'var(--spacing-xl)' }}>
-        <FormCard
-          title="Transition Plan"
-          description="Describe how the solution will be transitioned to the customer's operations team after go-live, including training, documentation, and handover activities."
-        >
-          <textarea
-            className="form-textarea"
-            value={transitionPlan}
-            onChange={(e) => update({ transitionPlan: e.target.value })}
-            placeholder="Outline the transition activities, timelines, training sessions, and documentation that will be provided to the customer's team..."
-            rows={8}
-          />
-        </FormCard>
-
-        <FormCard
-          title="Ongoing Support Model"
-          description="Describe the support model that will be in place after the transition, including SLAs, contact channels, and escalation paths."
-        >
-          <div className="form-group">
-            <label className="form-label">Target Handover Date</label>
-            <input
-              type="date"
-              className="form-input"
-              value={handoverDate}
-              onChange={(e) => update({ handoverDate: e.target.value })}
-            />
-          </div>
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Support Description</label>
+        <div data-subsection="supportTransition:transitionPlan">
+          <FormCard
+            title="Transition Plan"
+            description="Describe how the solution will be transitioned to the customer's operations team after go-live, including training, documentation, and handover activities."
+          >
             <textarea
               className="form-textarea"
-              value={supportModel}
-              onChange={(e) => update({ supportModel: e.target.value })}
-              placeholder="Describe the post-go-live support model, response times, and how the customer can raise issues..."
-              rows={5}
+              value={transitionPlan}
+              onChange={(e) => update({ transitionPlan: e.target.value })}
+              placeholder="Outline the transition activities, timelines, training sessions, and documentation that will be provided to the customer's team..."
+              rows={8}
             />
-          </div>
-        </FormCard>
+          </FormCard>
+        </div>
+
+        <div data-subsection="supportTransition:supportModel">
+          <FormCard
+            title="Ongoing Support Model"
+            description="Describe the support model that will be in place after the transition, including SLAs, contact channels, and escalation paths."
+          >
+            <div className="form-group">
+              <label className="form-label">Target Handover Date</label>
+              <input
+                type="date"
+                className="form-input"
+                value={handoverDate}
+                onChange={(e) => update({ handoverDate: e.target.value })}
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Support Description</label>
+              <textarea
+                className="form-textarea"
+                value={supportModel}
+                onChange={(e) => update({ supportModel: e.target.value })}
+                placeholder="Describe the post-go-live support model, response times, and how the customer can raise issues..."
+                rows={5}
+              />
+            </div>
+          </FormCard>
+        </div>
       </TwoColumnGrid>
     </div>
   );

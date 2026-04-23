@@ -1,295 +1,153 @@
 """
 AI / GraphRAG proxy router.
 
-Each endpoint checks GRAPHRAG_API_URL. If set, it forwards the request to
-the ML service via httpx. If not set (the default), it returns realistic stub
-data so the frontend can be wired up before the ML service is deployed.
+Each endpoint forwards the request to the ML service via httpx. When the ML
+service is not configured (GRAPHRAG_API_URL empty) or unreachable, every
+endpoint returns HTTP 503 with ``{detail: {message, retryable}}`` so the
+frontend can show the ``AIUnavailableBanner`` uniformly.
+
+No stub / mock data is ever returned — real or unavailable.
 """
 
 from __future__ import annotations
 
+import database
 import httpx
 from auth import CurrentUser
 from config import GRAPHRAG_API_URL
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
+from utils.db_helpers import require_collaborator
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
-
-# ── Stub data ─────────────────────────────────────────────────────────────────
-
-STUB_CONTEXT = {
-    "query": "",
-    "sow_id": None,
-    "methodology": None,
-    "deal_value": None,
-    "sections": [
-        {
-            "type": "SOWSection",
-            "title": "Executive Summary",
-            "content": "Sample executive summary content...",
-            "score": 0.92,
-        },
-        {
-            "type": "SOWSection",
-            "title": "Scope of Work",
-            "content": "Sample scope content...",
-            "score": 0.87,
-        },
-    ],
-    "rules": [
-        {
-            "type": "Rule",
-            "name": "SLA Required",
-            "description": "All engagements must include SLA terms",
-            "category": "compliance",
-        },
-        {
-            "type": "Rule",
-            "name": "Data Privacy Clause",
-            "description": "GDPR/CCPA compliance language required",
-            "category": "compliance",
-        },
-    ],
-    "banned_phrases": [
-        {"phrase": "best effort", "reason": "Implies no guaranteed outcome", "severity": "high"},
-        {"phrase": "unlimited", "reason": "Creates open-ended liability", "severity": "medium"},
-    ],
-    "risks": [
-        {
-            "category": "Staffing",
-            "level": "medium",
-            "description": "Key resource dependency on single SME",
-        },
-        {
-            "category": "Timeline",
-            "level": "low",
-            "description": "Holiday period overlap with Phase 2",
-        },
-    ],
-    "deliverables": [
-        {"name": "Solution Design Document", "phase": "Discovery", "required": True},
-        {"name": "Test Plan", "phase": "Implementation", "required": True},
-    ],
-    "similar_sections": [
-        {
-            "sow_id": "contoso-ccaas-platform",
-            "section": "Executive Summary",
-            "similarity": 0.85,
-        },
-    ],
-    "empty": False,
-}
-
-STUB_ASSIST = {
-    "answer": (
-        "Based on the knowledge graph analysis, this SoW section should include specific SLA "
-        "metrics (99.9% uptime), a detailed escalation matrix, and reference to the customer's "
-        "existing support agreements. Consider adding a RACI matrix for the delivery team "
-        "responsibilities."
-    ),
-    "context": {
-        "methodology": "Agile Sprint Delivery",
-        "deal_value": 2500000,
-        "rules_applied": 3,
-        "sections_referenced": 2,
-    },
-    "retrieved": {
-        "nodes": 12,
-        "relationships": 18,
-        "hops": 2,
-    },
-}
-
-STUB_VALIDATE = {
-    "sow_id": "",
-    "overall_score": 72,
-    "summary": (
-        "SoW meets most requirements but has gaps in SLA definition and risk mitigation sections."
-    ),
-    "violations": [
-        {
-            "rule": "Missing SLA terms",
-            "severity": "high",
-            "section": "Support & Transition",
-            "message": (
-                "No specific SLA metrics defined for uptime, response time, or resolution time"
-            ),
-        },
-        {
-            "rule": "Banned phrase detected",
-            "severity": "medium",
-            "section": "Executive Summary",
-            "message": ("Contains 'best effort' language — replace with specific commitments"),
-        },
-        {
-            "rule": "Missing data privacy clause",
-            "severity": "high",
-            "section": "Compliance",
-            "message": "No GDPR/CCPA compliance language found",
-        },
-    ],
-    "checklist": [
-        {"item": "Executive Summary", "status": "pass", "notes": "Adequate coverage"},
-        {"item": "Scope Definition", "status": "pass", "notes": "Clear in/out scope"},
-        {"item": "SLA Terms", "status": "fail", "notes": "Not defined"},
-        {
-            "item": "Risk Register",
-            "status": "warning",
-            "notes": "Only 2 risks identified — typical engagements have 5-8",
-        },
-        {"item": "Pricing Breakdown", "status": "pass", "notes": "Detailed breakdown provided"},
-    ],
-    "approval": {
-        "esap_type": "Type-2",
-        "level": "Yellow",
-        "required_reviewers": ["solution-architect", "sqa-reviewer", "cpl", "cdp"],
-    },
-    "suggestions": [
-        {
-            "section": "Support & Transition",
-            "suggestion": (
-                "Add specific uptime SLA (e.g., 99.9%) and response time targets "
-                "for P1-P4 incidents"
-            ),
-        },
-        {
-            "section": "Assumptions & Risks",
-            "suggestion": (
-                "Add risks for: data migration complexity, third-party integration delays, "
-                "customer resource availability"
-            ),
-        },
-    ],
-}
-
-STUB_RISKS = {
-    "risks": [
-        {
-            "category": "Staffing",
-            "level": "high",
-            "description": "Single point of failure on lead architect",
-            "mitigation": "Identify backup resource during kickoff",
-        },
-        {
-            "category": "Technical",
-            "level": "medium",
-            "description": "Legacy system integration complexity",
-            "mitigation": "Conduct technical spike in Sprint 1",
-        },
-        {
-            "category": "Commercial",
-            "level": "low",
-            "description": "Currency fluctuation on multi-region deal",
-            "mitigation": "Lock exchange rate in contract terms",
-        },
-    ],
-    "triggered": [
-        {
-            "rule": "High-value deal risk",
-            "trigger": "deal_value > $2M",
-            "recommendation": "Require senior delivery oversight",
-        },
-        {
-            "rule": "Timeline risk",
-            "trigger": "duration > 6 months",
-            "recommendation": "Add quarterly checkpoint reviews",
-        },
-    ],
-}
-
-STUB_SIMILAR = [
-    {
-        "sow_id": "contoso-ccaas-platform",
-        "title": "Contoso CCaaS Platform Migration",
-        "similarity": 0.87,
-        "methodology": "Cloud Adoption",
-        "overlap_areas": ["infrastructure", "migration", "support"],
-    },
-    {
-        "sow_id": "contoso-data-analytics-platform",
-        "title": "Contoso Data Analytics Platform",
-        "similarity": 0.72,
-        "methodology": "Agile Sprint Delivery",
-        "overlap_areas": ["data", "analytics", "dashboard"],
-    },
-    {
-        "sow_id": "contoso-data-estate-modern",
-        "title": "Contoso Data Estate Modernization",
-        "similarity": 0.65,
-        "methodology": "Cloud Adoption",
-        "overlap_areas": ["modernization", "cloud", "migration"],
-    },
-]
-
-STUB_APPROVAL = {
-    "esap_type": "Type-2",
-    "esap_level": "Yellow",
-    "approval_chain": [
-        {"role": "solution-architect", "stage": "internal_review", "required": True},
-        {"role": "sqa-reviewer", "stage": "internal_review", "required": True},
-        {"role": "cpl", "stage": "drm_review", "required": True},
-        {"role": "cdp", "stage": "drm_review", "required": True},
-    ],
-    "thresholds": {
-        "type_1": {"min_value": 5000000, "max_margin": 0.10},
-        "type_2": {"min_value": 1000000, "max_margin": 0.15},
-        "type_3": {"min_value": 0, "max_margin": 1.0},
-    },
-}
-
-STUB_GRAPH_SUMMARY = {
-    "nodes": [
-        {"label": "SOW", "count": 7},
-        {"label": "SOWSection", "count": 84},
-        {"label": "Rule", "count": 23},
-        {"label": "Risk", "count": 31},
-        {"label": "Deliverable", "count": 45},
-        {"label": "Methodology", "count": 4},
-        {"label": "BannedPhrase", "count": 12},
-    ],
-    "relationships": [
-        {"type": "HAS_SECTION", "count": 84},
-        {"type": "USES_METHODOLOGY", "count": 7},
-        {"type": "HAS_RISK", "count": 31},
-        {"type": "HAS_DELIVERABLE", "count": 45},
-        {"type": "SIMILAR_TO", "count": 18},
-        {"type": "VIOLATES_RULE", "count": 9},
-    ],
-}
 
 
 # ── Proxy helper ─────────────────────────────────────────────────────────────
 
 
-async def _proxy_or_stub(method: str, path: str, stub_data: dict | list, **kwargs) -> dict | list:
-    """Forward to GraphRAG API if configured, otherwise return stub data."""
-    if GRAPHRAG_API_URL:
-        async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=30.0) as client:
-            if method == "GET":
-                resp = await client.get(path, params=kwargs.get("params"))
-            else:
-                resp = await client.post(path, json=kwargs.get("json"))
+def _require_ml():
+    """Raise 503 immediately when the ML service URL is not configured."""
+    if not GRAPHRAG_API_URL:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "ML service not configured", "retryable": False},
+        )
+
+
+async def _require_sow_collaborator(sow_id: str, user_id: int) -> None:
+    """Raise 404 if the caller isn't a collaborator on this SoW.
+
+    SoW-scoped AI endpoints receive ``sow_id`` as a string (to accommodate
+    upstream KG node identifiers), but collaboration is stored against the
+    integer primary key.  A non-integer ``sow_id`` is treated as "not found"
+    so outsiders cannot probe whether a given SoW exists.
+    """
+    try:
+        sow_id_int = int(sow_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found") from exc
+    async with database.pg_pool.acquire() as conn:
+        await require_collaborator(conn, sow_id=sow_id_int, user_id=user_id)
+
+
+async def _proxy_get(
+    path: str,
+    *,
+    params: dict | None = None,
+    timeout: float = 5.0,
+    user: CurrentUser | None = None,
+) -> dict | list:
+    """Forward a GET to the ML service with error normalisation."""
+    _require_ml()
+    headers = {}
+    if user:
+        headers["X-Cocoon-User"] = str(user.id)
+    try:
+        async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=timeout) as client:
+            resp = await client.get(path, params=params, headers=headers)
+            if resp.status_code in (404, 501):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"message": f"Upstream {path} not yet available", "retryable": False},
+                )
             resp.raise_for_status()
             return resp.json()
-    return stub_data
+    except HTTPException:
+        raise
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML service unreachable: {exc}", "retryable": True},
+        ) from exc
+    except httpx.ReadTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML service timed out: {exc}", "retryable": True},
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        retryable = exc.response.status_code >= 500
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML error: {exc}", "retryable": retryable},
+        ) from exc
+
+
+async def _proxy_post(
+    path: str,
+    *,
+    json_body: dict | None = None,
+    timeout: float = 30.0,
+    user: CurrentUser | None = None,
+) -> dict | list:
+    """Forward a POST to the ML service with error normalisation."""
+    _require_ml()
+    headers = {}
+    if user:
+        headers["X-Cocoon-User"] = str(user.id)
+    try:
+        async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=timeout) as client:
+            resp = await client.post(path, json=json_body or {}, headers=headers)
+            if resp.status_code in (404, 501):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"message": f"Upstream {path} not yet available", "retryable": False},
+                )
+            resp.raise_for_status()
+            return resp.json()
+    except HTTPException:
+        raise
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML service unreachable: {exc}", "retryable": True},
+        ) from exc
+    except httpx.ReadTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML service timed out: {exc}", "retryable": True},
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        retryable = exc.response.status_code >= 500
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML error: {exc}", "retryable": retryable},
+        ) from exc
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
 @router.get("/health")
-async def ai_health(_: CurrentUser = None):
+async def ai_health(current_user: CurrentUser):
     """ML service connectivity check."""
-    mode = "proxy" if GRAPHRAG_API_URL else "stub"
-    if GRAPHRAG_API_URL:
-        try:
-            async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=5.0) as client:
-                resp = await client.get("/health")
-                resp.raise_for_status()
-                return {"status": "ok", "mode": mode, "upstream": resp.json()}
-        except Exception as exc:
-            return {"status": "degraded", "mode": mode, "error": str(exc)}
-    return {"status": "ok", "mode": mode}
+    if not GRAPHRAG_API_URL:
+        return {"status": "unconfigured", "mode": "unavailable"}
+    try:
+        async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=5.0) as client:
+            resp = await client.get("/health")
+            resp.raise_for_status()
+            return {"status": "ok", "mode": "proxy", "upstream": resp.json()}
+    except Exception as exc:
+        return {"status": "degraded", "mode": "proxy", "error": str(exc)}
 
 
 @router.get("/context")
@@ -298,62 +156,176 @@ async def ai_context(
     sow_id: str | None = None,
     top_k: int = Query(5, ge=1, le=50),
     hop_depth: int = Query(2, ge=1, le=5),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Graph retrieval — returns relevant sections, rules, risks, and deliverables."""
-    stub = dict(STUB_CONTEXT)
-    stub["query"] = query
-    stub["sow_id"] = sow_id
-    return await _proxy_or_stub(
-        "GET",
+    return await _proxy_get(
         "/context",
-        stub,
         params={"query": query, "sow_id": sow_id, "top_k": top_k, "hop_depth": hop_depth},
+        user=current_user,
     )
 
 
 @router.post("/assist")
-async def ai_assist(
-    body: dict,
-    _: CurrentUser = None,
-):
+async def ai_assist(body: dict, current_user: CurrentUser):
     """GraphRAG + LLM authoring suggestions."""
-    return await _proxy_or_stub("POST", "/assist", STUB_ASSIST, json=body)
+    return await _proxy_post("/assist", json_body=body, timeout=30.0, user=current_user)
 
 
 @router.get("/sow/{sow_id}/validate")
-async def ai_validate(sow_id: str, _: CurrentUser = None):
+async def ai_validate(sow_id: str, current_user: CurrentUser):
     """Rule-based SoW validation."""
-    stub = dict(STUB_VALIDATE)
-    stub["sow_id"] = sow_id
-    return await _proxy_or_stub("GET", f"/sows/{sow_id}/validate", stub)
+    await _require_sow_collaborator(sow_id, current_user.id)
+    return await _proxy_get(f"/sows/{sow_id}/validate", user=current_user)
 
 
 @router.get("/sow/{sow_id}/risks")
-async def ai_risks(sow_id: str, _: CurrentUser = None):
+async def ai_risks(sow_id: str, current_user: CurrentUser):
     """Risk register + triggered risks for a SoW."""
-    return await _proxy_or_stub("GET", f"/sows/{sow_id}/risks", STUB_RISKS)
+    await _require_sow_collaborator(sow_id, current_user.id)
+    return await _proxy_get(f"/sows/{sow_id}/risks", user=current_user)
 
 
 @router.get("/sow/{sow_id}/similar")
-async def ai_similar(sow_id: str, _: CurrentUser = None):
-    """Find similar historical SoWs."""
-    return await _proxy_or_stub("GET", f"/sows/{sow_id}/similar", STUB_SIMILAR)
+async def ai_similar(sow_id: str, current_user: CurrentUser):
+    """Find similar historical SoWs.
+
+    Normalizes the ML response by computing a ``similarity`` score from
+    ``shared_clauses`` so the frontend has one consistent shape.
+    """
+    await _require_sow_collaborator(sow_id, current_user.id)
+    data = await _proxy_get(f"/sows/{sow_id}/similar", user=current_user)
+    if isinstance(data, list) and data:
+        max_shared = max((d.get("shared_clauses", 0) for d in data), default=0) or 1
+        for d in data:
+            if "similarity" not in d:
+                d["similarity"] = round(d.get("shared_clauses", 0) / max_shared, 2)
+            d.setdefault("overlap_areas", [])
+            d.setdefault("outcome", None)
+    return data
 
 
 @router.get("/approval")
 async def ai_approval(
     value: float | None = None,
     margin: float | None = None,
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """ESAP level determination + approval chain."""
-    return await _proxy_or_stub(
-        "GET", "/approval", STUB_APPROVAL, params={"value": value, "margin": margin}
+    return await _proxy_get(
+        "/approval",
+        params={"value": value, "margin": margin},
+        user=current_user,
     )
 
 
 @router.get("/graph/summary")
-async def ai_graph_summary(_: CurrentUser = None):
+async def ai_graph_summary(current_user: CurrentUser):
     """Knowledge graph node/relationship counts."""
-    return await _proxy_or_stub("GET", "/graph/summary", STUB_GRAPH_SUMMARY)
+    return await _proxy_get("/graph/summary", user=current_user)
+
+
+# ── Future ML endpoints ────────────────────────────────────────────────────────
+#
+# Each endpoint below proxies to an ML route that may not yet exist. The proxy
+# returns a clean 503 when the upstream responds 404/501 so the frontend can
+# gracefully degrade.
+
+
+@router.post("/sow/{sow_id}/sync")
+async def ai_sync_sow(sow_id: str, body: dict | None = None, current_user: CurrentUser = None):
+    """Push an app SoW into Neo4j and return its ``kg_node_id``."""
+    await _require_sow_collaborator(sow_id, current_user.id)
+    return await _proxy_post(
+        "/sows/ingest",
+        json_body=body or {"sow_id": sow_id},
+        timeout=60.0,
+        user=current_user,
+    )
+
+
+@router.delete("/sow/{sow_id}/sync")
+async def ai_unsync_sow(sow_id: str, current_user: CurrentUser):
+    """Drop an app SoW from the KG.
+
+    Raises 503 with ``{message, retryable}`` on any upstream failure so the
+    frontend banner can distinguish "failed" from "deleted".  The 404/501
+    branch stays as a structured 200 because that signals "upstream route
+    not yet implemented" — deletion is effectively a no-op.
+    """
+    await _require_sow_collaborator(sow_id, current_user.id)
+    _require_ml()
+    try:
+        async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=10.0) as client:
+            resp = await client.delete(f"/sows/{sow_id}")
+            if resp.status_code in (404, 501):
+                return {"deleted": False, "detail": "Upstream delete not yet available"}
+            resp.raise_for_status()
+            return {"deleted": True}
+    except httpx.ConnectError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML service unreachable: {exc}", "retryable": True},
+        ) from exc
+    except httpx.ReadTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML service timed out: {exc}", "retryable": True},
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        retryable = exc.response.status_code >= 500
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": f"ML error: {exc}", "retryable": retryable},
+        ) from exc
+
+
+@router.post("/assist/stream")
+async def ai_assist_stream(body: dict, current_user: CurrentUser):
+    """SSE-streamed assist. Returns 503 until the ML route exists."""
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"message": "Streaming assist is not yet available upstream", "retryable": False},
+    )
+
+
+@router.get("/sow/{sow_id}/insights/{role}")
+async def ai_insights(sow_id: str, role: str, current_user: CurrentUser):
+    """Role-specific narrative insights for a reviewer."""
+    await _require_sow_collaborator(sow_id, current_user.id)
+    try:
+        return await _proxy_get(f"/sows/{sow_id}/insights/{role}", user=current_user)
+    except HTTPException as exc:
+        # Graceful degradation only when the upstream route isn't implemented
+        # yet (``retryable=False``).  Connect/timeout/5xx keep propagating so
+        # the frontend banner still sees the retryable signal.
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        if exc.status_code == 503 and detail.get("retryable") is False:
+            return {"summary": None, "flags": []}
+        raise
+
+
+@router.post("/document/prose")
+async def ai_document_prose(body: dict, current_user: CurrentUser):
+    """Polished prose generation from structured SoW data."""
+    return await _proxy_post("/document/prose", json_body=body, timeout=60.0, user=current_user)
+
+
+@router.get("/sows")
+async def ai_kg_sows(current_user: CurrentUser):
+    """List SoWs already ingested into the KG (admin/debug only)."""
+    return await _proxy_get("/sows", user=current_user)
+
+
+@router.get("/schema/proposals")
+async def ai_schema_proposals(
+    sproposal_status: str | None = Query(None, alias="status"),
+    kind: str | None = None,
+    current_user: CurrentUser = None,
+):
+    """LLM-extracted schema-evolution proposals (admin only)."""
+    return await _proxy_get(
+        "/schema/proposals",
+        params={"status": sproposal_status, "kind": kind},
+        user=current_user,
+    )
