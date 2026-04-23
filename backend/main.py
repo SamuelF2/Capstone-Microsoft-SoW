@@ -186,6 +186,12 @@ async def lifespan(app: FastAPI):
                 risks                     JSONB
             );
         """)
+            # Phase 1 AI integration: cache provenance columns
+            for ai_ddl in [
+                "ALTER TABLE ai_suggestion ADD COLUMN IF NOT EXISTS generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();",
+                "ALTER TABLE ai_suggestion ADD COLUMN IF NOT EXISTS generation_meta JSONB;",
+            ]:
+                await conn.execute(ai_ddl)
 
             # ------------------------------------------------------------------ #
             # 3. CONTENT (skeleton — child FK columns added after child tables)  #
@@ -270,6 +276,9 @@ async def lifespan(app: FastAPI):
                 # Phase 1: ESAP + margin columns
                 "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS esap_level TEXT;",
                 "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS estimated_margin NUMERIC;",
+                # Phase 1 AI integration: identity bridge to Neo4j KG
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS kg_node_id TEXT;",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS kg_content_hash TEXT;",
                 # Phase 4: finalization columns
                 "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;",
                 "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS finalized_by INTEGER REFERENCES users(id);",
@@ -655,7 +664,7 @@ async def lifespan(app: FastAPI):
                 # Send-backs from later stages must target draft directly.
                 transitions = [
                     ("draft", "ai_review", "default"),
-                    ("ai_review", "internal_review", "default"),
+                    ("ai_review", "internal_review", "on_approve"),
                     ("internal_review", "drm_review", "on_approve"),
                     ("drm_review", "approved", "on_approve"),
                     ("approved", "finalized", "default"),
@@ -729,7 +738,7 @@ async def lifespan(app: FastAPI):
                 # through ai_review.
                 required_transitions = [
                     ("draft", "ai_review", "default"),
-                    ("ai_review", "internal_review", "default"),
+                    ("ai_review", "internal_review", "on_approve"),
                     ("internal_review", "drm_review", "on_approve"),
                     ("drm_review", "approved", "on_approve"),
                     ("approved", "finalized", "default"),
@@ -929,6 +938,7 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS idx_sow_methodology ON sow_documents(methodology);",
                 "CREATE INDEX IF NOT EXISTS idx_sow_cycle       ON sow_documents(cycle);",
                 "CREATE INDEX IF NOT EXISTS idx_sow_content_id  ON sow_documents(content_id);",
+                "CREATE INDEX IF NOT EXISTS idx_sow_kg_node_id  ON sow_documents(kg_node_id) WHERE kg_node_id IS NOT NULL;",
                 "CREATE INDEX IF NOT EXISTS idx_review_sow_id   ON review_results(sow_id);",
                 "CREATE INDEX IF NOT EXISTS idx_history_sow_id     ON history(sow_id);",
                 "CREATE INDEX IF NOT EXISTS idx_history_changed_by ON history(changed_by);",

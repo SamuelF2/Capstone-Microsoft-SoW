@@ -19,14 +19,15 @@ The ingestion pipeline has two distinct phases that MUST be respected:
   Phase 2 — Parallel    (all remaining files concurrently)
     CSV:  budget, budget_actuals_fcst, staffing_plan,
           staffing_actuals_fcst, status_report
-    MD:   SOW documents only (guide documents belong in seed_kg.py)
+    Documents: SOW files in .md, .json, .docx, or .pdf format
+               (guide documents belong in seed_kg.py)
 
 Why two phases?
   Neo4j MERGE semantics guarantee idempotency, but MATCH statements in
   relationship queries will silently produce no edges if the referenced node
   doesn't exist yet.  Running foundation CSV files first eliminates that hazard.
 
-Banned phrases for markdown validation are fetched live from the graph
+Banned phrases for document validation are fetched live from the graph
 (seeded by seed_kg.py) rather than re-ingested from JSON on every run.
 
 Concurrency model
@@ -71,6 +72,8 @@ from neo4j import Driver, GraphDatabase
 from rich.console import Console
 from rich.table import Table
 
+from sow_kg.extract import extract_document
+from sow_kg.ingest import ingest_file
 from sow_kg.ingest_csv import (
     create_constraints,
     ingest_budget,
@@ -81,7 +84,6 @@ from sow_kg.ingest_csv import (
     ingest_staffing_plan,
     ingest_status_report,
 )
-from sow_kg.ingest_markdown import ingest_sow_document
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -235,7 +237,7 @@ async def _run_task(
 
 
 # ---------------------------------------------------------------------------
-# Markdown file discovery helpers
+# Document file discovery helpers (supports .md, .json, .docx, .pdf)
 # ---------------------------------------------------------------------------
 
 _SOW_SIGNALS = [
@@ -251,10 +253,18 @@ _SOW_SIGNALS = [
 
 
 def _is_sow(path: Path) -> bool:
+    """
+    Detect whether a file is a SOW by checking for keyword signals.
+
+    Supports markdown, JSON, DOCX, and PDF files via extract_document.
+    Returns False on any extraction error rather than failing loudly.
+    """
     try:
-        content = path.read_text(errors="replace").lower()
+        doc = extract_document(path)
+        content = doc["raw_text"].lower()
         return sum(1 for kw in _SOW_SIGNALS if kw in content) >= 3
-    except OSError:
+    except Exception as e:
+        log.debug(f"SOW detection failed for {path.name}: {e}")
         return False
 
 
@@ -267,41 +277,48 @@ def _collect_sow_tasks(
     cache: IngestCache,
 ) -> list[asyncio.Task]:
     """
-    Build one async task per SOW markdown file.
+    Build one async task per SOW document file.
+
+    Supports .md, .json, .docx, and .pdf files. ingest_file from ingest.py
+    is a blocking synchronous function that handles all these formats via
+    extract_document, so it is dispatched via _run_task into the
+    ThreadPoolExecutor exactly the same way CSV ingestors are — one thread
+    per file, guarded by the semaphore.
+
     Guide documents are excluded — they belong to the one-time seed_kg.py run.
+    SOW detection for root-level files uses keyword signal heuristic that
+    works across all supported file formats.
     """
     tasks = []
 
-    def _sow_task(md: Path) -> asyncio.Task:
+    def _sow_task(path: Path) -> asyncio.Task:
         return asyncio.ensure_future(
             _run_task(
-                f"md:{md.name}",
-                ingest_sow_document,
-                (driver, md, banned_phrases),
+                f"sow:{path.name}",
+                ingest_file,
+                (driver, path, "sow", banned_phrases),
                 executor,
                 semaphore,
                 cache,
-                path=md,
+                path=path,
             )
         )
 
-    # Dedicated SOW directory — every file here is a SOW by convention
     sow_dir = data_dir / "sow-md"
     if sow_dir.exists():
-        for md in sorted(sow_dir.glob("*.md")):
-            tasks.append(_sow_task(md))
+        for f in sorted(sow_dir.iterdir()):
+            if f.suffix.lower() in {".md", ".json", ".docx", ".pdf"}:
+                tasks.append(_sow_task(f))
 
-    # Root-level markdown files — classify by content signals
-    for md in sorted(data_dir.glob("*.md")):
-        if _is_sow(md):
-            tasks.append(_sow_task(md))
-        # Non-SOW files are silently skipped; seed_kg.py handles them
+    for f in sorted(data_dir.iterdir()):
+        if f.is_file() and _is_sow(f) and f.suffix.lower() in {".md", ".json", ".docx", ".pdf"}:
+            tasks.append(_sow_task(f))
 
     return tasks
 
 
 # ---------------------------------------------------------------------------
-# Banned-phrase helper  (needed by markdown tasks in Phase 2)
+# Banned-phrase helper  (needed by document ingestion tasks in Phase 2)
 # ---------------------------------------------------------------------------
 
 
@@ -428,7 +445,7 @@ async def ingest_async(
                 )
             )
 
-        # SOW markdown files only — guide docs are handled by seed_kg.py
+        # SOW documents (.md, .json, .docx, .pdf) — guide docs are handled by seed_kg.py
         parallel_tasks.extend(
             _collect_sow_tasks(data_dir, driver, banned_phrases, executor, semaphore, cache)
         )

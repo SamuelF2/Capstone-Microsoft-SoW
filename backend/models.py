@@ -175,6 +175,7 @@ class SoWResponse(BaseModel):
     metadata: dict[str, Any] | None = None
     finalized_at: datetime | None = None
     finalized_by: int | None = None
+    kg_node_id: str | None = None
 
 
 class SoWSummary(BaseModel):
@@ -314,6 +315,10 @@ class AIAnalysisResult(BaseModel):
     suggestions: list[SectionSuggestion]
     overall_score: float | None = None  # 0-100
     summary: str | None = None
+    generated_at: datetime | None = None
+    generation_meta: dict[str, Any] | None = (
+        None  # {endpoints_used, latency_ms, kg_node_id, model_version}
+    )
 
 
 # ── Review  (Phase 2) ───────────────────────────────────────────────────────

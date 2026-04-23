@@ -26,6 +26,8 @@ import {
   formatBytes,
   esapBadgeStyle,
 } from '../../lib/format';
+import { aiClient } from '../../lib/ai';
+import AIUnavailableBanner from '../../components/AIUnavailableBanner';
 
 // ── Step card wrapper ─────────────────────────────────────────────────────────
 
@@ -277,6 +279,9 @@ export default function FinalizePage() {
   const [locking, setLocking] = useState(false);
   const [toast, setToast] = useState(null);
   const [coaSummary, setCoaSummary] = useState(null);
+  const [proseLoading, setProseLoading] = useState(false);
+  const [proseText, setProseText] = useState(null);
+  const [proseError, setProseError] = useState(null);
 
   function showToast(msg, type = 'success') {
     setToast({ msg, type });
@@ -320,6 +325,23 @@ export default function FinalizePage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Request AI-generated polished prose. The ML route is not yet shipped,
+  // so the proxy currently returns 503 — the AIUnavailableBanner surfaces
+  // that and the rest of the finalize flow is unaffected.
+  async function handleGenerateProse() {
+    setProseLoading(true);
+    setProseError(null);
+    setProseText(null);
+    const result = await aiClient.documentProse(authFetch, id);
+    setProseLoading(false);
+    if (result.ok) {
+      setProseText(result.data?.prose || result.data?.text || '');
+      showToast('Polished prose generated');
+    } else {
+      setProseError(result.error);
+    }
+  }
 
   async function handleGenerateDocument() {
     setGenerating(true);
@@ -748,13 +770,54 @@ export default function FinalizePage() {
                       </label>
                     ))}
                   </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleGenerateDocument}
-                    disabled={generating}
-                  >
-                    {generating ? 'Generating…' : 'Generate Document'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleGenerateDocument}
+                      disabled={generating}
+                    >
+                      {generating ? 'Generating…' : 'Generate Document'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleGenerateProse}
+                      disabled={proseLoading}
+                      title="Use AI to draft polished prose for the document body"
+                    >
+                      {proseLoading ? 'Generating prose…' : 'Generate polished prose with AI'}
+                    </button>
+                  </div>
+
+                  {proseError && (
+                    <div style={{ marginTop: 'var(--spacing-md)' }}>
+                      <AIUnavailableBanner
+                        error={proseError}
+                        context="prose"
+                        onRetry={handleGenerateProse}
+                      />
+                    </div>
+                  )}
+
+                  {proseText && (
+                    <div
+                      style={{
+                        marginTop: 'var(--spacing-md)',
+                        padding: 'var(--spacing-md)',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--color-border-default)',
+                        backgroundColor: 'var(--color-bg-tertiary)',
+                        maxHeight: 320,
+                        overflowY: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        fontSize: 'var(--font-size-sm)',
+                        color: 'var(--color-text-primary)',
+                        lineHeight: 'var(--line-height-relaxed)',
+                      }}
+                    >
+                      {proseText}
+                    </div>
+                  )}
                 </>
               )}
 

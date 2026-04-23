@@ -64,7 +64,8 @@ from models import (
     SoWSummary,
     SoWUpdate,
 )
-from services.ai import analyze_sow
+from pydantic import BaseModel
+from services.ai import AIUnavailableError, analyze_sow, get_cached_analysis
 from utils.db_helpers import (
     create_assignment_with_prior,
     insert_history,
@@ -1009,6 +1010,12 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
 
+        # Grab kg_node_id before deletion for KG cleanup
+        kg_node_id = await conn.fetchval(
+            "SELECT kg_node_id FROM sow_documents WHERE id = $1",
+            sow_id,
+        )
+
         # Record deletion before the CASCADE removes related rows.
         # The FK is ON DELETE SET NULL so the history row survives.
         await insert_history(
@@ -1022,6 +1029,14 @@ async def delete_sow(sow_id: int, current_user: CurrentUser) -> dict:
 
     if result == "DELETE 0":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+    # Best-effort KG cleanup (fire-and-forget, don't block response)
+    if kg_node_id:
+        import asyncio
+
+        from services.ai import delete_sow_from_kg
+
+        asyncio.create_task(delete_sow_from_kg(kg_node_id))
 
     return {"deleted": sow_id}
 
@@ -1776,6 +1791,58 @@ async def submit_for_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
     return _row_to_response(dict(updated))
 
 
+@router.post(
+    "/{sow_id}/return-to-draft",
+    response_model=SoWResponse,
+    summary="Return from AI review back to draft for further editing",
+)
+async def return_to_draft(sow_id: int, current_user: CurrentUser) -> SoWResponse:
+    """Resolve the on_send_back transition from ``ai_review`` and move the
+    SoW back to draft status so the author can continue editing.
+
+    Requires the SoW to be in ``ai_review`` status.
+    """
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        row = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        if row["status"] != "ai_review":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SoW status is '{row['status']}', must be 'ai_review' to return to draft",
+            )
+
+        esap = row["esap_level"] or "type-3"
+
+        from services.workflow_engine import execute_transition, resolve_transition
+
+        target = await resolve_transition(conn, sow_id, "ai_review", "on_send_back")
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Workflow has no send-back transition from 'ai_review'. "
+                    "Edit the workflow to add an on_send_back edge before returning."
+                ),
+            )
+
+        await execute_transition(
+            conn,
+            sow_id,
+            target["stage_key"],
+            current_user.id,
+            esap,
+            reason="Returned to draft from AI review",
+        )
+
+        updated = await conn.fetchrow("SELECT * FROM sow_documents WHERE id = $1", sow_id)
+
+    return _row_to_response(dict(updated))
+
+
 # ── Full-text search ──────────────────────────────────────────────────────────
 
 
@@ -1850,8 +1917,9 @@ async def search_sows(
 async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult:
     """Trigger AI analysis on a SoW and store results in ``ai_suggestion``.
 
-    Returns the full analysis result. The SoW must be in ``ai_review`` or
-    ``draft`` status (to allow optional pre-submission analysis).
+    Fans out parallel calls to the ML GraphRAG service via
+    ``services.ai.analyze_sow``. When the ML service is unavailable,
+    returns HTTP 503 with ``{message, retryable}``.
     """
     async with database.pg_pool.acquire() as conn, conn.transaction():
         await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
@@ -1866,26 +1934,36 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
                 detail=f"SoW status is '{row['status']}', must be 'draft' or 'ai_review' for AI analysis",
             )
 
-        content = row["content"]
-        if isinstance(content, str):
-            content = json.loads(content)
-        content = content or {}
+        try:
+            result = await analyze_sow(conn, dict(row))
+        except AIUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": str(exc), "retryable": exc.retryable},
+            ) from exc
 
-        # Call AI service stub
-        result = await analyze_sow(content, row["methodology"] or "")
-
-        # Store in ai_suggestion table
+        # Persist in ai_suggestion table with provenance
+        rec_dump = result.model_dump(
+            include={
+                "violations",
+                "checklist",
+                "suggestions",
+                "approval",
+                "overall_score",
+                "summary",
+            }
+        )
         ai_id = await conn.fetchval(
             """
-            INSERT INTO ai_suggestion (flag, validation_recommendation, risks)
-            VALUES ($1, $2::jsonb, $3::jsonb)
+            INSERT INTO ai_suggestion (flag, validation_recommendation, risks, generated_at, generation_meta)
+            VALUES ($1, $2::jsonb, $3::jsonb, $4, $5::jsonb)
             RETURNING id
             """,
             result.approval.level,
-            json.dumps(
-                result.model_dump(include={"violations", "checklist", "suggestions", "approval"})
-            ),
+            json.dumps(rec_dump),
             json.dumps([r.model_dump() for r in result.risks]),
+            result.generated_at,
+            json.dumps(result.generation_meta) if result.generation_meta else None,
         )
 
         # Link to SoW
@@ -1900,10 +1978,82 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
             sow_id=sow_id,
             user_id=current_user.id,
             change_type="ai_analysis",
-            diff={"ai_suggestion_id": ai_id, "overall_score": result.overall_score},
+            diff={
+                "ai_suggestion_id": ai_id,
+                "overall_score": result.overall_score,
+                "endpoints_used": (result.generation_meta or {}).get("endpoints_used", []),
+            },
         )
 
     return result
+
+
+@router.get(
+    "/{sow_id}/ai-analyze",
+    response_model=AIAnalysisResult | None,
+    summary="Read the most recent cached AI analysis for a SoW",
+)
+async def get_cached_ai_analysis(sow_id: int, current_user: CurrentUser):
+    """Return the latest ``ai_suggestion`` row for this SoW without re-running.
+
+    Used by review pages on load to populate the AI panel without triggering
+    an expensive re-analysis. Returns ``null`` (200) when no analysis has
+    ever been run for this SoW.
+    """
+    async with database.pg_pool.acquire() as conn:
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+
+        # Verify SoW exists
+        exists = await conn.fetchval("SELECT 1 FROM sow_documents WHERE id = $1", sow_id)
+        if not exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+
+        return await get_cached_analysis(conn, sow_id)
+
+
+# ── Skip AI Review (graceful degradation) ────────────────────────────────────
+
+
+class SkipAIReviewRequest(BaseModel):
+    """Body for the explicit AI-review skip endpoint."""
+
+    reason: str
+    acknowledged_unavailable: bool = False
+
+
+@router.post(
+    "/{sow_id}/skip-ai-review",
+    summary="Explicitly skip the AI review stage when the ML service is down",
+)
+async def skip_ai_review(
+    sow_id: int,
+    body: SkipAIReviewRequest,
+    current_user: CurrentUser,
+):
+    """Record an explicit skip of the AI review stage.
+
+    Stub: writes a ``sow_history`` entry with ``change_type='ai_skipped'``
+    so downstream reviewers can see the SoW was not AI-analyzed. The full
+    implementation will also unblock the transition guard from ai_review.
+    """
+    if not body.acknowledged_unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must acknowledge ML service is unavailable to skip AI review",
+        )
+    async with database.pg_pool.acquire() as conn, conn.transaction():
+        await require_collaborator(conn, sow_id=sow_id, user_id=current_user.id)
+        row = await conn.fetchrow("SELECT id FROM sow_documents WHERE id = $1", sow_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
+        await insert_history(
+            conn,
+            sow_id=sow_id,
+            user_id=current_user.id,
+            change_type="ai_skipped",
+            diff={"reason": body.reason},
+        )
+    return {"skipped": True}
 
 
 # ── Proceed past AI Review ───────────────────────────────────────────────────
@@ -1944,6 +2094,23 @@ async def proceed_to_review(sow_id: int, current_user: CurrentUser) -> SoWRespon
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"SoW status is '{row['status']}', must be 'ai_review' to proceed",
             )
+
+        # Transition guard: require either a successful AI analysis or an
+        # explicit skip record so a frontend bypass can't accidentally skip
+        # the gate.
+        if row["ai_suggestion_id"] is None:
+            skipped = await conn.fetchval(
+                "SELECT 1 FROM history WHERE sow_id = $1 AND change_type = 'ai_skipped' LIMIT 1",
+                sow_id,
+            )
+            if not skipped:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "AI analysis required before proceeding. "
+                        "Run analysis or explicitly skip via the AI Review page."
+                    ),
+                )
 
         esap = row["esap_level"] or "type-3"
 

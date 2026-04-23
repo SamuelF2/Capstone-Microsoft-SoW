@@ -1,4 +1,5 @@
 import SectionHeader from './ui/SectionHeader';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 export default function ExecutiveSummary({ data, onChange }) {
   const content = data?.content ?? '';
@@ -10,7 +11,7 @@ export default function ExecutiveSummary({ data, onChange }) {
         description="Provide a concise, compelling overview of this engagement — its purpose, key objectives, and the value it delivers to the customer."
       />
 
-      <div className="card">
+      <div className="card" data-subsection="executiveSummary:content">
         <div className="form-group" style={{ marginBottom: 0 }}>
           <label className="form-label">
             Summary <span style={{ color: 'var(--color-error)' }}>*</span>
@@ -19,7 +20,7 @@ export default function ExecutiveSummary({ data, onChange }) {
             Describe the engagement at a high level — who the customer is, what problem is being
             solved, and the expected business outcomes.
           </p>
-          <textarea
+          <HighlightedTextarea
             className="form-textarea"
             value={content}
             onChange={(e) => onChange({ ...data, content: e.target.value })}

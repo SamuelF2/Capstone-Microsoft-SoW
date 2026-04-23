@@ -100,35 +100,39 @@ export default function AgileApproach({ data, onChange }) {
       />
 
       <TwoColumnGrid style={{ marginBottom: 'var(--spacing-2xl)' }}>
-        <FormCard
-          title="Delivery Approach & Methodology"
-          description="Ensure your approach aligns with the Agile methodology and includes how you'll manage risks and quality across sprints."
-        >
-          <textarea
-            className="form-textarea"
-            value={deliveryApproach}
-            onChange={(e) => update({ deliveryApproach: e.target.value })}
-            placeholder="Describe the Agile delivery approach — ceremonies (stand-ups, reviews, retrospectives), tooling (Azure DevOps, Jira), sprint cadence, and quality gates..."
-            rows={8}
-          />
-        </FormCard>
+        <div data-subsection="agileApproach:deliveryApproach">
+          <FormCard
+            title="Delivery Approach & Methodology"
+            description="Ensure your approach aligns with the Agile methodology and includes how you'll manage risks and quality across sprints."
+          >
+            <textarea
+              className="form-textarea"
+              value={deliveryApproach}
+              onChange={(e) => update({ deliveryApproach: e.target.value })}
+              placeholder="Describe the Agile delivery approach — ceremonies (stand-ups, reviews, retrospectives), tooling (Azure DevOps, Jira), sprint cadence, and quality gates..."
+              rows={8}
+            />
+          </FormCard>
+        </div>
 
-        <FormCard
-          title="Support Transition Plan"
-          description="Describe how the solution will be transitioned to the customer's operations team after go-live."
-        >
-          <textarea
-            className="form-textarea"
-            value={supportTransitionPlan}
-            onChange={(e) => update({ supportTransitionPlan: e.target.value })}
-            placeholder="Outline the transition activities — knowledge transfer sessions, runbook handover, training plan, and the support window post-go-live..."
-            rows={8}
-          />
-        </FormCard>
+        <div data-subsection="agileApproach:supportTransitionPlan">
+          <FormCard
+            title="Support Transition Plan"
+            description="Describe how the solution will be transitioned to the customer's operations team after go-live."
+          >
+            <textarea
+              className="form-textarea"
+              value={supportTransitionPlan}
+              onChange={(e) => update({ supportTransitionPlan: e.target.value })}
+              placeholder="Outline the transition activities — knowledge transfer sessions, runbook handover, training plan, and the support window post-go-live..."
+              rows={8}
+            />
+          </FormCard>
+        </div>
       </TwoColumnGrid>
 
       {/* Sprint Planning */}
-      <div>
+      <div data-subsection="agileApproach:sprints">
         <div
           style={{
             display: 'flex',
