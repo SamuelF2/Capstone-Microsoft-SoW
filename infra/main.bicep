@@ -239,3 +239,9 @@ output WEB_URL string = 'https://${web.outputs.fqdn}'
 output NEO4J_FQDN string = neo4j.outputs.fqdn
 output POSTGRES_FQDN string = postgres.outputs.fqdn
 output AZURE_RESOURCE_GROUP string = rg.name
+
+// Managed identity principal IDs for downstream RBAC role assignments (COC-118)
+output apiPrincipalId string = api.outputs.principalId
+output webPrincipalId string = web.outputs.principalId
+output postgresPrincipalId string = postgres.outputs.principalId
+output neo4jPrincipalId string = neo4j.outputs.principalId
