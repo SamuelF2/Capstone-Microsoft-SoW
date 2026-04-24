@@ -556,7 +556,10 @@ export default function AssignmentReviewPage() {
       }
       setModal(null);
       showToast('SoW sent back for revision');
-      setTimeout(() => router.push('/my-reviews'), 1500);
+      setTimeout(() => {
+        allowNextNavigation();
+        router.push('/my-reviews');
+      }, 1500);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
