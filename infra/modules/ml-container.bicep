@@ -86,7 +86,7 @@ resource ml 'Microsoft.App/containerApps@2024-03-01' = {
         }
         {
           name: 'azure-openai-api-key'
-          value: azureOpenAiApiKey
+          value: empty(azureOpenAiApiKey) ? 'not-set' : azureOpenAiApiKey
         }
         {
           name: 'neo4j-password'
