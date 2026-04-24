@@ -62,6 +62,21 @@ param azureAiKey string = ''
 @description('Microsoft Entra ID Application (Client) ID')
 param azureAdClientId string = ''
 
+// --- Azure OpenAI / Foundry params for the ML Container App (COC-118 step 2) ---
+// The key is temporary — COC-118 step 3 replaces it with managed identity + RBAC.
+@description('Azure OpenAI / Foundry endpoint URL used by the ML service')
+param azureOpenAiEndpoint string = ''
+
+@description('Azure OpenAI deployment name used by the ML service')
+param azureOpenAiDeployment string = ''
+
+@description('Azure OpenAI API version used by the ML service')
+param azureOpenAiApiVersion string = ''
+
+@secure()
+@description('Azure OpenAI API key (temporary — removed in COC-118 step 3)')
+param azureOpenAiApiKey string = ''
+
 // ---------------------------------------------------------------------------
 // Variables
 // ---------------------------------------------------------------------------
@@ -167,6 +182,28 @@ module neo4j 'modules/neo4j-container.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
+// Container App: ML / GraphRAG (FastAPI retrieval + LLM authoring service)
+// ---------------------------------------------------------------------------
+
+module ml 'modules/ml-container.bicep' = {
+  name: 'ml'
+  scope: rg
+  params: {
+    name: '${abbrs.appContainerApps}ml-${resourceToken}'
+    location: location
+    tags: tags
+    containerAppsEnvironmentId: containerAppsEnv.outputs.id
+    containerRegistryName: containerRegistry.outputs.name
+    azureOpenAiEndpoint: azureOpenAiEndpoint
+    azureOpenAiDeployment: azureOpenAiDeployment
+    azureOpenAiApiVersion: azureOpenAiApiVersion
+    azureOpenAiApiKey: azureOpenAiApiKey
+    neo4jUri: 'bolt://${neo4j.outputs.name}:7687'
+    neo4jPassword: neo4jPassword
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Container App: API (FastAPI Backend)
 // ---------------------------------------------------------------------------
 
@@ -194,6 +231,7 @@ module api 'modules/container-app.bicep' = {
       { name: 'AZURE_AI_ENDPOINT', secretRef: 'azure-ai-endpoint' }
       { name: 'AZURE_AI_KEY', secretRef: 'azure-ai-key' }
       { name: 'AZURE_AD_CLIENT_ID', value: azureAdClientId }
+      { name: 'GRAPHRAG_API_URL', value: 'https://${ml.outputs.fqdn}' }
     ]
     secrets: [
       { name: 'neo4j-password', value: neo4jPassword }
@@ -245,3 +283,4 @@ output apiPrincipalId string = api.outputs.principalId
 output webPrincipalId string = web.outputs.principalId
 output postgresPrincipalId string = postgres.outputs.principalId
 output neo4jPrincipalId string = neo4j.outputs.principalId
+output mlPrincipalId string = ml.outputs.principalId

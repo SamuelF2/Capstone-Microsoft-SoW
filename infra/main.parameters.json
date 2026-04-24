@@ -28,6 +28,18 @@
     },
     "azureAdClientId": {
       "value": "${AZURE_AD_CLIENT_ID}"
+    },
+    "azureOpenAiEndpoint": {
+      "value": "${AZURE_OPENAI_ENDPOINT}"
+    },
+    "azureOpenAiDeployment": {
+      "value": "${AZURE_OPENAI_DEPLOYMENT}"
+    },
+    "azureOpenAiApiVersion": {
+      "value": "${AZURE_OPENAI_API_VERSION}"
+    },
+    "azureOpenAiApiKey": {
+      "value": "${AZURE_OPENAI_API_KEY}"
     }
   }
 }
