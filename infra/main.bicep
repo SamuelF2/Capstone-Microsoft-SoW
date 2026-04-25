@@ -62,8 +62,8 @@ param azureAiKey string = ''
 @description('Microsoft Entra ID Application (Client) ID')
 param azureAdClientId string = ''
 
-// --- Azure OpenAI / Foundry params for the ML Container App (COC-118 step 2) ---
-// The key is temporary — COC-118 step 3 replaces it with managed identity + RBAC.
+// --- Azure OpenAI / Foundry params for the ML Container App ---
+// Auth uses managed identity + RBAC (see foundry-rbac module below).
 @description('Azure OpenAI / Foundry endpoint URL used by the ML service')
 param azureOpenAiEndpoint string = ''
 
@@ -73,9 +73,14 @@ param azureOpenAiDeployment string = ''
 @description('Azure OpenAI API version used by the ML service')
 param azureOpenAiApiVersion string = ''
 
-@secure()
-@description('Azure OpenAI API key (temporary — removed in COC-118 step 3)')
-param azureOpenAiApiKey string = ''
+@description('Subscription ID where the existing Foundry resource lives')
+param foundrySubscriptionId string = '0a96bee6-0b0e-4a8e-8ef7-cc83cb272a81'
+
+@description('Resource group containing the existing Foundry account')
+param foundryResourceGroup string = 'RG-SOW'
+
+@description('Name of the existing Foundry account')
+param foundryAccountName string = 'Foundry-SOW'
 
 // ---------------------------------------------------------------------------
 // Variables
@@ -197,9 +202,21 @@ module ml 'modules/ml-container.bicep' = {
     azureOpenAiEndpoint: azureOpenAiEndpoint
     azureOpenAiDeployment: azureOpenAiDeployment
     azureOpenAiApiVersion: azureOpenAiApiVersion
-    azureOpenAiApiKey: azureOpenAiApiKey
     neo4jUri: 'bolt://${neo4j.outputs.name}:7687'
     neo4jPassword: neo4jPassword
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-Sub RBAC: Grant ML MI access to Foundry-SOW
+// ---------------------------------------------------------------------------
+
+module foundryRbac 'modules/foundry-rbac.bicep' = {
+  name: 'foundry-rbac'
+  scope: resourceGroup(foundrySubscriptionId, foundryResourceGroup)
+  params: {
+    foundryAccountName: foundryAccountName
+    mlPrincipalId: ml.outputs.principalId
   }
 }
 

@@ -11,15 +11,15 @@ NUM_PROJECTS = 20
 SEED = 42
 
 # ── Azure OpenAI ────────────────────────────────────────────────────────────
-# Set these 3 env vars to enable LLM text generation.
-# Find them in Azure AI Foundry → your deployment → Endpoint + Keys.
+# Set these 2 env vars to enable LLM text generation. Authentication uses
+# DefaultAzureCredential (managed identity in Azure, `az login` locally).
+# Find the endpoint + deployment name in Azure AI Foundry → your deployment.
 AZURE_OPENAI_ENDPOINT = os.environ.get(
     "AZURE_OPENAI_ENDPOINT", ""
 )  # e.g. "https://your-resource.openai.azure.com"
-AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY", "")
 AZURE_OPENAI_DEPLOYMENT = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "")  # e.g. "gpt-4o-mini"
 AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
-USE_LLM = bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and AZURE_OPENAI_DEPLOYMENT)
+USE_LLM = bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT)
 
 # ── Timeline ────────────────────────────────────────────────────────────────
 PROJECT_DATE_RANGE_START = date(2023, 1, 1)

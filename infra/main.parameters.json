@@ -37,9 +37,6 @@
     },
     "azureOpenAiApiVersion": {
       "value": "${AZURE_OPENAI_API_VERSION}"
-    },
-    "azureOpenAiApiKey": {
-      "value": "${AZURE_OPENAI_API_KEY}"
     }
   }
 }

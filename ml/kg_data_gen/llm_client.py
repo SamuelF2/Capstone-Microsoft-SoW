@@ -8,7 +8,6 @@ import random
 import time
 
 from config import (
-    AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_API_VERSION,
     AZURE_OPENAI_DEPLOYMENT,
     AZURE_OPENAI_ENDPOINT,
@@ -16,11 +15,16 @@ from config import (
 )
 
 if USE_LLM:
+    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     from openai import AzureOpenAI
 
+    _token_provider = get_bearer_token_provider(
+        DefaultAzureCredential(),
+        "https://cognitiveservices.azure.com/.default",
+    )
     client = AzureOpenAI(
         azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_API_KEY,
+        azure_ad_token_provider=_token_provider,
         api_version=AZURE_OPENAI_API_VERSION,
     )
 

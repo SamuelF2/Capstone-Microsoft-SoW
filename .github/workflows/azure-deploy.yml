@@ -27,7 +27,7 @@
 #   AZURE_OPENAI_ENDPOINT     - Azure OpenAI / Foundry endpoint for the ML service
 #   AZURE_OPENAI_DEPLOYMENT   - Azure OpenAI deployment name for the ML service
 #   AZURE_OPENAI_API_VERSION  - Azure OpenAI API version for the ML service
-#   AZURE_OPENAI_API_KEY      - Azure OpenAI API key (temporary — removed in COC-118 step 3)
+# (Foundry auth uses the ML Container App's managed identity — no API key needed.)
 # =============================================================================
 
 name: Azure Deploy
@@ -68,7 +68,6 @@ jobs:
       AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
       AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
       AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
-      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
 
     steps:
       - name: Checkout code

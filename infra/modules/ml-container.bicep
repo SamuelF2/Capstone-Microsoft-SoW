@@ -5,10 +5,10 @@
 // assistant. Internal-only — only other containers in the environment can
 // reach it. The `api` Container App proxies requests here via GRAPHRAG_API_URL.
 //
-// System-assigned managed identity is provisioned here so step 3 of COC-118
-// can grant Cognitive Services access to Azure OpenAI / Foundry via RBAC.
-// Until that step lands, AZURE_OPENAI_API_KEY below continues to authorize
-// Foundry calls.
+// Foundry auth: the system-assigned managed identity is granted
+// `Azure AI Developer` on Foundry-SOW via the cross-sub `foundry-rbac` module
+// invoked from main.bicep. The Python client constructs DefaultAzureCredential
+// at runtime — no API key in the container.
 //
 // Port: 8001 (matches local docker-compose GRAPHRAG_API_URL default)
 // =============================================================================
@@ -27,10 +27,6 @@ param azureOpenAiDeployment string
 
 @description('Azure OpenAI API version')
 param azureOpenAiApiVersion string
-
-@secure()
-@description('Azure OpenAI API key — temporary, replaced by MI + RBAC in COC-118 step 3')
-param azureOpenAiApiKey string
 
 @description('Bolt URI for the Neo4j container (e.g. bolt://<name>:7687)')
 param neo4jUri string
@@ -85,10 +81,6 @@ resource ml 'Microsoft.App/containerApps@2024-03-01' = {
           value: containerRegistry.listCredentials().passwords[0].value
         }
         {
-          name: 'azure-openai-api-key'
-          value: empty(azureOpenAiApiKey) ? 'not-set' : azureOpenAiApiKey
-        }
-        {
           name: 'neo4j-password'
           value: neo4jPassword
         }
@@ -110,7 +102,6 @@ resource ml 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAiEndpoint }
             { name: 'AZURE_OPENAI_DEPLOYMENT', value: azureOpenAiDeployment }
             { name: 'AZURE_OPENAI_API_VERSION', value: azureOpenAiApiVersion }
-            { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-api-key' }
             { name: 'NEO4J_URI', value: neo4jUri }
             { name: 'NEO4J_USER', value: neo4jUser }
             { name: 'NEO4J_PASSWORD', secretRef: 'neo4j-password' }
