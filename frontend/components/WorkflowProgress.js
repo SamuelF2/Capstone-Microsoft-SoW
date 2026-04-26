@@ -627,20 +627,31 @@ function ParallelGroupNode({
             (a) => a.decision === 'approved' || a.decision === 'approved-with-conditions'
           );
           const hasRejection = branchAssigns.some((a) => a.decision === 'rejected');
-          const branchColor =
-            rt === 'completed' || hasApproval
+          const isSkipped = rt === 'skipped';
+          const branchColor = isSkipped
+            ? 'var(--color-text-tertiary)'
+            : rt === 'completed' || hasApproval
               ? 'var(--color-success)'
               : hasRejection
                 ? 'var(--color-error)'
                 : rt === 'active'
                   ? TEAL
                   : 'var(--color-text-tertiary)';
-          const branchIcon = rt === 'completed' || hasApproval ? '✓' : hasRejection ? '✗' : '●';
+          const branchIcon = isSkipped
+            ? '⊘'
+            : rt === 'completed' || hasApproval
+              ? '✓'
+              : hasRejection
+                ? '✗'
+                : '●';
+          const tooltip = isSkipped
+            ? `${b.stage.display_name}: skipped — condition not met`
+            : `${b.stage.display_name}: ${rt}`;
 
           return (
             <span
               key={j}
-              title={`${b.stage.display_name}: ${rt}`}
+              title={tooltip}
               style={{
                 fontSize: '10px',
                 color: branchColor,
@@ -649,9 +660,12 @@ function ParallelGroupNode({
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 fontWeight: b.stage.stage_key === currentStage ? 700 : 400,
+                fontStyle: isSkipped ? 'italic' : 'normal',
+                opacity: isSkipped ? 0.7 : 1,
               }}
             >
               {branchIcon} {b.stage.display_name}
+              {isSkipped ? ' (skipped)' : ''}
             </span>
           );
         })}
@@ -903,9 +917,11 @@ function ParallelGroupTooltip({
         const rtColor =
           rt === 'completed'
             ? 'var(--color-success)'
-            : rt === 'active'
-              ? TEAL
-              : 'var(--color-text-tertiary)';
+            : rt === 'skipped'
+              ? 'var(--color-text-tertiary)'
+              : rt === 'active'
+                ? TEAL
+                : 'var(--color-text-tertiary)';
 
         return (
           <div
@@ -946,13 +962,16 @@ function ParallelGroupTooltip({
                       ? 'rgba(74,222,128,0.15)'
                       : rt === 'active'
                         ? 'rgba(13,148,136,0.15)'
-                        : 'var(--color-bg-secondary)',
+                        : rt === 'skipped'
+                          ? 'rgba(148,163,184,0.15)'
+                          : 'var(--color-bg-secondary)',
                   color: rtColor,
                   fontWeight: 600,
                   textTransform: 'uppercase',
                   letterSpacing: '0.3px',
                   marginLeft: 'auto',
                 }}
+                title={rt === 'skipped' ? 'Branch skipped — condition not met' : undefined}
               >
                 {rt}
               </span>

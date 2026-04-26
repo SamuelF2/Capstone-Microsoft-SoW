@@ -561,6 +561,18 @@ async def lifespan(app: FastAPI):
                 ADD COLUMN IF NOT EXISTS parallel_branches JSONB;
             """)
 
+            # Microsoft Default Workflow: per-role conditional requirement and
+            # per-transition skip condition. Both are JSONB predicates evaluated
+            # against sow_documents.metadata.microsoft_workflow at runtime.
+            await conn.execute("""
+                ALTER TABLE workflow_template_stage_roles
+                ADD COLUMN IF NOT EXISTS required_if JSONB;
+            """)
+            await conn.execute("""
+                ALTER TABLE workflow_template_transitions
+                ADD COLUMN IF NOT EXISTS skip_condition JSONB;
+            """)
+
             # ------------------------------------------------------------------ #
             # 13b. WORKFLOW STAGE DOCUMENT REQUIREMENTS  (Phase 4)               #
             # Must be after workflow_templates to satisfy FK constraint.          #
@@ -727,6 +739,13 @@ async def lifespan(app: FastAPI):
                         desc,
                     )
                 print("Seeded default document requirements")
+
+            # Seed the Microsoft Default Workflow alongside the ESAP one. The
+            # function is idempotent on template name, so it's safe to call on
+            # every startup.
+            from seeds.microsoft_workflow import seed_microsoft_default_workflow
+
+            await seed_microsoft_default_workflow(conn)
 
             # Backfill any transitions that may be missing from previously-seeded
             # templates (the guard above skips re-seeding if the template exists).

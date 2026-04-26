@@ -32,6 +32,7 @@ from models import (
 )
 from services.workflow_engine import (
     _find_stage,
+    _load_sow_microsoft_metadata,
     _load_workflow_data,
     _validate_workflow_snapshot_change,
     compute_workflow_diff,
@@ -72,20 +73,25 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
         # Fetch roles for this stage
         role_rows = await conn.fetch(
             """
-            SELECT role_key, is_required, esap_levels
+            SELECT role_key, is_required, esap_levels, required_if
             FROM   workflow_template_stage_roles
             WHERE  stage_id = $1
             """,
             s["id"],
         )
-        roles = [
-            {
-                "role_key": r["role_key"],
-                "is_required": r["is_required"],
-                "esap_levels": list(r["esap_levels"]) if r["esap_levels"] else None,
-            }
-            for r in role_rows
-        ]
+        roles = []
+        for r in role_rows:
+            req_if = r["required_if"]
+            if isinstance(req_if, str):
+                req_if = json.loads(req_if)
+            roles.append(
+                {
+                    "role_key": r["role_key"],
+                    "is_required": r["is_required"],
+                    "esap_levels": list(r["esap_levels"]) if r["esap_levels"] else None,
+                    "required_if": req_if if isinstance(req_if, dict) else None,
+                }
+            )
 
         raw_cfg = s["config"]
         if isinstance(raw_cfg, dict):
@@ -128,27 +134,45 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
 
     transition_rows = await conn.fetch(
         """
-        SELECT from_stage_key, to_stage_key, condition
+        SELECT from_stage_key, to_stage_key, condition, skip_condition
         FROM   workflow_template_transitions
         WHERE  template_id = $1
         """,
         template_id,
     )
-    transitions = [
-        {
-            "from_stage": t["from_stage_key"],
-            "to_stage": t["to_stage_key"],
-            "condition": t["condition"] or "default",
-        }
-        for t in transition_rows
-    ]
+    transitions = []
+    for t in transition_rows:
+        skip = t["skip_condition"]
+        if isinstance(skip, str):
+            skip = json.loads(skip)
+        transitions.append(
+            {
+                "from_stage": t["from_stage_key"],
+                "to_stage": t["to_stage_key"],
+                "condition": t["condition"] or "default",
+                "skip_condition": skip if isinstance(skip, dict) else None,
+            }
+        )
 
     return {"stages": stages, "transitions": transitions}
 
 
 async def get_default_template_id(conn) -> int | None:
-    """Return the ID of the system default workflow template, or None."""
-    return await conn.fetchval("SELECT id FROM workflow_templates WHERE is_system = TRUE LIMIT 1")
+    """Return the ID of the system default workflow template, or None.
+
+    Name-pinned to the ESAP workflow so that adding additional ``is_system``
+    templates (e.g. the Microsoft Default Workflow) does not make this lookup
+    non-deterministic. Implicit-default callers (SoW creation without a
+    template_id, legacy backfill) keep getting ESAP; opt-in templates are
+    selected via the picker.
+    """
+    return await conn.fetchval(
+        """
+        SELECT id FROM workflow_templates
+        WHERE  is_system = TRUE AND name = 'Default ESAP Workflow'
+        LIMIT  1
+        """
+    )
 
 
 def _validate_workflow_data(wd: WorkflowData) -> None:
@@ -320,26 +344,28 @@ async def create_template(
                 await conn.execute(
                     """
                     INSERT INTO workflow_template_stage_roles
-                        (stage_id, role_key, is_required, esap_levels)
-                    VALUES ($1, $2, $3, $4)
+                        (stage_id, role_key, is_required, esap_levels, required_if)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
                     """,
                     stage_id,
                     role.role_key,
                     role.is_required,
                     role.esap_levels,
+                    json.dumps(role.required_if) if role.required_if else None,
                 )
 
         for t in wd.transitions:
             await conn.execute(
                 """
                 INSERT INTO workflow_template_transitions
-                    (template_id, from_stage_key, to_stage_key, condition)
-                VALUES ($1, $2, $3, $4)
+                    (template_id, from_stage_key, to_stage_key, condition, skip_condition)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
                 """,
                 template_id,
                 t.from_stage,
                 t.to_stage,
                 t.condition,
+                json.dumps(t.skip_condition) if t.skip_condition else None,
             )
 
         snapshot = await build_workflow_snapshot(conn, template_id)
@@ -442,26 +468,28 @@ async def update_template(
                 await conn.execute(
                     """
                     INSERT INTO workflow_template_stage_roles
-                        (stage_id, role_key, is_required, esap_levels)
-                    VALUES ($1, $2, $3, $4)
+                        (stage_id, role_key, is_required, esap_levels, required_if)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
                     """,
                     stage_id,
                     role.role_key,
                     role.is_required,
                     role.esap_levels,
+                    json.dumps(role.required_if) if role.required_if else None,
                 )
 
         for t in wd.transitions:
             await conn.execute(
                 """
                 INSERT INTO workflow_template_transitions
-                    (template_id, from_stage_key, to_stage_key, condition)
-                VALUES ($1, $2, $3, $4)
+                    (template_id, from_stage_key, to_stage_key, condition, skip_condition)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
                 """,
                 template_id,
                 t.from_stage,
                 t.to_stage,
                 t.condition,
+                json.dumps(t.skip_condition) if t.skip_condition else None,
             )
 
         snapshot = await build_workflow_snapshot(conn, template_id)
@@ -681,14 +709,17 @@ async def update_sow_workflow(
         # create assignments for the newly-required roles. ``create_stage_assignments``
         # is idempotent via dedup in ``create_assignment_with_prior``, so existing
         # assignments are left alone.
+        # Pass sow_meta so required_if predicates evaluate consistently with
+        # what create_stage_assignments and check_gating_rules see.
+        sow_meta = await _load_sow_microsoft_metadata(conn, sow_id)
         new_current_cfg = _find_stage(new_snapshot, current_stage)
         existing_current_cfg = _find_stage(existing_snapshot, current_stage)
         if (
             new_current_cfg
             and new_current_cfg.get("stage_type") in ("review", "approval")
             and (
-                required_role_keys(new_current_cfg, esap_level)
-                - required_role_keys(existing_current_cfg, esap_level)
+                required_role_keys(new_current_cfg, esap_level, sow_meta)
+                - required_role_keys(existing_current_cfg, esap_level, sow_meta)
             )
         ):
             await create_stage_assignments(

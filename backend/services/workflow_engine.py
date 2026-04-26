@@ -83,6 +83,108 @@ async def _load_parallel_branches(conn, sow_id: int) -> dict | None:
     return raw if isinstance(raw, dict) and raw else None
 
 
+# ── Microsoft workflow predicate evaluation ─────────────────────────────────
+
+
+async def _load_sow_microsoft_metadata(conn, sow_id: int) -> dict:
+    """Return ``sow_documents.metadata.microsoft_workflow`` (or ``{}``).
+
+    Centralizes the metadata fetch + namespace unwrap used by every site
+    that evaluates ``skip_condition`` / ``required_if`` predicates.
+    """
+    row = await conn.fetchrow("SELECT metadata FROM sow_documents WHERE id = $1", sow_id)
+    if not row or not row["metadata"]:
+        return {}
+    meta = row["metadata"]
+    if isinstance(meta, str):
+        meta = json.loads(meta)
+    if not isinstance(meta, dict):
+        return {}
+    nested = meta.get("microsoft_workflow")
+    return nested if isinstance(nested, dict) else {}
+
+
+def evaluate_skip_condition(condition: dict | None, sow_meta: dict) -> bool:
+    """Evaluate a workflow predicate. Returns True iff the condition matches.
+
+    Used for both transition ``skip_condition`` (matches → branch is skipped)
+    and role ``required_if`` (matches → role IS required). The predicate
+    schema is intentionally narrow:
+
+        {"field": <key>, "op": "eq",        "value": <scalar>}
+        {"field": <key>, "op": "is_empty"}
+        {"field": <key>, "op": "contains",  "value": <member>}
+
+    ``field`` is always read from ``sow_meta[field]``. Fail-open semantics:
+    a missing condition, missing field, or unknown operator returns False
+    (do not skip / not required-by-this-rule). The caller can still mark a
+    role required via the static ``is_required`` flag.
+    """
+    if not condition or not isinstance(condition, dict):
+        return False
+    field = condition.get("field")
+    op = condition.get("op")
+    if not field or not op:
+        return False
+    value = sow_meta.get(field) if isinstance(sow_meta, dict) else None
+
+    if op == "eq":
+        return value == condition.get("value")
+    if op == "is_empty":
+        if value is None:
+            return True
+        return isinstance(value, list | str | dict) and len(value) == 0
+    if op == "contains":
+        target = condition.get("value")
+        if isinstance(value, list):
+            return target in value
+        if isinstance(value, str):
+            return isinstance(target, str) and target in value
+        return False
+
+    return False  # unknown operator → fail-open
+
+
+def _is_role_active(role: dict, esap_level: str, sow_meta: dict) -> bool:
+    """Single source of truth for "is this role required for this SoW?".
+
+    Combines three filters in order:
+      1. ``is_required`` flag (default True)
+      2. ``esap_levels`` filter — role only applies for matching ESAP levels
+      3. ``required_if`` predicate — role only applies when the predicate
+         evaluates True against the SoW's microsoft_workflow metadata
+
+    Replaces three near-identical inline filter loops in
+    :func:`check_gating_rules`, :func:`create_stage_assignments`, and
+    :func:`required_role_keys`.
+    """
+    if not role.get("is_required", True):
+        return False
+    esap_filter = role.get("esap_levels")
+    if esap_filter and esap_level not in esap_filter:
+        return False
+    required_if = role.get("required_if")
+    return not required_if or evaluate_skip_condition(required_if, sow_meta)
+
+
+def _find_join_target_for_branch(workflow_data: dict, branch_stage_key: str) -> str | None:
+    """Return the join-stage key that follows a parallel branch, if any.
+
+    Walks ``on_approve``/``default`` outgoing edges from the branch — same
+    rule used by :func:`complete_parallel_branch` — and returns the first
+    target. Returns ``None`` when the branch has no forward edge (e.g. a
+    rejected terminal-only branch).
+    """
+    transitions = workflow_data.get("transitions", [])
+    for t in transitions:
+        if t.get("from_stage") == branch_stage_key and t.get("condition") in (
+            "on_approve",
+            "default",
+        ):
+            return t.get("to_stage")
+    return None
+
+
 async def resolve_effective_review_stage(
     conn,
     sow_id: int,
@@ -253,15 +355,15 @@ async def check_gating_rules(
     if not stage:
         return True, []
 
-    # Determine which roles are required for this ESAP level
-    required_roles: list[str] = []
-    for role in stage.get("roles", []):
-        if not role.get("is_required", True):
-            continue
-        esap_filter = role.get("esap_levels")
-        if esap_filter and esap_level not in esap_filter:
-            continue
-        required_roles.append(role["role_key"])
+    # Determine which roles are required for this ESAP level + SoW metadata.
+    # _is_role_active applies the same is_required / esap_levels / required_if
+    # filter used by create_stage_assignments and required_role_keys.
+    sow_meta = await _load_sow_microsoft_metadata(conn, sow_id)
+    required_roles = [
+        role["role_key"]
+        for role in stage.get("roles", [])
+        if _is_role_active(role, esap_level, sow_meta)
+    ]
 
     if not required_roles:
         return True, []
@@ -379,16 +481,14 @@ async def create_stage_assignments(
     author_ids = [r["id"] for r in author_rows]
 
     # Pre-flight: figure out which roles we'll actually process so we can
-    # batch the per-role lookups and avoid an N+1.  Filter out non-required
-    # roles and ESAP-excluded roles up front.
-    role_specs: list[dict] = []
-    for role in target_stage.get("roles", []):
-        if not role.get("is_required", True):
-            continue
-        esap_filter = role.get("esap_levels")
-        if esap_filter and esap_level not in esap_filter:
-            continue
-        role_specs.append(role)
+    # batch the per-role lookups and avoid an N+1.  _is_role_active applies
+    # is_required, esap_levels, and required_if filters in one place.
+    sow_meta = await _load_sow_microsoft_metadata(conn, sow_id)
+    role_specs = [
+        role
+        for role in target_stage.get("roles", [])
+        if _is_role_active(role, esap_level, sow_meta)
+    ]
     role_keys = [r["role_key"] for r in role_specs]
 
     # Batch the designated-reviewer lookup: one round trip for the whole
@@ -609,10 +709,13 @@ async def _execute_parallel_fan_out(
 
     The gateway is a pass-through node:
       1. Identify all outgoing transitions from the gateway.
-      2. For each target that is a review/approval stage, create assignments.
-      3. Store the parallel branch state in ``sow_workflow.parallel_branches``
-         (JSONB) so the join check can track completion.
-      4. The SoW status stays at the gateway key while branches execute.
+      2. For each target with no matching ``skip_condition``, create
+         assignments and mark the branch ``"active"``. Branches whose
+         ``skip_condition`` matches are recorded as ``"skipped"`` and do
+         not get assignments.
+      3. Store branch state in ``sow_workflow.parallel_branches`` (JSONB).
+      4. If every branch is skipped, immediately recurse into the join
+         target so the SoW does not freeze at an empty gateway.
 
     Returns a result dict, or ``None`` if there are no outgoing targets.
     """
@@ -621,22 +724,28 @@ async def _execute_parallel_fan_out(
     if not outgoing:
         return None
 
-    target_keys = [t["to_stage"] for t in outgoing]
+    sow_meta = await _load_sow_microsoft_metadata(conn, sow_id)
+
+    branches: dict[str, str] = {}
+    skipped_branches: list[str] = []
     all_assigned: list[str] = []
 
-    for tkey in target_keys:
+    for t in outgoing:
+        tkey = t["to_stage"]
         target_stage = _find_stage(workflow_data, tkey)
         if not target_stage:
             continue
+        if evaluate_skip_condition(t.get("skip_condition"), sow_meta):
+            branches[tkey] = "skipped"
+            skipped_branches.append(tkey)
+            continue
+        branches[tkey] = "active"
         if target_stage.get("stage_type") in ("review", "approval"):
             roles = await create_stage_assignments(
                 conn, sow_id, target_stage, esap_level, actor_user_id
             )
             all_assigned.extend(roles)
 
-    # Store parallel branch tracking in sow_workflow
-    # Each branch records its target stage_key and a status of "active"
-    branches = {tkey: "active" for tkey in target_keys}
     await conn.execute(
         """
         UPDATE sow_workflow
@@ -653,14 +762,48 @@ async def _execute_parallel_fan_out(
         sow_id,
         actor_user_id,
         "parallel_fan_out",
-        {"gateway": gateway_key, "branches": target_keys},
+        {
+            "gateway": gateway_key,
+            "branches": list(branches.keys()),
+            "skipped": skipped_branches,
+        },
     )
+
+    # All branches skipped → no reviewers will ever submit and the SoW would
+    # sit on the gateway forever. Recurse into the (single) join target.
+    active_branches = [k for k, v in branches.items() if v == "active"]
+    if branches and not active_branches:
+        # Every outgoing branch shares the same join target by construction;
+        # take the first available.
+        join_key: str | None = None
+        for skipped in skipped_branches:
+            join_key = _find_join_target_for_branch(workflow_data, skipped)
+            if join_key:
+                break
+        if join_key:
+            await conn.execute(
+                """
+                UPDATE sow_workflow
+                SET    parallel_branches = NULL, updated_at = NOW()
+                WHERE  sow_id = $1
+                """,
+                sow_id,
+            )
+            return await execute_transition(
+                conn,
+                sow_id,
+                join_key,
+                actor_user_id,
+                esap_level,
+                reason="Parallel join — all branches skipped by condition",
+            )
 
     return {
         "advanced": True,
         "sow_id": sow_id,
         "new_status": gateway_key,
-        "parallel_branches": target_keys,
+        "parallel_branches": list(branches.keys()),
+        "skipped_branches": skipped_branches,
         "assigned_roles": all_assigned,
     }
 
@@ -726,19 +869,27 @@ async def check_join_requirements(
         # Not a parallel join — normal single-predecessor
         return True, []
 
-    outstanding = [k for k in tracked_predecessors if branches_raw.get(k) != "completed"]
+    # Skipped branches count as satisfied for all-required / custom joins —
+    # they were intentionally not run because their skip_condition matched.
+    # any_required still requires at least one ACTUAL completion.
+    outstanding = [
+        k for k in tracked_predecessors if branches_raw.get(k) not in ("completed", "skipped")
+    ]
 
     if join_mode == "any_required":
-        # OR-join: at least one predecessor is done
-        ready = len(outstanding) < len(tracked_predecessors)
+        # OR-join: at least one predecessor truly completed (skipped doesn't count)
+        completed_count = sum(1 for k in tracked_predecessors if branches_raw.get(k) == "completed")
+        ready = completed_count >= 1
     elif join_mode == "custom":
-        # Only the listed required_predecessors must be done
+        # Only the listed required_predecessors must be done (skipped counts)
         required = set(config.get("required_predecessors", []))
-        custom_outstanding = [k for k in required if branches_raw.get(k) != "completed"]
+        custom_outstanding = [
+            k for k in required if branches_raw.get(k) not in ("completed", "skipped")
+        ]
         ready = len(custom_outstanding) == 0
         outstanding = custom_outstanding
     else:
-        # all_required / default: every predecessor must be done
+        # all_required / default: every predecessor must be done or skipped
         ready = len(outstanding) == 0
 
     return ready, outstanding
@@ -792,7 +943,10 @@ async def complete_parallel_branch(
     """
     wd = await _load_workflow_data(conn, sow_id)
 
-    # Find the join target (next stage after this parallel branch)
+    # Find the join target (next stage after this parallel branch). The
+    # helper walks on_approve/default outgoing edges — same rule as before,
+    # extracted so the all-skipped path in _execute_parallel_fan_out can
+    # reuse it.
     transitions = wd.get("transitions", [])
     join_targets = [
         t["to_stage"]
@@ -913,7 +1067,9 @@ async def recheck_and_maybe_advance(
         if not parallel_branches:
             return result
 
-        active_branches = [k for k, v in parallel_branches.items() if v != "completed"]
+        active_branches = [
+            k for k, v in parallel_branches.items() if v not in ("completed", "skipped")
+        ]
         any_branch_met = False
         for branch_key in active_branches:
             branch_cfg = _find_stage(wd, branch_key)
@@ -1012,22 +1168,25 @@ def _validate_workflow_snapshot_change(
         )
 
 
-def required_role_keys(stage: dict | None, esap_level: str) -> set[str]:
+def required_role_keys(
+    stage: dict | None, esap_level: str, sow_meta: dict | None = None
+) -> set[str]:
     """Return the set of role_keys required at *stage* for *esap_level*.
 
-    Mirrors the filtering used by :func:`check_gating_rules` and
-    :func:`create_stage_assignments`: a role counts only when it is marked
-    required AND its ``esap_levels`` filter (if any) includes the SoW's
-    ESAP level.
+    Delegates to :func:`_is_role_active` so this matches exactly what
+    :func:`check_gating_rules` and :func:`create_stage_assignments` see.
+
+    ``sow_meta`` is the SoW's ``metadata.microsoft_workflow`` dict — needed
+    to evaluate ``required_if`` predicates. Defaults to ``{}`` for callers
+    that don't need conditional-role filtering (e.g. legacy code paths
+    where no role uses ``required_if``).
     """
     if not stage:
         return set()
+    meta = sow_meta or {}
     result: set[str] = set()
     for role in stage.get("roles", []):
-        if not role.get("is_required", True):
-            continue
-        esap_filter = role.get("esap_levels")
-        if esap_filter and esap_level not in esap_filter:
+        if not _is_role_active(role, esap_level, meta):
             continue
         key = role.get("role_key")
         if key:
@@ -1038,9 +1197,10 @@ def required_role_keys(stage: dict | None, esap_level: str) -> set[str]:
 def compute_workflow_diff(existing: dict, new: dict) -> dict:
     """Return a minimal diff describing the changes between two snapshots.
 
-    Captures added/removed stages and transitions plus per-stage
-    ``approval_mode`` changes — enough for the ``workflow_edited`` audit
-    entry without dumping the full snapshot into the history table.
+    Captures added/removed stages and transitions, per-stage ``approval_mode``
+    changes, transition ``skip_condition`` changes, and per-role
+    ``required_if`` changes — enough for the ``workflow_edited`` audit entry
+    without dumping the full snapshot into the history table.
     """
     existing_stages = {s["stage_key"]: s for s in existing.get("stages", [])}
     new_stages = {s["stage_key"]: s for s in new.get("stages", [])}
@@ -1074,6 +1234,45 @@ def compute_workflow_diff(existing: dict, new: dict) -> dict:
         if old_mode != new_mode:
             approval_mode_changes.append({"stage_key": stage_key, "old": old_mode, "new": new_mode})
 
+    # Skip-condition changes on transitions retained in both snapshots.
+    existing_t_map = {
+        transition_key(t): t.get("skip_condition") for t in existing.get("transitions", [])
+    }
+    new_t_map = {transition_key(t): t.get("skip_condition") for t in new.get("transitions", [])}
+    skip_condition_changes: list[dict] = []
+    for key in sorted(set(existing_t_map) & set(new_t_map)):
+        if existing_t_map[key] != new_t_map[key]:
+            skip_condition_changes.append(
+                {
+                    "from_stage": key[0],
+                    "to_stage": key[1],
+                    "condition": key[2],
+                    "old": existing_t_map[key],
+                    "new": new_t_map[key],
+                }
+            )
+
+    # required_if changes on roles retained in both snapshots.
+    def role_map(stage: dict) -> dict[str, dict]:
+        return {r.get("role_key"): r for r in stage.get("roles", []) if r.get("role_key")}
+
+    required_if_changes: list[dict] = []
+    for stage_key in sorted(set(existing_stages) & set(new_stages)):
+        old_roles = role_map(existing_stages[stage_key])
+        new_roles = role_map(new_stages[stage_key])
+        for role_key in sorted(set(old_roles) & set(new_roles)):
+            old_ri = old_roles[role_key].get("required_if")
+            new_ri = new_roles[role_key].get("required_if")
+            if old_ri != new_ri:
+                required_if_changes.append(
+                    {
+                        "stage_key": stage_key,
+                        "role_key": role_key,
+                        "old": old_ri,
+                        "new": new_ri,
+                    }
+                )
+
     diff: dict[str, Any] = {}
     if added_stages:
         diff["added_stages"] = added_stages
@@ -1085,5 +1284,9 @@ def compute_workflow_diff(existing: dict, new: dict) -> dict:
         diff["removed_transitions"] = removed_transitions
     if approval_mode_changes:
         diff["approval_mode_changes"] = approval_mode_changes
+    if skip_condition_changes:
+        diff["skip_condition_changes"] = skip_condition_changes
+    if required_if_changes:
+        diff["required_if_changes"] = required_if_changes
 
     return diff

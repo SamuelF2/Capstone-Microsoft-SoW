@@ -401,6 +401,15 @@ export const ROLE_DISPLAY_NAMES = {
   'delivery-manager': 'Delivery Manager',
   consultant: 'Consultant',
   'system-admin': 'System Admin',
+  // Microsoft Default Workflow roles
+  'solution-reviewer': 'Solution Reviewer',
+  'responsible-ai-lead': 'Responsible AI Lead',
+  'global-dev-lead': 'Global Dev Lead',
+  'shared-services-lead': 'Shared Services Lead',
+  'ux-services-lead': 'UX Services Lead',
+  'acm-services-lead': 'ACM Services Lead',
+  'data-ai-services-lead': 'Data & AI Services Lead',
+  'industry-solutions-lead': 'Industry Solutions Lead',
 };
 
 /**
@@ -414,6 +423,14 @@ export const KNOWN_REVIEWER_ROLES = [
   'cpl',
   'cdp',
   'delivery-manager',
+  'solution-reviewer',
+  'responsible-ai-lead',
+  'global-dev-lead',
+  'shared-services-lead',
+  'ux-services-lead',
+  'acm-services-lead',
+  'data-ai-services-lead',
+  'industry-solutions-lead',
 ];
 
 /**

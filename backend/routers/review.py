@@ -37,6 +37,10 @@ from models import (
     ReviewSubmitPayload,
     SendBackPayload,
 )
+from services.workflow_engine import (
+    _is_role_active,
+    _load_sow_microsoft_metadata,
+)
 from utils.db_helpers import (
     insert_history,
     record_review_result,
@@ -315,16 +319,14 @@ async def _get_required_roles(conn, sow_id: int, stage_key: str, esap_level: str
         if isinstance(row["workflow_data"], dict)
         else json.loads(row["workflow_data"])
     )
+    sow_meta = await _load_sow_microsoft_metadata(conn, sow_id)
     for stage in data.get("stages", []):
         if stage["stage_key"] == stage_key:
-            roles = []
-            for role in stage.get("roles", []):
-                if not role.get("is_required", True):
-                    continue
-                esap_list = role.get("esap_levels")
-                if esap_list is None or esap_level in esap_list:
-                    roles.append(role["role_key"])
-            return roles
+            return [
+                role["role_key"]
+                for role in stage.get("roles", [])
+                if _is_role_active(role, esap_level, sow_meta)
+            ]
     return []
 
 
@@ -1170,7 +1172,9 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     ),
                 )
 
-            active_branches = [k for k, v in parallel_branches.items() if v != "completed"]
+            active_branches = [
+                k for k, v in parallel_branches.items() if v not in ("completed", "skipped")
+            ]
 
             # Aggregate outstanding roles across every active branch so the
             # caller gets a single 409 listing everything that's still pending.

@@ -530,11 +530,20 @@ class DocumentGenerationResponse(BaseModel):
 
 
 class WorkflowStageRoleConfig(BaseModel):
-    """A reviewer role required at a workflow stage."""
+    """A reviewer role required at a workflow stage.
+
+    ``required_if`` is an optional JSON predicate evaluated against
+    ``sow_documents.metadata.microsoft_workflow``; when present, the role is
+    only required when the predicate matches. Used by the Microsoft Default
+    Workflow's Shared Services stage to gate sub-roles by selected service
+    group. See ``services.workflow_engine.evaluate_skip_condition`` for the
+    supported operator schema.
+    """
 
     role_key: str
     is_required: bool = True
     esap_levels: list[str] | None = None  # None = all levels
+    required_if: dict[str, Any] | None = None
 
 
 class WorkflowStageConfig(BaseModel):
@@ -565,11 +574,18 @@ class WorkflowStageConfig(BaseModel):
 
 
 class WorkflowTransitionConfig(BaseModel):
-    """A valid transition between two stages."""
+    """A valid transition between two stages.
+
+    ``skip_condition`` is an optional JSON predicate. When set on a transition
+    out of a parallel gateway, the branch is skipped (recorded as ``"skipped"``
+    in ``sow_workflow.parallel_branches``) instead of activated, and the join
+    treats it as satisfied. See ``services.workflow_engine.evaluate_skip_condition``.
+    """
 
     from_stage: str
     to_stage: str
     condition: str = "default"  # default | on_approve | on_reject | on_send_back | on_condition_met (on_condition_met is backend-only, not exposed in the graph editor UI)
+    skip_condition: dict[str, Any] | None = None
 
 
 class WorkflowData(BaseModel):

@@ -9,6 +9,7 @@ import AttachmentManager from '../../components/AttachmentManager';
 import WorkflowProgress from '../../components/WorkflowProgress';
 import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
 import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPanel';
+import MicrosoftWorkflowFlags from '../../components/sow/MicrosoftWorkflowFlags';
 import ActivityLog from '../../components/ActivityLog';
 import ContextSidebar from '../../components/ai-context/ContextSidebar';
 import AssistChat from '../../components/ai-assist/AssistChat';
@@ -179,6 +180,10 @@ export default function DraftPage() {
   const [notFound, setNotFound] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  // Microsoft workflow: full SoW metadata (so PATCHes can preserve sibling
+  // keys) and a flag indicating the SoW is using the Microsoft template.
+  const [sowMetadata, setSowMetadata] = useState(null);
+  const [isMicrosoftWorkflow, setIsMicrosoftWorkflow] = useState(false);
 
   // Persistence: load from backend on mount, debounced auto-save on edit.
   // The previous implementation used localStorage as the primary store,
@@ -238,6 +243,9 @@ export default function DraftPage() {
         // and skip the redundant PATCH-back.
         lastServerContentRef.current = JSON.stringify(content);
         setSowData(content);
+        // Capture full metadata so MicrosoftWorkflowFlags edits can PATCH
+        // back without dropping sibling keys (workOrderNumber etc.).
+        setSowMetadata(data.metadata || {});
         if (data.updated_at) setSavedAt(data.updated_at);
       } catch (err) {
         if (!cancelled) {
@@ -287,6 +295,51 @@ export default function DraftPage() {
       }
     };
   }, [sowData, id, authFetch]);
+
+  // Detect whether this SoW uses the Microsoft Default Workflow by inspecting
+  // its workflow snapshot for the gateway stage_key. Structural — survives
+  // template renames as long as the seed keeps the gateway key.
+  useEffect(() => {
+    if (!id || !authFetch) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(`/api/workflow/sow/${id}`);
+        if (!res.ok || cancelled) return;
+        const wf = await res.json();
+        const stages = wf?.workflow_data?.stages || [];
+        const isMs = stages.some((s) => s.stage_key === 'microsoft_parallel_branches');
+        if (!cancelled) setIsMicrosoftWorkflow(isMs);
+      } catch {
+        // Snapshot fetch failure is non-fatal — flags section just won't render.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, authFetch]);
+
+  // Update microsoft_workflow flags by PATCHing /api/sow/{id} with the
+  // merged metadata. Other metadata keys (workOrderNumber, customerLegalName)
+  // are preserved by spreading the prior metadata first.
+  const updateMicrosoftWorkflowFlags = useCallback(
+    async (next) => {
+      if (!id || !authFetch) return;
+      const merged = { ...(sowMetadata || {}), microsoft_workflow: next };
+      setSowMetadata(merged);
+      try {
+        const res = await authFetch(`/api/sow/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metadata: merged }),
+        });
+        if (res.ok) setSavedAt(new Date().toISOString());
+      } catch {
+        // Silent fail — author can re-edit to retry.
+      }
+    },
+    [id, authFetch, sowMetadata]
+  );
 
   // Update a top-level section of the SoW data
   const updateSection = (section, value) => {
@@ -676,6 +729,15 @@ export default function DraftPage() {
             <div style={{ marginTop: 'var(--spacing-sm)' }}>
               <WorkflowReadOnlySummary sowId={id} />
             </div>
+            {isMicrosoftWorkflow && (
+              <div style={{ marginTop: 'var(--spacing-md)' }}>
+                <MicrosoftWorkflowFlags
+                  data={sowMetadata?.microsoft_workflow}
+                  onChange={updateMicrosoftWorkflowFlags}
+                  readOnly={(sowData.status || 'draft') !== 'draft'}
+                />
+              </div>
+            )}
             <div style={{ marginTop: 'var(--spacing-md)' }}>
               <ReviewerAssignmentPanel
                 sowId={id}
