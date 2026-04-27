@@ -43,6 +43,14 @@ services:
       path: ./Dockerfile.postgres
       context: .
 
+  ingestion:
+    project: ./
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.ingestion
+      context: .
+
 hooks:
   postprovision:
     shell: sh

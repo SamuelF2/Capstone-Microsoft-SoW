@@ -37,6 +37,9 @@
     },
     "azureOpenAiApiVersion": {
       "value": "${AZURE_OPENAI_API_VERSION}"
+    },
+    "serviceIngestionImageName": {
+      "value": "${SERVICE_INGESTION_IMAGE_NAME=}"
     }
   }
 }

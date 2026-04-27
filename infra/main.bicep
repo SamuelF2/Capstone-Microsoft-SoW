@@ -8,8 +8,10 @@
 //   - Azure Container Registry (stores Docker images)
 //   - Container App: api (FastAPI backend)
 //   - Container App: web (Next.js frontend)
+//   - Container App: ml (FastAPI GraphRAG service)
 //   - Container App: neo4j (graph database)
 //   - Container App: postgres (relational database)
+//   - Container Apps Job: ingestion (manual-trigger Neo4j data seeding)
 //   - Log Analytics Workspace (monitoring/logging)
 //
 // NOTE: PostgreSQL runs as a container because Azure Database for PostgreSQL
@@ -81,6 +83,9 @@ param foundryResourceGroup string = 'RG-SOW'
 
 @description('Name of the existing Foundry account')
 param foundryAccountName string = 'Foundry-SOW'
+
+@description('Image name for the ingestion service (set by azd via SERVICE_INGESTION_IMAGE_NAME; falls back to a :latest reference on the env-suffixed repo if unset, e.g. on first deploy before any image build has run)')
+param serviceIngestionImageName string = ''
 
 // ---------------------------------------------------------------------------
 // Variables
@@ -208,7 +213,33 @@ module ml 'modules/ml-container.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-Sub RBAC: Grant ML MI access to Foundry-SOW
+// Container Apps Job: Ingestion (Neo4j data seeding — manual trigger)
+// ---------------------------------------------------------------------------
+// Declared BEFORE foundryRbac so ingestionJob.outputs.principalId is available
+// to add to that module's principalIds list. The Job needs Azure AI Developer
+// on Foundry-SOW for the same reason the ML container does — it runs
+// main_new.py ingest, which makes hundreds of LLM calls during seeding.
+
+module ingestionJob 'modules/ingestion-job.bicep' = {
+  name: 'ingestion-job'
+  scope: rg
+  params: {
+    jobName: 'caj-ingest-${resourceToken}'
+    location: location
+    tags: tags
+    containerAppsEnvironmentId: containerAppsEnv.outputs.id
+    containerRegistryName: containerRegistry.outputs.name
+    image: !empty(serviceIngestionImageName) ? serviceIngestionImageName : '${containerRegistry.outputs.loginServer}/cocoon/ingestion-${environmentName}:latest'
+    neo4jName: neo4j.outputs.name
+    neo4jPassword: neo4jPassword
+    foundryEndpoint: azureOpenAiEndpoint
+    foundryDeployment: azureOpenAiDeployment
+    foundryApiVersion: azureOpenAiApiVersion
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-Sub RBAC: Grant ML + Ingestion MIs access to Foundry-SOW
 // ---------------------------------------------------------------------------
 
 module foundryRbac 'modules/foundry-rbac.bicep' = {
@@ -216,7 +247,10 @@ module foundryRbac 'modules/foundry-rbac.bicep' = {
   scope: resourceGroup(foundrySubscriptionId, foundryResourceGroup)
   params: {
     foundryAccountName: foundryAccountName
-    mlPrincipalId: ml.outputs.principalId
+    principalIds: [
+      ml.outputs.principalId
+      ingestionJob.outputs.principalId
+    ]
   }
 }
 
