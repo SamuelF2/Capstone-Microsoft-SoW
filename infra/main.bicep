@@ -229,7 +229,7 @@ module ingestionJob 'modules/ingestion-job.bicep' = {
     tags: tags
     containerAppsEnvironmentId: containerAppsEnv.outputs.id
     containerRegistryName: containerRegistry.outputs.name
-    image: !empty(serviceIngestionImageName) ? serviceIngestionImageName : '${containerRegistry.outputs.loginServer}/cocoon/ingestion-${environmentName}:latest'
+    image: !empty(serviceIngestionImageName) ? serviceIngestionImageName : '${containerRegistry.outputs.loginServer}/cocoon/ingestion-${toLower(environmentName)}:latest'
     neo4jName: neo4j.outputs.name
     neo4jPassword: neo4jPassword
     foundryEndpoint: azureOpenAiEndpoint
