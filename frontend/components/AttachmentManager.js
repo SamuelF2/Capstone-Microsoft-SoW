@@ -4,18 +4,47 @@
  * Shows a document requirements checklist (if any), a drag-and-drop upload
  * area, and a list of existing attachments with download/delete actions.
  *
+ * AI auto-fill: when the staged file is a PDF, DOCX, CSV, or XLSX, the
+ * staging card offers a checkbox to "Use AI to fill SoW sections from this
+ * document". On upload, the freshly-created attachment is sent to the
+ * extraction endpoint; the user previews the AI proposal in the
+ * ExtractionPreviewModal before applying any of it back to ``sow.content``.
+ * Extraction failures never block the upload itself.
+ *
  * Props
  * -----
- * sowId            integer           — the SoW being managed
- * stageKey         string|null       — current workflow stage key (for filtering/defaults)
- * readOnly         boolean           — hide upload/delete controls
- * showRequirements boolean           — show document requirements section
- * authFetch        function          — authenticated fetch from useAuth()
- * onUpload         () => void        — called after a successful upload
+ * sowId              integer    — the SoW being managed
+ * stageKey           string|null — current workflow stage key (for filtering/defaults)
+ * readOnly           boolean    — hide upload/delete controls
+ * showRequirements   boolean    — show document requirements section
+ * authFetch          function   — authenticated fetch from useAuth()
+ * onUpload           () => void — called after a successful upload
+ * onContentExtracted (sowResponse) => void
+ *                                — called when AI extraction is applied;
+ *                                  receives the updated SoWResponse so the
+ *                                  parent can refresh its sowData state.
+ * currentContent     object|null — current sow.content, used by the
+ *                                  preview modal's side-by-side diff so
+ *                                  the author sees what they're about to
+ *                                  overwrite. Pass null on the cold-start
+ *                                  upload page where the SoW is empty.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { aiClient } from '../lib/ai';
 import { formatBytes } from '../lib/format';
+import ExtractionPreviewModal from './ExtractionPreviewModal';
+
+// File types the extraction pipeline can read. Other allowed attachment
+// types (.pptx, images) upload normally but the auto-fill checkbox stays
+// hidden because we have no extractor for them.
+const EXTRACTABLE_EXTS = new Set(['.pdf', '.docx', '.csv', '.xlsx']);
+
+function getExt(filename) {
+  if (!filename) return '';
+  const i = filename.lastIndexOf('.');
+  return i < 0 ? '' : filename.slice(i).toLowerCase();
+}
 
 const DOCUMENT_TYPE_LABELS = {
   'solution-architecture': 'Solution Architecture',
@@ -153,6 +182,8 @@ export default function AttachmentManager({
   showRequirements = false,
   authFetch,
   onUpload,
+  onContentExtracted = null,
+  currentContent = null,
 }) {
   const [attachments, setAttachments] = useState([]);
   const [requirements, setRequirements] = useState(null);
@@ -166,6 +197,18 @@ export default function AttachmentManager({
   const [pendingFile, setPendingFile] = useState(null);
   const [pendingDocType, setPendingDocType] = useState('other');
   const [pendingDescription, setPendingDescription] = useState('');
+  // AI auto-fill toggle is always visible when the staged file is
+  // parseable; default ON because the most common case is "I dropped this
+  // staffing plan, fill in my Team Structure".
+  const [autoFillEnabled, setAutoFillEnabled] = useState(true);
+  // Extraction state — null until the modal opens. We keep `extracting`
+  // separate from `uploading` so the staging card's spinner only spans
+  // the upload itself; the extraction call happens in the background and
+  // the modal carries its own loading state.
+  const [extracting, setExtracting] = useState(false);
+  const [extractionResult, setExtractionResult] = useState(null);
+  const [extractionApplying, setExtractionApplying] = useState(false);
+  const [extractionError, setExtractionError] = useState(null);
   const fileInputRef = useRef(null);
 
   // ── Load attachments & requirements ────────────────────────────────────
@@ -250,6 +293,9 @@ export default function AttachmentManager({
 
   const confirmUpload = async () => {
     if (!pendingFile || !authFetch) return;
+    const ext = getExt(pendingFile.name);
+    const wantAutoFill = autoFillEnabled && EXTRACTABLE_EXTS.has(ext);
+    let attachmentRow = null;
     try {
       setUploading(true);
       setError(null);
@@ -270,13 +316,36 @@ export default function AttachmentManager({
         throw new Error(err.detail || 'Upload failed');
       }
 
+      attachmentRow = await res.json().catch(() => null);
+
       cancelStaged();
       await load();
       if (onUpload) onUpload();
     } catch (err) {
       setError(err.message || 'Upload failed');
-    } finally {
       setUploading(false);
+      return;
+    }
+    setUploading(false);
+
+    // Extraction is best-effort: any failure here surfaces as a
+    // non-blocking message but the upload itself already succeeded.
+    if (wantAutoFill && attachmentRow?.id) {
+      setExtracting(true);
+      setExtractionError(null);
+      const result = await aiClient.extractFromDocument(authFetch, sowId, {
+        attachmentId: attachmentRow.id,
+      });
+      setExtracting(false);
+      if (result.ok && result.data && Object.keys(result.data.extracted || {}).length > 0) {
+        setExtractionResult(result.data);
+      } else if (!result.ok) {
+        setError(`Auto-fill unavailable: ${result.error.message}. File uploaded as attachment.`);
+      } else {
+        // ML returned 200 but extracted nothing useful. Tell the author
+        // so they don't sit waiting for a modal that's not coming.
+        setError('AI couldn’t extract structured fields from this document.');
+      }
     }
   };
 
@@ -330,6 +399,38 @@ export default function AttachmentManager({
     }
   };
 
+  // ── AI extraction modal handlers ───────────────────────────────────────
+
+  const handleApplyExtraction = async (selectedSections) => {
+    if (!extractionResult || !authFetch) return;
+    setExtractionApplying(true);
+    setExtractionError(null);
+    const result = await aiClient.applyExtraction(authFetch, sowId, {
+      sections: selectedSections,
+      expectedContentHash: extractionResult.content_hash,
+    });
+    setExtractionApplying(false);
+    if (!result.ok) {
+      // Hash-mismatch is the common case (the SoW changed mid-modal),
+      // so map the 409 to a friendly inline message instead of a toast.
+      if (result.error.status === 409) {
+        setExtractionError(
+          'The SoW changed since extraction. Close this and re-upload to try again.'
+        );
+      } else {
+        setExtractionError(result.error.message || 'Could not apply changes.');
+      }
+      return;
+    }
+    if (onContentExtracted) onContentExtracted(result.data);
+    setExtractionResult(null);
+  };
+
+  const handleCloseExtraction = () => {
+    setExtractionResult(null);
+    setExtractionError(null);
+  };
+
   // ── Delete ─────────────────────────────────────────────────────────────
 
   const handleDelete = async (attachmentId) => {
@@ -364,486 +465,545 @@ export default function AttachmentManager({
     : 0;
 
   return (
-    <div
-      style={{
-        border: '1px solid var(--color-border-default)',
-        borderRadius: '8px',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header */}
+    <>
       <div
         style={{
-          padding: '12px 16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          border: '1px solid var(--color-border-default)',
+          borderRadius: '8px',
+          overflow: 'hidden',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <strong style={{ fontSize: 'var(--font-size-sm)' }}>Attachments</strong>
-          <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}>
-            ({attachments.length} file{attachments.length !== 1 ? 's' : ''})
-          </span>
-        </div>
-        {showRequirements && reqsTotal > 0 && (
-          <Badge
-            label={`${reqsMet}/${reqsTotal} required`}
-            color={reqsMet === reqsTotal ? 'var(--color-success)' : 'var(--color-error)'}
-          />
-        )}
-      </div>
-
-      {error && (
-        <div
-          style={{
-            padding: '8px 16px',
-            backgroundColor: 'var(--color-error-bg, #fef2f2)',
-            color: 'var(--color-error)',
-            fontSize: 'var(--font-size-sm)',
-            borderBottom: '1px solid var(--color-border-default)',
-          }}
-        >
-          {error}
-          <button
-            onClick={() => setError(null)}
-            style={{
-              marginLeft: '12px',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--color-error)',
-              fontWeight: 'var(--font-weight-semibold)',
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Requirements checklist */}
-      {showRequirements && requirements && requirements.requirements.length > 0 && (
+        {/* Header */}
         <div
           style={{
             padding: '12px 16px',
-            borderBottom: '1px solid var(--color-border-default)',
-            // backgroundColor: 'var(--color-bg-secondary, #000000)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
           }}
         >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <strong style={{ fontSize: 'var(--font-size-sm)' }}>Attachments</strong>
+            <span style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-sm)' }}>
+              ({attachments.length} file{attachments.length !== 1 ? 's' : ''})
+            </span>
+          </div>
+          {showRequirements && reqsTotal > 0 && (
+            <Badge
+              label={`${reqsMet}/${reqsTotal} required`}
+              color={reqsMet === reqsTotal ? 'var(--color-success)' : 'var(--color-error)'}
+            />
+          )}
+        </div>
+
+        {error && (
           <div
             style={{
-              fontSize: 'var(--font-size-xs)',
-              fontWeight: 'var(--font-weight-semibold)',
-              color: 'var(--color-text-tertiary)',
-              marginBottom: '8px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
+              padding: '8px 16px',
+              backgroundColor: 'var(--color-error-bg, #fef2f2)',
+              color: 'var(--color-error)',
+              fontSize: 'var(--font-size-sm)',
+              borderBottom: '1px solid var(--color-border-default)',
             }}
           >
-            Document Requirements
+            {error}
+            <button
+              onClick={() => setError(null)}
+              style={{
+                marginLeft: '12px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--color-error)',
+                fontWeight: 'var(--font-weight-semibold)',
+              }}
+            >
+              Dismiss
+            </button>
           </div>
-          {requirements.requirements.map((req, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '4px 0',
-                fontSize: 'var(--font-size-sm)',
-              }}
-            >
-              {req.fulfilled ? (
-                <span
-                  style={{
-                    color: 'var(--color-success)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                  }}
-                >
-                  {'\u2713'}
-                </span>
-              ) : req.is_required ? (
-                <span
-                  style={{ color: 'var(--color-error)', fontWeight: 'var(--font-weight-semibold)' }}
-                >
-                  {'\u2717'}
-                </span>
-              ) : (
-                <span
-                  style={{
-                    color: 'var(--color-text-tertiary)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                  }}
-                >
-                  {'\u25CB'}
-                </span>
-              )}
-              <span>{DOCUMENT_TYPE_LABELS[req.document_type] || req.document_type}</span>
-              {req.is_required && (
-                <span
-                  style={{
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-error)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                  }}
-                >
-                  REQUIRED
-                </span>
-              )}
-              {req.description && (
-                <span
-                  style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-xs)' }}
-                >
-                  — {req.description}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+        )}
 
-      {/* Upload area */}
-      {!readOnly && (
-        <div
-          style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-default)' }}
-        >
-          {/* No file staged yet → show dropzone. Once a file is dropped or
-              chosen we swap in the staging card so the user can confirm what
-              kind of document it is before anything is sent. */}
-          {!pendingFile ? (
-            <>
-              <div
-                onDragEnter={handleDragIn}
-                onDragLeave={handleDragOut}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  border: `2px dashed ${dragActive ? 'var(--color-primary)' : 'var(--color-border-default)'}`,
-                  borderRadius: '8px',
-                  padding: '24px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  backgroundColor: dragActive ? 'var(--color-primary-bg, #eff6ff)' : 'transparent',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{ marginBottom: '4px', color: 'var(--color-text-secondary)' }}>
-                  <UploadIcon size={28} />
-                </div>
-                <div
-                  style={{
-                    color: 'var(--color-text-secondary)',
-                    fontSize: 'var(--font-size-sm)',
-                    fontWeight: 'var(--font-weight-medium)',
-                  }}
-                >
-                  Drag & drop a document here, or{' '}
-                  <span
-                    style={{
-                      color: 'var(--color-primary)',
-                      fontWeight: 'var(--font-weight-semibold)',
-                    }}
-                  >
-                    browse
-                  </span>
-                </div>
-                <div
-                  style={{
-                    color: 'var(--color-text-tertiary)',
-                    fontSize: 'var(--font-size-xs)',
-                    marginTop: '4px',
-                  }}
-                >
-                  You'll choose the document type before uploading. PDF, DOCX, XLSX, CSV, PPTX, PNG,
-                  JPG — max 25 MB
-                </div>
-              </div>
-            </>
-          ) : (
+        {/* Requirements checklist */}
+        {showRequirements && requirements && requirements.requirements.length > 0 && (
+          <div
+            style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid var(--color-border-default)',
+              // backgroundColor: 'var(--color-bg-secondary, #000000)',
+            }}
+          >
             <div
               style={{
-                border: '1px solid var(--color-border-default)',
-                borderRadius: '8px',
-                padding: '14px 16px',
-                backgroundColor: 'var(--color-bg-secondary)',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 'var(--font-weight-semibold)',
+                color: 'var(--color-text-tertiary)',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
               }}
             >
-              {/* File header */}
+              Document Requirements
+            </div>
+            {requirements.requirements.map((req, i) => (
               <div
+                key={i}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px',
-                  marginBottom: '12px',
-                }}
-              >
-                <FileIcon name={pendingFile.name} size={22} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontWeight: 'var(--font-weight-semibold)',
-                      fontSize: 'var(--font-size-sm)',
-                      color: 'var(--color-text-primary)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {pendingFile.name}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 'var(--font-size-xs)',
-                      color: 'var(--color-text-tertiary)',
-                      marginTop: '2px',
-                    }}
-                  >
-                    {formatBytes(pendingFile.size)} · ready to upload
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={cancelStaged}
-                  disabled={uploading}
-                  title="Discard this file"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: uploading ? 'not-allowed' : 'pointer',
-                    color: 'var(--color-text-tertiary)',
-                    fontSize: '20px',
-                    lineHeight: 1,
-                    padding: '4px 8px',
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Document type — required field */}
-              <div style={{ marginBottom: '10px' }}>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: 'var(--font-size-xs)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Document type
-                </label>
-                <select
-                  value={pendingDocType}
-                  onChange={(e) => setPendingDocType(e.target.value)}
-                  disabled={uploading}
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--color-border-default)',
-                    fontSize: 'var(--font-size-sm)',
-                    backgroundColor: 'var(--color-bg-primary)',
-                    color: 'var(--color-text-primary)',
-                  }}
-                >
-                  {Object.entries(DOCUMENT_TYPE_LABELS).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Description — optional */}
-              <div style={{ marginBottom: '12px' }}>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: 'var(--font-size-xs)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Description{' '}
-                  <span
-                    style={{
-                      color: 'var(--color-text-tertiary)',
-                      fontWeight: 'var(--font-weight-regular)',
-                      textTransform: 'none',
-                      letterSpacing: 0,
-                    }}
-                  >
-                    (optional)
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  value={pendingDescription}
-                  onChange={(e) => setPendingDescription(e.target.value)}
-                  disabled={uploading}
-                  placeholder="Short note about this document..."
-                  style={{
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--color-border-default)',
-                    fontSize: 'var(--font-size-sm)',
-                    backgroundColor: 'var(--color-bg-primary)',
-                    color: 'var(--color-text-primary)',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  onClick={cancelStaged}
-                  disabled={uploading}
-                  className="btn btn-secondary"
-                  style={{ padding: '6px 14px', fontSize: 'var(--font-size-sm)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmUpload}
-                  disabled={uploading}
-                  className="btn btn-primary"
-                  style={{ padding: '6px 14px', fontSize: 'var(--font-size-sm)' }}
-                >
-                  {uploading ? 'Uploading...' : 'Upload'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            onChange={handleFileSelect}
-            accept=".pdf,.docx,.xlsx,.csv,.pptx,.png,.jpg,.jpeg"
-            style={{ display: 'none' }}
-          />
-        </div>
-      )}
-
-      {/* Attachment list */}
-      {attachments.length === 0 ? (
-        <div
-          style={{
-            padding: '20px 16px',
-            textAlign: 'center',
-            color: 'var(--color-text-tertiary)',
-            fontSize: 'var(--font-size-sm)',
-          }}
-        >
-          No attachments yet
-        </div>
-      ) : (
-        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-          {attachments.map((att) => {
-            const typeColor = DOC_TYPE_COLOR[att.document_type] || '#6b7280';
-            return (
-              <div
-                key={att.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '10px 16px',
-                  borderBottom: '1px solid var(--color-border-default)',
+                  gap: '8px',
+                  padding: '4px 0',
                   fontSize: 'var(--font-size-sm)',
                 }}
               >
-                <FileIcon name={att.original_name} size={18} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
+                {req.fulfilled ? (
+                  <span
                     style={{
-                      fontWeight: 'var(--font-weight-medium)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      color: 'var(--color-success)',
+                      fontWeight: 'var(--font-weight-semibold)',
                     }}
                   >
-                    {att.original_name}
+                    {'\u2713'}
+                  </span>
+                ) : req.is_required ? (
+                  <span
+                    style={{
+                      color: 'var(--color-error)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                    }}
+                  >
+                    {'\u2717'}
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      color: 'var(--color-text-tertiary)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                    }}
+                  >
+                    {'\u25CB'}
+                  </span>
+                )}
+                <span>{DOCUMENT_TYPE_LABELS[req.document_type] || req.document_type}</span>
+                {req.is_required && (
+                  <span
+                    style={{
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--color-error)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                    }}
+                  >
+                    REQUIRED
+                  </span>
+                )}
+                {req.description && (
+                  <span
+                    style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-xs)' }}
+                  >
+                    — {req.description}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Upload area */}
+        {!readOnly && (
+          <div
+            style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-default)' }}
+          >
+            {/* No file staged yet → show dropzone. Once a file is dropped or
+              chosen we swap in the staging card so the user can confirm what
+              kind of document it is before anything is sent. */}
+            {!pendingFile ? (
+              <>
+                <div
+                  onDragEnter={handleDragIn}
+                  onDragLeave={handleDragOut}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    border: `2px dashed ${dragActive ? 'var(--color-primary)' : 'var(--color-border-default)'}`,
+                    borderRadius: '8px',
+                    padding: '24px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    backgroundColor: dragActive
+                      ? 'var(--color-primary-bg, #eff6ff)'
+                      : 'transparent',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{ marginBottom: '4px', color: 'var(--color-text-secondary)' }}>
+                    <UploadIcon size={28} />
                   </div>
                   <div
-                    style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '2px' }}
+                    style={{
+                      color: 'var(--color-text-secondary)',
+                      fontSize: 'var(--font-size-sm)',
+                      fontWeight: 'var(--font-weight-medium)',
+                    }}
                   >
-                    <Badge
-                      label={DOCUMENT_TYPE_LABELS[att.document_type] || att.document_type}
-                      color={typeColor}
-                    />
+                    Drag & drop a document here, or{' '}
+                    <span
+                      style={{
+                        color: 'var(--color-primary)',
+                        fontWeight: 'var(--font-weight-semibold)',
+                      }}
+                    >
+                      browse
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      color: 'var(--color-text-tertiary)',
+                      fontSize: 'var(--font-size-xs)',
+                      marginTop: '4px',
+                    }}
+                  >
+                    You'll choose the document type before uploading. PDF, DOCX, XLSX, CSV, PPTX,
+                    PNG, JPG — max 25 MB
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: '8px',
+                  padding: '14px 16px',
+                  backgroundColor: 'var(--color-bg-secondary)',
+                }}
+              >
+                {/* File header */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    marginBottom: '12px',
+                  }}
+                >
+                  <FileIcon name={pendingFile.name} size={22} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 'var(--font-weight-semibold)',
+                        fontSize: 'var(--font-size-sm)',
+                        color: 'var(--color-text-primary)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {pendingFile.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--color-text-tertiary)',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {formatBytes(pendingFile.size)} · ready to upload
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={cancelStaged}
+                    disabled={uploading}
+                    title="Discard this file"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: uploading ? 'not-allowed' : 'pointer',
+                      color: 'var(--color-text-tertiary)',
+                      fontSize: '20px',
+                      lineHeight: 1,
+                      padding: '4px 8px',
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Document type — required field */}
+                <div style={{ marginBottom: '10px' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      color: 'var(--color-text-secondary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    Document type
+                  </label>
+                  <select
+                    value={pendingDocType}
+                    onChange={(e) => setPendingDocType(e.target.value)}
+                    disabled={uploading}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border-default)',
+                      fontSize: 'var(--font-size-sm)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                      color: 'var(--color-text-primary)',
+                    }}
+                  >
+                    {Object.entries(DOCUMENT_TYPE_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Description — optional */}
+                <div style={{ marginBottom: '12px' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      color: 'var(--color-text-secondary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    Description{' '}
                     <span
                       style={{
                         color: 'var(--color-text-tertiary)',
-                        fontSize: 'var(--font-size-xs)',
+                        fontWeight: 'var(--font-weight-regular)',
+                        textTransform: 'none',
+                        letterSpacing: 0,
                       }}
                     >
-                      {formatBytes(att.file_size)}
+                      (optional)
                     </span>
-                    {att.stage_key && (
+                  </label>
+                  <input
+                    type="text"
+                    value={pendingDescription}
+                    onChange={(e) => setPendingDescription(e.target.value)}
+                    disabled={uploading}
+                    placeholder="Short note about this document..."
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--color-border-default)',
+                      fontSize: 'var(--font-size-sm)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                      color: 'var(--color-text-primary)',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                {/* AI auto-fill toggle — only shown for parseable file
+                  types because there's no extractor for images / PPTX. */}
+                {EXTRACTABLE_EXTS.has(getExt(pendingFile.name)) && (
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '8px',
+                      marginBottom: '12px',
+                      fontSize: 'var(--font-size-sm)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoFillEnabled}
+                      onChange={(e) => setAutoFillEnabled(e.target.checked)}
+                      disabled={uploading || extracting}
+                      style={{ marginTop: '2px' }}
+                    />
+                    <span>
+                      Use AI to fill SoW sections from this document
+                      <span
+                        style={{
+                          display: 'block',
+                          color: 'var(--color-text-tertiary)',
+                          fontSize: 'var(--font-size-xs)',
+                          marginTop: '2px',
+                        }}
+                      >
+                        You&apos;ll review the proposed changes before anything is applied.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={cancelStaged}
+                    disabled={uploading || extracting}
+                    className="btn btn-secondary"
+                    style={{ padding: '6px 14px', fontSize: 'var(--font-size-sm)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmUpload}
+                    disabled={uploading || extracting}
+                    className="btn btn-primary"
+                    style={{ padding: '6px 14px', fontSize: 'var(--font-size-sm)' }}
+                  >
+                    {uploading ? 'Uploading...' : extracting ? 'Reading document…' : 'Upload'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleFileSelect}
+              accept=".pdf,.docx,.xlsx,.csv,.pptx,.png,.jpg,.jpeg"
+              style={{ display: 'none' }}
+            />
+          </div>
+        )}
+
+        {/* Attachment list */}
+        {attachments.length === 0 ? (
+          <div
+            style={{
+              padding: '20px 16px',
+              textAlign: 'center',
+              color: 'var(--color-text-tertiary)',
+              fontSize: 'var(--font-size-sm)',
+            }}
+          >
+            No attachments yet
+          </div>
+        ) : (
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {attachments.map((att) => {
+              const typeColor = DOC_TYPE_COLOR[att.document_type] || '#6b7280';
+              return (
+                <div
+                  key={att.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '10px 16px',
+                    borderBottom: '1px solid var(--color-border-default)',
+                    fontSize: 'var(--font-size-sm)',
+                  }}
+                >
+                  <FileIcon name={att.original_name} size={18} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 'var(--font-weight-medium)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {att.original_name}
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '8px',
+                        alignItems: 'center',
+                        marginTop: '2px',
+                      }}
+                    >
+                      <Badge
+                        label={DOCUMENT_TYPE_LABELS[att.document_type] || att.document_type}
+                        color={typeColor}
+                      />
                       <span
                         style={{
                           color: 'var(--color-text-tertiary)',
                           fontSize: 'var(--font-size-xs)',
                         }}
                       >
-                        Stage: {att.stage_key}
+                        {formatBytes(att.file_size)}
                       </span>
-                    )}
+                      {att.stage_key && (
+                        <span
+                          style={{
+                            color: 'var(--color-text-tertiary)',
+                            fontSize: 'var(--font-size-xs)',
+                          }}
+                        >
+                          Stage: {att.stage_key}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                  <button
-                    onClick={() => handleDownload(att)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--color-border-default)',
-                      background: 'var(--color-bg-secondary)',
-                      cursor: 'pointer',
-                      fontSize: 'var(--font-size-xs)',
-                      fontWeight: 'var(--font-weight-medium)',
-                      color: 'var(--color-primary)',
-                    }}
-                    title="Download"
-                  >
-                    Download
-                  </button>
-                  {!readOnly && (
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                     <button
-                      onClick={() => handleDelete(att.id)}
+                      onClick={() => handleDownload(att)}
                       style={{
                         padding: '4px 10px',
                         borderRadius: '6px',
-                        border: '1px solid var(--color-error-border, #fecaca)',
-                        background: 'var(--color-error-bg, #fef2f2)',
+                        border: '1px solid var(--color-border-default)',
+                        background: 'var(--color-bg-secondary)',
                         cursor: 'pointer',
                         fontSize: 'var(--font-size-xs)',
                         fontWeight: 'var(--font-weight-medium)',
-                        color: 'var(--color-error)',
+                        color: 'var(--color-primary)',
                       }}
-                      title="Delete"
+                      title="Download"
                     >
-                      Remove
+                      Download
                     </button>
-                  )}
+                    {!readOnly && (
+                      <button
+                        onClick={() => handleDelete(att.id)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--color-error-border, #fecaca)',
+                          background: 'var(--color-error-bg, #fef2f2)',
+                          cursor: 'pointer',
+                          fontSize: 'var(--font-size-xs)',
+                          fontWeight: 'var(--font-weight-medium)',
+                          color: 'var(--color-error)',
+                        }}
+                        title="Delete"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <ExtractionPreviewModal
+        open={!!extractionResult}
+        extracted={extractionResult?.extracted}
+        currentContent={currentContent}
+        notes={extractionResult?.notes}
+        onApply={handleApplyExtraction}
+        onClose={handleCloseExtraction}
+        applying={extractionApplying}
+        error={extractionError}
+      />
+    </>
   );
 }

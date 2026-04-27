@@ -68,6 +68,7 @@ export default function InternalReview() {
   const [submitting, setSubmitting] = useState(false);
   const [advancing, setAdvancing] = useState(false);
   const [runningAI, setRunningAI] = useState(false);
+  const [regeneratingChecklist, setRegeneratingChecklist] = useState(false);
   const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions'
   const [toast, setToast] = useState(null);
 
@@ -254,6 +255,30 @@ export default function InternalReview() {
     } else {
       setAiError(result.error);
       showToast(result.error.message, 'error');
+    }
+  }
+
+  // ── Regenerate AI-suggested checklist (assignment-scoped) ────────────────
+  async function handleRegenerateChecklist() {
+    const aid = checklist?.assignment_id;
+    if (!aid) return;
+    setRegeneratingChecklist(true);
+    try {
+      const res = await authFetch(`/api/review/assignment/${aid}/checklist/regenerate`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const detail = typeof body.detail === 'string' ? body.detail : body.detail?.message;
+        throw new Error(detail || `Regenerate failed (${res.status})`);
+      }
+      // Reload via the existing fetch so legacy fields stay in sync.
+      await refresh();
+      showToast('Checklist regenerated');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRegeneratingChecklist(false);
     }
   }
 
@@ -569,6 +594,11 @@ export default function InternalReview() {
                       responses={responses}
                       onChange={setResponses}
                       readOnly={isMyReviewDone}
+                      mode={checklist.mode}
+                      generatedAt={checklist.generated_at}
+                      sowChanged={checklist.sow_changed}
+                      regenerating={regeneratingChecklist}
+                      onRegenerate={checklist.assignment_id ? handleRegenerateChecklist : undefined}
                     />
                   </div>
 
@@ -578,10 +608,11 @@ export default function InternalReview() {
                   )}
                   <AISuggestionsPanel
                     analysisResult={aiAnalysis}
-                    collapsed={true}
+                    collapsed={false}
                     showRunButton={true}
                     onRunAnalysis={handleRunAI}
                     loading={runningAI}
+                    autoRun
                   />
 
                   {/* Comments */}

@@ -73,7 +73,8 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
         # Fetch roles for this stage
         role_rows = await conn.fetch(
             """
-            SELECT role_key, is_required, esap_levels, required_if
+            SELECT role_key, is_required, esap_levels, required_if,
+                   checklist_mode, checklist_items, permission_tier
             FROM   workflow_template_stage_roles
             WHERE  stage_id = $1
             """,
@@ -84,12 +85,20 @@ async def build_workflow_snapshot(conn, template_id: int) -> dict:
             req_if = r["required_if"]
             if isinstance(req_if, str):
                 req_if = json.loads(req_if)
+            cl_items = r["checklist_items"]
+            if isinstance(cl_items, str):
+                cl_items = json.loads(cl_items)
+            if not isinstance(cl_items, list):
+                cl_items = []
             roles.append(
                 {
                     "role_key": r["role_key"],
                     "is_required": r["is_required"],
                     "esap_levels": list(r["esap_levels"]) if r["esap_levels"] else None,
                     "required_if": req_if if isinstance(req_if, dict) else None,
+                    "checklist_mode": r["checklist_mode"] or "ai",
+                    "checklist_items": cl_items,
+                    "permission_tier": r["permission_tier"] or "suggest",
                 }
             )
 
@@ -344,14 +353,18 @@ async def create_template(
                 await conn.execute(
                     """
                     INSERT INTO workflow_template_stage_roles
-                        (stage_id, role_key, is_required, esap_levels, required_if)
-                    VALUES ($1, $2, $3, $4, $5::jsonb)
+                        (stage_id, role_key, is_required, esap_levels, required_if,
+                         checklist_mode, checklist_items, permission_tier)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8)
                     """,
                     stage_id,
                     role.role_key,
                     role.is_required,
                     role.esap_levels,
                     json.dumps(role.required_if) if role.required_if else None,
+                    role.checklist_mode,
+                    json.dumps([item.model_dump() for item in role.checklist_items]),
+                    role.permission_tier,
                 )
 
         for t in wd.transitions:
@@ -468,14 +481,18 @@ async def update_template(
                 await conn.execute(
                     """
                     INSERT INTO workflow_template_stage_roles
-                        (stage_id, role_key, is_required, esap_levels, required_if)
-                    VALUES ($1, $2, $3, $4, $5::jsonb)
+                        (stage_id, role_key, is_required, esap_levels, required_if,
+                         checklist_mode, checklist_items, permission_tier)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8)
                     """,
                     stage_id,
                     role.role_key,
                     role.is_required,
                     role.esap_levels,
                     json.dumps(role.required_if) if role.required_if else None,
+                    role.checklist_mode,
+                    json.dumps([item.model_dump() for item in role.checklist_items]),
+                    role.permission_tier,
                 )
 
         for t in wd.transitions:

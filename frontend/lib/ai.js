@@ -124,6 +124,33 @@ export const aiClient = {
     return call(authFetch, `/api/ai/approval${qs ? `?${qs}` : ''}`, opts);
   },
 
+  // ── Document → SoW field extraction ────────────────────────────────────
+  // Two-step pipeline: first extract proposes structured values (no DB
+  // mutation), then apply writes the user-approved subset back. The
+  // `expected_content_hash` echoed back into apply guards against the
+  // draft auto-save changing content while the preview modal is open.
+  extractFromDocument(
+    authFetch,
+    sowId,
+    { attachmentId = null, targetSections = null, signal } = {}
+  ) {
+    const body = {};
+    if (attachmentId != null) body.attachment_id = attachmentId;
+    if (targetSections) body.target_sections = targetSections;
+    return call(authFetch, `/api/sow/${sowId}/extract-from-document`, {
+      method: 'POST',
+      body,
+      signal,
+    });
+  },
+  applyExtraction(authFetch, sowId, { sections, expectedContentHash, signal } = {}) {
+    return call(authFetch, `/api/sow/${sowId}/apply-extraction`, {
+      method: 'POST',
+      body: { sections, expected_content_hash: expectedContentHash },
+      signal,
+    });
+  },
+
   // ── KG ingest + finalize prose ─────────────────────────────────────────
   syncSow(authFetch, sowId, body, opts) {
     return call(authFetch, `/api/ai/sow/${sowId}/sync`, {

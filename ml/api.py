@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -169,6 +171,242 @@ def post_assist(req: AssistRequest):
     except Exception as e:
         logger.exception("assist error")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ── Reviewer checklist generation ────────────────────────────────────────────
+
+
+class ChecklistAssistRequest(BaseModel):
+    sow_id: int | str | None = None
+    sow_title: str | None = None
+    sow_content: (
+        str  # plain-text body produced by flatten_sow_content (Python) or flattenSowContent (JS)
+    )
+    role_key: str
+    role_display: str | None = None
+    seed_items: list[dict] = []
+
+
+class ChecklistAssistItem(BaseModel):
+    id: str
+    text: str
+
+
+class ChecklistAssistResponse(BaseModel):
+    items: list[ChecklistAssistItem]
+
+
+_CHECKLIST_SYSTEM = """\
+You are generating a focused review checklist for a Microsoft Statement of Work
+(SOW) reviewer. Each item must be a single yes/no question the reviewer can
+answer by reading the SOW. Items should be specific to the document and the
+reviewer's role — not generic policy language.
+
+Rules:
+* Generate 5 to 10 items. Fewer is better than padding.
+* Each item is one sentence, ideally under 25 words, phrased so checking it
+  off implies the SOW passes that check.
+* If "Author seeds" are provided, treat them as guidance: cover the same
+  intent, but you may rephrase or merge with related document-specific items.
+* Do NOT invent facts not present in the SOW content. Reference concrete
+  items (deliverables, risks, sections) when relevant.
+* Output strict JSON: {"items": [{"id": str, "text": str}]}
+  Use a short stable id like "ai-1", "ai-2", ...
+"""
+
+
+@app.post("/assist/checklist", response_model=ChecklistAssistResponse)
+def post_assist_checklist(req: ChecklistAssistRequest):
+    """Generate a per-role review checklist grounded in the SoW body.
+
+    Called by ``backend/routers/review.py`` when a reviewer opens an
+    assignment whose role is configured for AI-suggested mode. The first
+    call for an assignment writes through to ``reviewer_checklist_cache``
+    on the backend so subsequent reloads serve the same items.
+    """
+    from sow_kg.llm_client import llm_json
+
+    if not req.sow_content.strip():
+        raise HTTPException(status_code=400, detail="sow_content must not be empty")
+
+    role_label = req.role_display or req.role_key
+    seed_block = ""
+    if req.seed_items:
+        seed_lines = [
+            f"- {(s.get('text') or '').strip()}"
+            for s in req.seed_items
+            if (s.get("text") or "").strip()
+        ]
+        if seed_lines:
+            seed_block = "\n\nAuthor seeds:\n" + "\n".join(seed_lines)
+
+    user = (
+        f"Reviewer role: {role_label}\n"
+        f"SOW title: {req.sow_title or '(untitled)'}\n"
+        f"---\n"
+        f"SOW body:\n{req.sow_content[:12000]}"
+        f"{seed_block}"
+    )
+
+    raw = llm_json(
+        system=_CHECKLIST_SYSTEM,
+        user=user,
+        fallback={"items": []},
+    )
+    items_in = raw.get("items", []) if isinstance(raw, dict) else []
+    items_out: list[ChecklistAssistItem] = []
+    for idx, it in enumerate(items_in):
+        if not isinstance(it, dict):
+            continue
+        text = (it.get("text") or "").strip()
+        if not text:
+            continue
+        item_id = (it.get("id") or "").strip() or f"ai-{idx + 1}"
+        items_out.append(ChecklistAssistItem(id=item_id, text=text))
+        if len(items_out) >= 10:
+            break
+    return ChecklistAssistResponse(items=items_out)
+
+
+# ── SoW field extraction (document → structured sections) ───────────────────
+
+
+class ExtractFieldsRequest(BaseModel):
+    """Request payload for ``POST /extract/sow-fields``.
+
+    The backend (``backend/routers/sow_extraction.py``) handles file
+    parsing and ships plain text + the section schemas it owns. The ML
+    service is stateless here — it does not see the original file, only
+    the extracted text and the schemas.
+    """
+
+    document_text: str
+    methodology: str | None = None
+    target_sections: list[str]
+    section_schemas: dict[str, dict[str, Any]]
+    sow_title: str | None = None
+
+
+class ExtractedSection(BaseModel):
+    """One section's extraction result.
+
+    ``value`` is ``None`` when the LLM had no confidence to extract that
+    section — the modal renders ``rationale`` in that case so the author
+    knows *why* it stayed blank.
+    """
+
+    value: Any | None = None
+    confidence: float = 0.0
+    rationale: str | None = None
+
+
+class ExtractFieldsResponse(BaseModel):
+    extracted: dict[str, ExtractedSection]
+    notes: str = ""
+    model_version: str = ""
+
+
+_EXTRACT_SYSTEM = """\
+You are extracting structured Statement of Work (SOW) data from a source
+document (e.g., proposal, deal sheet, staffing plan, existing SOW).
+
+For each requested section, return a JSON object that conforms to the
+section's schema. Schemas use these type markers:
+  "string"  -> a string
+  "number"  -> a number
+  [...]     -> array of objects matching the inner shape
+  {...}     -> object with the named keys
+
+Rules:
+* Only extract values supported by text in the document.
+* If you cannot confidently extract a section, return value=null with a
+  one-sentence rationale explaining what was missing.
+* Do NOT invent project names, deliverables, dates, prices, or people.
+* Confidence is your honest estimate (0.0 = wild guess, 1.0 = explicitly
+  stated). Use 0.0 when value is null.
+* Keep extracted text faithful to the source — preserve numbers, names,
+  and dates verbatim.
+* Output a single JSON object with this shape:
+  {
+    "extracted": {
+      "<sectionKey>": {
+        "value": <schema-conforming-or-null>,
+        "confidence": <0.0-1.0>,
+        "rationale": "<short-string-or-null>"
+      },
+      ...
+    },
+    "notes": "<1-2 sentences summarizing what was extracted>"
+  }
+"""
+
+
+def _build_extract_user_prompt(req: ExtractFieldsRequest) -> str:
+    parts: list[str] = []
+    if req.sow_title:
+        parts.append(f"SOW title: {req.sow_title}")
+    if req.methodology:
+        parts.append(f"Methodology: {req.methodology}")
+    parts.append("Sections to extract (each with its schema):")
+    for key in req.target_sections:
+        sch = req.section_schemas.get(key)
+        if not sch:
+            continue
+        description = sch.get("description", "")
+        shape = json.dumps(sch.get("schema"), indent=2)
+        parts.append(f"\n## {key}\n{description}\nSchema:\n{shape}")
+    parts.append(f"\n---\nDocument text (truncated to 12k chars):\n{req.document_text[:12000]}")
+    return "\n".join(parts)
+
+
+@app.post("/extract/sow-fields", response_model=ExtractFieldsResponse)
+def post_extract_sow_fields(req: ExtractFieldsRequest):
+    """Extract SoW section content from a parsed document.
+
+    Called by ``backend/routers/sow_extraction.py`` after the backend has
+    extracted plain text from the source file. Returns one entry per
+    requested section, with ``value=null`` when extraction was not
+    confident — never guesses.
+    """
+    from sow_kg.llm_client import llm_json
+
+    if not req.document_text.strip():
+        raise HTTPException(status_code=400, detail="document_text must not be empty")
+    if not req.target_sections:
+        raise HTTPException(status_code=400, detail="target_sections must not be empty")
+
+    raw = llm_json(
+        system=_EXTRACT_SYSTEM,
+        user=_build_extract_user_prompt(req),
+        fallback={
+            "extracted": {},
+            "notes": "AI extraction failed; no fields populated.",
+        },
+    )
+
+    raw_extracted = raw.get("extracted", {}) if isinstance(raw, dict) else {}
+    extracted: dict[str, ExtractedSection] = {}
+    for key in req.target_sections:
+        item = raw_extracted.get(key) or {}
+        if not isinstance(item, dict):
+            item = {}
+        try:
+            confidence = float(item.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+        extracted[key] = ExtractedSection(
+            value=item.get("value"),
+            confidence=confidence if item.get("value") is not None else 0.0,
+            rationale=(item.get("rationale") or None),
+        )
+
+    notes = str(raw.get("notes", "")) if isinstance(raw, dict) else ""
+    return ExtractFieldsResponse(
+        extracted=extracted,
+        notes=notes,
+        model_version=os.getenv("AZURE_OPENAI_DEPLOYMENT", "Kimi-K2.5"),
+    )
 
 
 @app.get("/sows")

@@ -10,15 +10,47 @@
  * responses   [{id, checked, notes}]   — current checked/notes state
  * onChange    (responses) => void      — called on any change
  * readOnly    boolean                  — disable all inputs (for completed reviews)
+ * mode        "ai" | "manual" | "legacy" — source of items, drives the badge
+ * generatedAt ISO string — when an AI list was generated (header timestamp)
+ * sowChanged  boolean — SoW edited since list was cached (offer regen)
+ * regenerating boolean — show spinner on the Regenerate button
+ * onRegenerate () => void — fires when reviewer clicks Regenerate
  */
 
 import { useState } from 'react';
+
+const MODE_BADGES = {
+  ai: { label: 'AI-suggested', color: 'var(--color-accent-purple, #7c3aed)' },
+  manual: { label: 'From workflow', color: 'var(--color-accent-blue, #2563eb)' },
+  legacy: { label: 'Default', color: 'var(--color-text-tertiary)' },
+};
+
+function formatGeneratedAt(iso) {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return null;
+  }
+}
 
 export default function ReviewChecklist({
   items = [],
   responses = [],
   onChange,
   readOnly = false,
+  mode = 'legacy',
+  generatedAt = null,
+  sowChanged = false,
+  regenerating = false,
+  onRegenerate,
 }) {
   const [expandedNotes, setExpandedNotes] = useState({});
   const [expandedHelp, setExpandedHelp] = useState({});
@@ -44,8 +76,75 @@ export default function ReviewChecklist({
   const requiredCount = items.filter((i) => i.required).length;
   const checkedRequired = items.filter((i) => i.required && getResponse(i.id).checked).length;
 
+  const badge = MODE_BADGES[mode] || MODE_BADGES.legacy;
+  const generatedLabel = formatGeneratedAt(generatedAt);
+  const showRegenerate = mode === 'ai' && typeof onRegenerate === 'function' && !readOnly;
+
   return (
     <div>
+      {/* Source / regen header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--spacing-xs)',
+          marginBottom: 'var(--spacing-sm)',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '11px',
+            fontWeight: 'var(--font-weight-semibold)',
+            color: badge.color,
+            padding: '2px 8px',
+            borderRadius: 'var(--radius-full)',
+            border: `1px solid ${badge.color}`,
+            backgroundColor: `${badge.color}11`,
+          }}
+        >
+          {badge.label}
+        </span>
+        {generatedLabel && (
+          <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>
+            Generated {generatedLabel}
+          </span>
+        )}
+        {sowChanged && (
+          <span
+            style={{
+              fontSize: '11px',
+              color: 'var(--color-warning, #f59e0b)',
+            }}
+            title="The SoW has been edited since this checklist was generated."
+          >
+            · SoW updated
+          </span>
+        )}
+        {showRegenerate && (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            disabled={regenerating}
+            style={{
+              marginLeft: 'auto',
+              background: 'none',
+              border: '1px solid var(--color-border-default)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '2px 8px',
+              cursor: regenerating ? 'default' : 'pointer',
+              fontSize: '11px',
+              color: regenerating
+                ? 'var(--color-text-tertiary)'
+                : 'var(--color-accent-blue, #2563eb)',
+            }}
+            title="Generate a fresh checklist from the current SoW content"
+          >
+            {regenerating ? 'Regenerating…' : '↻ Regenerate'}
+          </button>
+        )}
+      </div>
+
       {/* Progress bar */}
       {requiredCount > 0 && (
         <div style={{ marginBottom: 'var(--spacing-md)' }}>

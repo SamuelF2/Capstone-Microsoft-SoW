@@ -12,7 +12,7 @@ Organised by domain:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -372,7 +372,13 @@ class ChecklistItemModel(BaseModel):
 
 
 class ReviewChecklistResponse(BaseModel):
-    """Full checklist for a reviewer."""
+    """Full checklist for a reviewer.
+
+    ``mode`` indicates the source of items: ``"ai"`` when generated from
+    SoW context, ``"manual"`` when read from the workflow author's curated
+    list, or ``"legacy"`` when neither was available and the hardcoded
+    fallback was used.
+    """
 
     reviewer_role: str
     display_name: str
@@ -380,6 +386,12 @@ class ReviewChecklistResponse(BaseModel):
     items: list[ChecklistItemModel]
     saved_responses: list[dict[str, Any]] | None = None
     comments: str | None = None
+    mode: Literal["ai", "manual", "legacy"] = "legacy"
+    sow_changed: bool = False
+    generated_at: datetime | None = None
+    # Optional — set on legacy SoW-scoped fetches so the frontend can call
+    # the assignment-scoped regenerate endpoint without a second roundtrip.
+    assignment_id: int | None = None
 
 
 class ReviewProgressPayload(BaseModel):
@@ -529,6 +541,13 @@ class DocumentGenerationResponse(BaseModel):
 # ── Workflow Templates ───────────────────────────────────────────────────────
 
 
+class ChecklistItem(BaseModel):
+    """One author-authored checklist row (manual list, or AI seeds)."""
+
+    id: str
+    text: str
+
+
 class WorkflowStageRoleConfig(BaseModel):
     """A reviewer role required at a workflow stage.
 
@@ -538,12 +557,23 @@ class WorkflowStageRoleConfig(BaseModel):
     Workflow's Shared Services stage to gate sub-roles by selected service
     group. See ``services.workflow_engine.evaluate_skip_condition`` for the
     supported operator schema.
+
+    ``checklist_mode`` selects between AI-generated review items
+    (``"ai"``, default) and an author-authored manual list (``"manual"``).
+    In AI mode, ``checklist_items`` are seeds nudging the generator;
+    in manual mode, they are the literal items every reviewer sees.
     """
 
     role_key: str
     is_required: bool = True
     esap_levels: list[str] | None = None  # None = all levels
     required_if: dict[str, Any] | None = None
+    checklist_mode: Literal["ai", "manual"] = "ai"
+    checklist_items: list[ChecklistItem] = []
+    # ``permission_tier`` controls what reviewers playing this role may do
+    # in the SoW viewer. ``suggest`` allows comments + content edit
+    # suggestions, ``comment`` allows comments only, ``view`` is read-only.
+    permission_tier: Literal["view", "comment", "suggest"] = "suggest"
 
 
 class WorkflowStageConfig(BaseModel):
@@ -850,3 +880,96 @@ class AuditEntry(BaseModel):
     description: str
     metadata: dict | None = None
     timestamp: datetime
+
+
+# ── Reviewer Checklist (per-assignment cache) ────────────────────────────────
+
+
+class GeneratedChecklistItem(BaseModel):
+    """A single item served to a reviewer. ``id`` is stable so the
+    reviewer's checked/notes state survives merges."""
+
+    id: str
+    text: str
+
+
+class ReviewerChecklist(BaseModel):
+    """Per-assignment checklist response. Source is either the author's
+    manual list or AI generation; the cache row freezes whichever was
+    served so the reviewer sees a stable list across reloads."""
+
+    assignment_id: int
+    role_key: str
+    mode: Literal["ai", "manual"]
+    items: list[GeneratedChecklistItem]
+    generated_at: datetime | None = None
+    sow_content_hash: str | None = None
+    sow_changed: bool = False  # current SoW hash differs from cached hash
+
+
+# ── SoW Comments (anchored highlights with threaded replies) ─────────────────
+
+
+class SowCommentMessage(BaseModel):
+    id: int
+    thread_id: int
+    author_id: int
+    author_name: str | None = None
+    author_email: str | None = None
+    body: str
+    created_at: datetime
+
+
+class SowCommentThread(BaseModel):
+    id: int
+    sow_id: int
+    author_id: int
+    author_name: str | None = None
+    author_email: str | None = None
+    section_key: str
+    offset_start: int
+    offset_end: int
+    anchor_text: str
+    is_stale: bool = False
+    resolved_at: datetime | None = None
+    resolved_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    messages: list[SowCommentMessage] = []
+    # Suggestion-mode fields. ``kind`` is ``"suggestion"`` when the thread
+    # proposes an edit, otherwise ``"comment"``. Suggestions carry a
+    # ``replacement_text`` and accumulate apply/reject state separately
+    # from ``resolved_at`` (a thread can be resolved without ever applying).
+    kind: Literal["comment", "suggestion"] = "comment"
+    replacement_text: str | None = None
+    applied_at: datetime | None = None
+    applied_by: int | None = None
+    rejected_at: datetime | None = None
+    rejected_by: int | None = None
+    can_apply: bool = False  # current viewer's tier allows accept/reject
+    apply_blocked_reason: str | None = (
+        None  # populated when can_apply=False on a still-open suggestion
+    )
+
+
+class SowCommentThreadCreate(BaseModel):
+    section_key: str
+    offset_start: int
+    offset_end: int
+    anchor_text: str = Field(..., max_length=500)
+    body: str = Field(..., min_length=1, max_length=4000)
+    kind: Literal["comment", "suggestion"] = "comment"
+    replacement_text: str | None = Field(default=None, max_length=4000)
+
+
+class SowCommentReplyCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
+class SowCommentsListResponse(BaseModel):
+    """Wraps the threads list with the caller's effective permission tier
+    so the SoW viewer can render the right composer + accept/reject affordances
+    in one fetch."""
+
+    tier: Literal["view", "comment", "suggest"]
+    threads: list[SowCommentThread]
