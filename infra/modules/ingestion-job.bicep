@@ -127,6 +127,18 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
             memory: '2Gi'
           }
           env: [
+            // ml/sow_kg/db.py reads NEO4J_URI / NEO4J_USER at module-import time
+            // (not from the CLI --uri flag — main_new.py's Phase 0 schema-init and
+            // enrich.py both call get_driver() which reads these env vars).
+            // Without them, both fall back to localhost:7687 and the Job fails.
+            {
+              name: 'NEO4J_URI'
+              value: 'bolt://${neo4jName}:7687'
+            }
+            {
+              name: 'NEO4J_USER'
+              value: 'neo4j'
+            }
             {
               name: 'NEO4J_PASSWORD'
               secretRef: 'neo4j-password'
