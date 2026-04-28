@@ -52,9 +52,7 @@ async def list_roles(current_user: CurrentUser) -> list[RoleDefinition]:
 @router.get("/{role_key}", response_model=RoleDefinition, summary="Get a single role definition")
 async def get_role(role_key: str, current_user: CurrentUser) -> RoleDefinition:
     async with database.pg_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM role_definitions WHERE role_key = $1", role_key
-        )
+        row = await conn.fetchrow("SELECT * FROM role_definitions WHERE role_key = $1", role_key)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     d = dict(row)

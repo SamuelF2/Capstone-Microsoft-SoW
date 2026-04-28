@@ -8,18 +8,18 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 // ── Available permissions ─────────────────────────────────────────────────────
 
 const ALL_PERMISSIONS = [
-  { key: 'sow.read',        label: 'SoW: Read',        group: 'SoW' },
-  { key: 'sow.create',      label: 'SoW: Create',      group: 'SoW' },
-  { key: 'sow.write',       label: 'SoW: Edit',        group: 'SoW' },
-  { key: 'sow.delete',      label: 'SoW: Delete',      group: 'SoW' },
-  { key: 'review.read',     label: 'Review: Read',     group: 'Review' },
-  { key: 'review.submit',   label: 'Review: Submit',   group: 'Review' },
-  { key: 'review.approve',  label: 'Review: Approve',  group: 'Review' },
-  { key: 'workflow.read',   label: 'Workflow: Read',   group: 'Workflow' },
-  { key: 'workflow.edit',   label: 'Workflow: Edit',   group: 'Workflow' },
-  { key: 'users.read',      label: 'Users: Read',      group: 'Admin' },
-  { key: 'roles.manage',    label: 'Roles: Manage',    group: 'Admin' },
-  { key: '*',               label: 'Full Access (*)',   group: 'Admin' },
+  { key: 'sow.read', label: 'SoW: Read', group: 'SoW' },
+  { key: 'sow.create', label: 'SoW: Create', group: 'SoW' },
+  { key: 'sow.write', label: 'SoW: Edit', group: 'SoW' },
+  { key: 'sow.delete', label: 'SoW: Delete', group: 'SoW' },
+  { key: 'review.read', label: 'Review: Read', group: 'Review' },
+  { key: 'review.submit', label: 'Review: Submit', group: 'Review' },
+  { key: 'review.approve', label: 'Review: Approve', group: 'Review' },
+  { key: 'workflow.read', label: 'Workflow: Read', group: 'Workflow' },
+  { key: 'workflow.edit', label: 'Workflow: Edit', group: 'Workflow' },
+  { key: 'users.read', label: 'Users: Read', group: 'Admin' },
+  { key: 'roles.manage', label: 'Roles: Manage', group: 'Admin' },
+  { key: '*', label: 'Full Access (*)', group: 'Admin' },
 ];
 
 const PERMISSION_GROUPS = [...new Set(ALL_PERMISSIONS.map((p) => p.group))];
@@ -28,10 +28,10 @@ const PERMISSION_GROUPS = [...new Set(ALL_PERMISSIONS.map((p) => p.group))];
 
 function PermissionBadge({ permission }) {
   const colors = {
-    'SoW':      { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa',  border: 'rgba(59,130,246,0.3)'  },
-    'Review':   { bg: 'rgba(139,92,246,0.12)', color: '#c084fc',  border: 'rgba(139,92,246,0.3)'  },
-    'Workflow': { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24',  border: 'rgba(251,191,36,0.3)'  },
-    'Admin':    { bg: 'rgba(239,68,68,0.12)',  color: '#f87171',  border: 'rgba(239,68,68,0.3)'   },
+    SoW: { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa', border: 'rgba(59,130,246,0.3)' },
+    Review: { bg: 'rgba(139,92,246,0.12)', color: '#c084fc', border: 'rgba(139,92,246,0.3)' },
+    Workflow: { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: 'rgba(251,191,36,0.3)' },
+    Admin: { bg: 'rgba(239,68,68,0.12)', color: '#f87171', border: 'rgba(239,68,68,0.3)' },
   };
   const perm = ALL_PERMISSIONS.find((p) => p.key === permission);
   const group = perm?.group || 'SoW';
@@ -95,7 +95,14 @@ function RoleCard({ role, isAdmin, onEdit, onDelete }) {
             }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--spacing-sm)',
+                  flexWrap: 'wrap',
+                }}
+              >
                 <h3 className="text-lg font-semibold" style={{ margin: 0 }}>
                   {role.display_name}
                 </h3>
@@ -155,7 +162,14 @@ function RoleCard({ role, isAdmin, onEdit, onDelete }) {
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--spacing-sm)',
+              flexWrap: 'wrap',
+            }}
+          >
             {(expanded ? role.permissions : role.permissions.slice(0, 4)).map((p) => (
               <PermissionBadge key={p} permission={p} />
             ))}
@@ -163,10 +177,12 @@ function RoleCard({ role, isAdmin, onEdit, onDelete }) {
               <button
                 onClick={() => setExpanded(true)}
                 style={{
-                  background: 'none', border: 'none',
+                  background: 'none',
+                  border: 'none',
                   color: 'var(--color-accent-blue)',
                   fontSize: 'var(--font-size-xs)',
-                  cursor: 'pointer', padding: '2px 4px',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
                 }}
               >
                 +{role.permissions.length - 4} more
@@ -176,10 +192,12 @@ function RoleCard({ role, isAdmin, onEdit, onDelete }) {
               <button
                 onClick={() => setExpanded(false)}
                 style={{
-                  background: 'none', border: 'none',
+                  background: 'none',
+                  border: 'none',
                   color: 'var(--color-text-tertiary)',
                   fontSize: 'var(--font-size-xs)',
-                  cursor: 'pointer', padding: '2px 4px',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
                 }}
               >
                 Show less
@@ -216,8 +234,14 @@ function RoleModal({ role, onClose, onSave }) {
   };
 
   const handleSave = async () => {
-    if (!formData.display_name.trim()) { setError('Display name is required'); return; }
-    if (!isEditing && !formData.role_key.trim()) { setError('Role key is required'); return; }
+    if (!formData.display_name.trim()) {
+      setError('Display name is required');
+      return;
+    }
+    if (!isEditing && !formData.role_key.trim()) {
+      setError('Role key is required');
+      return;
+    }
     if (!isEditing && !/^[a-z0-9-]+$/.test(formData.role_key)) {
       setError('Role key must be lowercase letters, numbers, and hyphens only');
       return;
@@ -237,9 +261,13 @@ function RoleModal({ role, onClose, onSave }) {
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
         backgroundColor: 'rgba(0,0,0,0.7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         padding: 'var(--spacing-xl)',
       }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -247,28 +275,41 @@ function RoleModal({ role, onClose, onSave }) {
       <div
         className="card"
         style={{
-          width: '100%', maxWidth: '580px',
-          maxHeight: '85vh', overflowY: 'auto',
+          width: '100%',
+          maxWidth: '580px',
+          maxHeight: '85vh',
+          overflowY: 'auto',
           padding: 'var(--spacing-2xl)',
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-xl)' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 'var(--spacing-xl)',
+          }}
+        >
           <h2 className="text-2xl font-bold" style={{ margin: 0 }}>
             {isEditing ? `Edit: ${role.display_name}` : 'Create New Role'}
           </h2>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>
+            ✕
+          </button>
         </div>
 
         {error && (
-          <div style={{
-            marginBottom: 'var(--spacing-lg)',
-            padding: 'var(--spacing-md)',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'rgba(239,68,68,0.08)',
-            border: '1px solid rgba(239,68,68,0.3)',
-            color: 'var(--color-error)',
-            fontSize: 'var(--font-size-sm)',
-          }}>
+          <div
+            style={{
+              marginBottom: 'var(--spacing-lg)',
+              padding: 'var(--spacing-md)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              color: 'var(--color-error)',
+              fontSize: 'var(--font-size-sm)',
+            }}
+          >
             {error}
           </div>
         )}
@@ -306,17 +347,19 @@ function RoleModal({ role, onClose, onSave }) {
         )}
 
         {isEditing && role.is_system && (
-          <div style={{
-            marginBottom: 'var(--spacing-lg)',
-            padding: 'var(--spacing-md)',
-            borderRadius: 'var(--radius-md)',
-            backgroundColor: 'rgba(59,130,246,0.08)',
-            border: '1px solid rgba(59,130,246,0.2)',
-            fontSize: 'var(--font-size-sm)',
-            color: 'var(--color-text-secondary)',
-          }}>
-            This is a system role. You can edit its display name, description, and permissions,
-            but it cannot be deleted.
+          <div
+            style={{
+              marginBottom: 'var(--spacing-lg)',
+              padding: 'var(--spacing-md)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'rgba(59,130,246,0.08)',
+              border: '1px solid rgba(59,130,246,0.2)',
+              fontSize: 'var(--font-size-sm)',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            This is a system role. You can edit its display name, description, and permissions, but
+            it cannot be deleted.
           </div>
         )}
 
@@ -356,7 +399,9 @@ function RoleModal({ role, onClose, onSave }) {
                     <label
                       key={perm.key}
                       style={{
-                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
                         cursor: 'pointer',
                         padding: '4px 10px',
                         borderRadius: 'var(--radius-full)',
@@ -375,7 +420,8 @@ function RoleModal({ role, onClose, onSave }) {
                         onChange={() => togglePermission(perm.key)}
                         style={{ display: 'none' }}
                       />
-                      {checked ? '✓ ' : ''}{perm.label}
+                      {checked ? '✓ ' : ''}
+                      {perm.label}
                     </label>
                   );
                 })}
@@ -384,7 +430,14 @@ function RoleModal({ role, onClose, onSave }) {
           ))}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--spacing-md)', marginTop: 'var(--spacing-xl)' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 'var(--spacing-md)',
+            marginTop: 'var(--spacing-xl)',
+          }}
+        >
           <button className="btn btn-secondary" onClick={onClose} disabled={saving}>
             Cancel
           </button>
@@ -402,14 +455,21 @@ function DeleteConfirmModal({ role, onClose, onConfirm }) {
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
         backgroundColor: 'rgba(0,0,0,0.7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         padding: 'var(--spacing-xl)',
       }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="card" style={{ width: '100%', maxWidth: '420px', padding: 'var(--spacing-2xl)' }}>
+      <div
+        className="card"
+        style={{ width: '100%', maxWidth: '420px', padding: 'var(--spacing-2xl)' }}
+      >
         <h2 className="text-xl font-bold mb-md">Delete Role</h2>
         <p className="text-secondary mb-xl">
           Are you sure you want to delete <strong>{role.display_name}</strong> ({role.role_key})?
@@ -460,11 +520,19 @@ export default function RolesPage() {
         if (!res.ok) throw new Error(`Failed to load roles (${res.status})`);
         return res.json();
       })
-      .then((data) => { setRoles(data); setLoading(false); })
-      .catch((err) => { setFetchError(err.message); setLoading(false); });
+      .then((data) => {
+        setRoles(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setFetchError(err.message);
+        setLoading(false);
+      });
   }, [user, authFetch]);
 
-  useEffect(() => { loadRoles(); }, [loadRoles]);
+  useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
 
   const showSuccess = (msg) => {
     setSuccessMsg(msg);
@@ -486,7 +554,9 @@ export default function RolesPage() {
       throw new Error(data?.detail || `Error ${res.status}`);
     }
     loadRoles();
-    showSuccess(isEditing ? `"${formData.display_name}" updated` : `"${formData.display_name}" created`);
+    showSuccess(
+      isEditing ? `"${formData.display_name}" updated` : `"${formData.display_name}" created`
+    );
   };
 
   const handleDelete = async (role) => {
@@ -513,12 +583,19 @@ export default function RolesPage() {
 
   if (!isAdmin) {
     return (
-      <div style={{
-        minHeight: 'calc(100vh - 80px)',
-        backgroundColor: 'var(--color-bg-primary)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <div className="card text-center" style={{ padding: 'var(--spacing-3xl)', maxWidth: '400px' }}>
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          className="card text-center"
+          style={{ padding: 'var(--spacing-3xl)', maxWidth: '400px' }}
+        >
           <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>🔒</div>
           <h3 className="text-xl font-semibold mb-sm">Access Restricted</h3>
           <p className="text-secondary mb-xl">Only system admins can manage roles.</p>
@@ -532,7 +609,9 @@ export default function RolesPage() {
 
   return (
     <>
-      <Head><title>Roles Management – Cocoon</title></Head>
+      <Head>
+        <title>Roles Management – Cocoon</title>
+      </Head>
 
       {editingRole !== null && (
         <RoleModal
@@ -549,21 +628,27 @@ export default function RolesPage() {
         />
       )}
 
-      <div style={{
-        minHeight: 'calc(100vh - 80px)',
-        backgroundColor: 'var(--color-bg-primary)',
-        padding: 'var(--spacing-2xl) var(--spacing-xl)',
-      }}>
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          padding: 'var(--spacing-2xl) var(--spacing-xl)',
+        }}
+      >
         <div style={{ maxWidth: 'var(--container-lg)', margin: '0 auto' }}>
-
-          <div style={{
-            display: 'flex', justifyContent: 'space-between',
-            alignItems: 'flex-start', marginBottom: 'var(--spacing-2xl)',
-          }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              marginBottom: 'var(--spacing-2xl)',
+            }}
+          >
             <div>
               <h1 className="text-4xl font-bold mb-sm">Roles Management</h1>
               <p className="text-secondary">
-                Configure role definitions and permissions. System roles can be edited but not deleted.
+                Configure role definitions and permissions. System roles can be edited but not
+                deleted.
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => setEditingRole(false)}>
@@ -572,32 +657,42 @@ export default function RolesPage() {
           </div>
 
           {successMsg && (
-            <div style={{
-              marginBottom: 'var(--spacing-lg)',
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'rgba(74,222,128,0.08)',
-              border: '1px solid rgba(74,222,128,0.3)',
-              color: 'var(--color-success)',
-              fontSize: 'var(--font-size-sm)',
-            }}>
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(74,222,128,0.08)',
+                border: '1px solid rgba(74,222,128,0.3)',
+                color: 'var(--color-success)',
+                fontSize: 'var(--font-size-sm)',
+              }}
+            >
               ✓ {successMsg}
             </div>
           )}
 
           {fetchError && (
-            <div style={{
-              marginBottom: 'var(--spacing-lg)',
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'rgba(220,38,38,0.08)',
-              border: '1px solid rgba(220,38,38,0.3)',
-              color: 'var(--color-error)',
-              fontSize: 'var(--font-size-sm)',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
+            <div
+              style={{
+                marginBottom: 'var(--spacing-lg)',
+                padding: 'var(--spacing-md) var(--spacing-lg)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'rgba(220,38,38,0.08)',
+                border: '1px solid rgba(220,38,38,0.3)',
+                color: 'var(--color-error)',
+                fontSize: 'var(--font-size-sm)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <span>{fetchError}</span>
-              <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-error)' }} onClick={loadRoles}>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ color: 'var(--color-error)' }}
+                onClick={loadRoles}
+              >
                 Retry
               </button>
             </div>
@@ -619,22 +714,39 @@ export default function RolesPage() {
           </p>
 
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 'var(--spacing-3xl)', color: 'var(--color-text-secondary)' }}>
+            <div
+              style={{
+                textAlign: 'center',
+                padding: 'var(--spacing-3xl)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
               Loading roles…
             </div>
           ) : (
             <>
               {systemRoles.length > 0 && (
                 <section style={{ marginBottom: 'var(--spacing-2xl)' }}>
-                  <h2 className="text-xl font-semibold mb-lg" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                  <h2
+                    className="text-xl font-semibold mb-lg"
+                    style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+                  >
                     <span style={{ color: 'var(--color-accent-blue)' }}>●</span> System Roles
                     <span className="text-sm text-tertiary" style={{ fontWeight: 'normal' }}>
                       — built-in, editable but not deletable
                     </span>
                   </h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+                  <div
+                    style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}
+                  >
                     {systemRoles.map((role) => (
-                      <RoleCard key={role.role_key} role={role} isAdmin={isAdmin} onEdit={setEditingRole} onDelete={setDeletingRole} />
+                      <RoleCard
+                        key={role.role_key}
+                        role={role}
+                        isAdmin={isAdmin}
+                        onEdit={setEditingRole}
+                        onDelete={setDeletingRole}
+                      />
                     ))}
                   </div>
                 </section>
@@ -642,12 +754,24 @@ export default function RolesPage() {
 
               {customRoles.length > 0 && (
                 <section style={{ marginBottom: 'var(--spacing-2xl)' }}>
-                  <h2 className="text-xl font-semibold mb-lg" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
-                    <span style={{ color: 'var(--color-accent-purple-light)' }}>●</span> Custom Roles
+                  <h2
+                    className="text-xl font-semibold mb-lg"
+                    style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
+                  >
+                    <span style={{ color: 'var(--color-accent-purple-light)' }}>●</span> Custom
+                    Roles
                   </h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+                  <div
+                    style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}
+                  >
                     {customRoles.map((role) => (
-                      <RoleCard key={role.role_key} role={role} isAdmin={isAdmin} onEdit={setEditingRole} onDelete={setDeletingRole} />
+                      <RoleCard
+                        key={role.role_key}
+                        role={role}
+                        isAdmin={isAdmin}
+                        onEdit={setEditingRole}
+                        onDelete={setDeletingRole}
+                      />
                     ))}
                   </div>
                 </section>

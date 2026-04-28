@@ -159,7 +159,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserResponse:
                 -- across logins. The JWT role claim is only used on first insert.
             RETURNING id, email, full_name, username, name, role, is_active, created_at, oid
             """,
-            oid, email, name, role,
+            oid,
+            email,
+            name,
+            role,
         )
 
     if row is None:

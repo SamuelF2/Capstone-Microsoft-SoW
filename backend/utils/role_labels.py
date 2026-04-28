@@ -7,6 +7,7 @@ shapes; importing from here keeps them in lockstep.
 """
 
 from __future__ import annotations
+
 import database
 
 ROLE_DISPLAY_NAMES: dict[str, str] = {
@@ -30,7 +31,6 @@ def humanize_role(role_key: str | None) -> str:
     if not role_key:
         return ""
     return ROLE_DISPLAY_NAMES.get(role_key) or role_key.replace("-", " ").title()
-
 
 
 async def humanize_role_async(role_key: str | None) -> str:

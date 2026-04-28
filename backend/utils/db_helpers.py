@@ -341,7 +341,9 @@ async def record_review_result(
         json.dumps(conditions) if conditions else None,
     )
 
+
 # ── Roles and permissions ────────────────────────────────────────────────────────
+
 
 async def require_permission(conn, user_id: int, permission: str) -> None:
     """Raise 403 if the user's role doesn't have the given permission.
@@ -367,6 +369,7 @@ async def require_permission(conn, user_id: int, permission: str) -> None:
     permissions = row["permissions"]
     if isinstance(permissions, str):
         import json
+
         permissions = json.loads(permissions)
 
     if "*" in permissions or permission in permissions:
@@ -376,6 +379,7 @@ async def require_permission(conn, user_id: int, permission: str) -> None:
         status_code=status.HTTP_403_FORBIDDEN,
         detail=f"Permission '{permission}' required",
     )
+
 
 async def require_sow_manager(conn, sow_id: int, user_id: int) -> None:
     """Raise 403 unless the user is the SoW manager for this SoW or a system-admin.
