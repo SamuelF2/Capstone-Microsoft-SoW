@@ -397,15 +397,10 @@ export default function DraftPage() {
     return Object.keys(val).some((k) => val[k]);
   })();
 
-  const canWrite = !permissionsLoading && (
-    sowPermissions.includes('*') ||
-    sowPermissions.includes('sow.write')
-  );
+  const canWrite =
+    !permissionsLoading && (sowPermissions.includes('*') || sowPermissions.includes('sow.write'));
 
-  const canRead = !permissionsLoading && (
-    canWrite ||
-    sowPermissions.includes('sow.read')
-  );
+  const canRead = !permissionsLoading && (canWrite || sowPermissions.includes('sow.read'));
 
   const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
@@ -502,11 +497,15 @@ export default function DraftPage() {
 
   if (permissionsLoading) {
     return (
-      <div style={{
-        minHeight: 'calc(100vh - 80px)',
-        backgroundColor: 'var(--color-bg-primary)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
         <Spinner message="Loading permissions…" />
       </div>
     );

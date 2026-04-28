@@ -838,7 +838,11 @@ export default function CreateNew() {
                       checked={addMyGroup}
                       onChange={(e) => setAddMyGroup(e.target.checked)}
                       disabled={true}
-                      style={{ marginTop: 3, accentColor: 'var(--color-accent-blue)', opacity: 0.5 }}
+                      style={{
+                        marginTop: 3,
+                        accentColor: 'var(--color-accent-blue)',
+                        opacity: 0.5,
+                      }}
                     />
                     <div>
                       <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
@@ -846,8 +850,8 @@ export default function CreateNew() {
                       </span>
                       <span className="text-sm">Add my Entra ID group members as viewers</span>
                       <p className="text-xs text-tertiary" style={{ margin: '2px 0 0' }}>
-                        Group sync is not yet available — collaborators can be added manually
-                        from the SoW manage page after creation.
+                        Group sync is not yet available — collaborators can be added manually from
+                        the SoW manage page after creation.
                         {groupsLoading
                           ? 'Checking group membership…'
                           : "Requires your organization's App Registration to have group claims enabled. " +

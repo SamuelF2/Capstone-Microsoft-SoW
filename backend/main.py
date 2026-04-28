@@ -54,12 +54,12 @@ from routers.auth import router as auth_router
 from routers.coa import router as coa_router
 from routers.finalize import router as finalize_router
 from routers.review import router as review_router
+from routers.roles import router as roles_router
 from routers.rules import router as rules_router
 from routers.sow import router as sow_router
 from routers.sow_roles import router as sow_roles_router
 from routers.users import router as users_router
 from routers.workflow import router as workflow_router
-from routers.roles import router as roles_router
 from status import router as status_router
 from validators import (
     build_health_status,
@@ -772,26 +772,56 @@ async def lifespan(app: FastAPI):
                 print("Seeded default document requirements")
 
             default_roles = [
-                ("solution-architect", "Solution Architect", "Technical design and architecture review",
-                 ["review.read", "review.submit", "sow.read"]),
-                ("sqa-reviewer", "SQA Reviewer", "Quality assurance review",
-                 ["review.read", "review.submit", "sow.read"]),
-                ("cpl", "Customer Practice Lead", "Practice-level approval authority",
-                 ["review.read", "review.submit", "review.approve", "sow.read"]),
-                ("cdp", "Customer Delivery Partner", "Delivery partnership approval",
-                 ["review.read", "review.submit", "review.approve", "sow.read"]),
-                ("delivery-manager", "Delivery Manager", "Delivery oversight and approval",
-                 ["review.read", "review.submit", "review.approve", "sow.read"]),
-                ("consultant", "Consultant", "Standard SoW author and editor",
-                 ["sow.read", "sow.write", "sow.create"]),
+                (
+                    "solution-architect",
+                    "Solution Architect",
+                    "Technical design and architecture review",
+                    ["review.read", "review.submit", "sow.read"],
+                ),
+                (
+                    "sqa-reviewer",
+                    "SQA Reviewer",
+                    "Quality assurance review",
+                    ["review.read", "review.submit", "sow.read"],
+                ),
+                (
+                    "cpl",
+                    "Customer Practice Lead",
+                    "Practice-level approval authority",
+                    ["review.read", "review.submit", "review.approve", "sow.read"],
+                ),
+                (
+                    "cdp",
+                    "Customer Delivery Partner",
+                    "Delivery partnership approval",
+                    ["review.read", "review.submit", "review.approve", "sow.read"],
+                ),
+                (
+                    "delivery-manager",
+                    "Delivery Manager",
+                    "Delivery oversight and approval",
+                    ["review.read", "review.submit", "review.approve", "sow.read"],
+                ),
+                (
+                    "consultant",
+                    "Consultant",
+                    "Standard SoW author and editor",
+                    ["sow.read", "sow.write", "sow.create"],
+                ),
                 ("system-admin", "System Admin", "Full platform access", ["*"]),
             ]
             for role_key, display_name, description, permissions in default_roles:
-                await conn.execute("""
+                await conn.execute(
+                    """
                                     INSERT INTO role_definitions (role_key, display_name, description, permissions, is_system)
                                     VALUES ($1, $2, $3, $4::jsonb, TRUE)
                                     ON CONFLICT (role_key) DO NOTHING
-                                """, role_key, display_name, description, json.dumps(permissions))
+                                """,
+                    role_key,
+                    display_name,
+                    description,
+                    json.dumps(permissions),
+                )
                 default_roles = [
                     (
                         "solution-architect",
@@ -843,7 +873,6 @@ async def lifespan(app: FastAPI):
                         description,
                         json.dumps(permissions),
                     )
-
 
             # Backfill any transitions that may be missing from previously-seeded
             # templates (the guard above skips re-seeding if the template exists).
