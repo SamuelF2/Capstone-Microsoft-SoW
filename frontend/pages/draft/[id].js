@@ -179,6 +179,7 @@ export default function DraftPage() {
   const [notFound, setNotFound] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  const [sowPermissions, setSowPermissions] = useState(null);
 
   // Persistence: load from backend on mount, debounced auto-save on edit.
   // The previous implementation used localStorage as the primary store,
@@ -238,6 +239,10 @@ export default function DraftPage() {
         // and skip the redundant PATCH-back.
         lastServerContentRef.current = JSON.stringify(content);
         setSowData(content);
+        authFetch(`/api/sow/${id}/my-permissions`)
+          .then((res) => res.ok ? res.json() : { permissions: [] })
+          .then((data) => setSowPermissions(data.permissions || []))
+          .catch(() => setSowPermissions([]));
         if (data.updated_at) setSavedAt(data.updated_at);
       } catch (err) {
         if (!cancelled) {
@@ -257,6 +262,7 @@ export default function DraftPage() {
   // and any redundant re-renders that don't actually change content).
   useEffect(() => {
     if (!sowData || !id || !authFetch) return;
+    if (!canWrite) return;
     const serialized = JSON.stringify(sowData);
     if (serialized === lastServerContentRef.current) return;
 
@@ -389,6 +395,14 @@ export default function DraftPage() {
     return Object.keys(val).some((k) => val[k]);
   })();
 
+  const canWrite = sowPermissions === null ||
+    sowPermissions.includes('*') ||
+    sowPermissions.includes('sow.write');
+
+  const canRead = sowPermissions === null ||
+    canWrite ||
+    sowPermissions.includes('sow.read');
+
   const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
   // Submit the SoW for review.  The backend resolves the SoW's workflow to
@@ -478,6 +492,27 @@ export default function DraftPage() {
         }}
       >
         <Spinner message="Loading SoW…" />
+      </div>
+    );
+  }
+
+  if (sowPermissions !== null && !canRead) {
+    return (
+      <div style={{
+        minHeight: 'calc(100vh - 80px)',
+        backgroundColor: 'var(--color-bg-primary)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div className="card text-center" style={{ padding: 'var(--spacing-3xl)', maxWidth: '440px' }}>
+          <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>🔒</div>
+          <h3 className="text-xl font-semibold mb-sm">{sowData?.sowTitle || 'SoW'}</h3>
+          <p className="text-secondary mb-sm">Status: <strong>{sowData?.status || 'draft'}</strong></p>
+          <p className="text-secondary mb-xl">
+            You have been added as a collaborator but do not have permission to view this SoW's contents.
+            Contact the SoW manager to request access.
+          </p>
+          <Link href="/all-sows" className="btn btn-primary">Back to All SoWs</Link>
+        </div>
       </div>
     );
   }
@@ -829,7 +864,7 @@ export default function DraftPage() {
                   transition={{ duration: 0.2 }}
                 >
                   {tabs.length > 0 && tabs[activeTab] ? (
-                    tabs[activeTab].render(sowData, updateSection)
+                    tabs[activeTab].render(sowData, canWrite ? updateSection : () => {}, !canWrite)
                   ) : (
                     <p className="text-secondary">No content configured for this methodology.</p>
                   )}
@@ -990,8 +1025,8 @@ export default function DraftPage() {
               <button
                 className="btn btn-primary"
                 onClick={() => setShowConfirm(true)}
-                disabled={isSubmitting || !allRequiredMet}
-                style={{ opacity: isSubmitting || !allRequiredMet ? 0.6 : 1 }}
+                disabled={isSubmitting || !allRequiredMet || !canWrite}
+                style={{ opacity: isSubmitting || !allRequiredMet || !canWrite ? 0.6 : 1 }}
               >
                 {isSubmitting ? 'Submitting…' : 'Submit for Review →'}
               </button>

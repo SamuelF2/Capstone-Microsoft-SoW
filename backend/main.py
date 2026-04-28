@@ -56,6 +56,7 @@ from routers.finalize import router as finalize_router
 from routers.review import router as review_router
 from routers.rules import router as rules_router
 from routers.sow import router as sow_router
+from routers.sow_roles import router as sow_roles_router
 from routers.users import router as users_router
 from routers.workflow import router as workflow_router
 from routers.roles import router as roles_router
@@ -337,6 +338,27 @@ async def lifespan(app: FastAPI):
                 role    TEXT
             );
         """)
+
+            # ------------------------------------------------------------------ #
+            # 8b. SOW ROLE DEFINITIONS  (per-SoW roles)                          #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS sow_role_definitions (
+                    id              SERIAL PRIMARY KEY,
+                    sow_id          INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
+                    role_key        TEXT NOT NULL,
+                    display_name    TEXT NOT NULL,
+                    description     TEXT,
+                    permissions     JSONB NOT NULL DEFAULT '[]',
+                    created_by      INTEGER REFERENCES users(id),
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE(sow_id, role_key)
+                );
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sow_role_defs_sow ON sow_role_definitions(sow_id);"
+            )
 
             # ------------------------------------------------------------------ #
             # 9. REVIEW ASSIGNMENTS  (Phase 1+: per-SoW review duties)           #
@@ -987,6 +1009,7 @@ async def lifespan(app: FastAPI):
                 "CREATE INDEX IF NOT EXISTS idx_history_changed_by ON history(changed_by);",
                 "CREATE INDEX IF NOT EXISTS idx_collab_sow_id      ON collaboration(sow_id);",
                 "CREATE INDEX IF NOT EXISTS idx_collab_user_id  ON collaboration(user_id);",
+                "CREATE INDEX IF NOT EXISTS idx_sow_role_defs_sow ON sow_role_definitions(sow_id);",
                 # review_assignments indexes
                 "CREATE INDEX IF NOT EXISTS idx_review_assignments_sow    ON review_assignments(sow_id);",
                 "CREATE INDEX IF NOT EXISTS idx_review_assignments_user   ON review_assignments(user_id);",
@@ -1108,6 +1131,7 @@ app.add_middleware(
 app.include_router(status_router)  # /status  (HTML status page)
 app.include_router(auth_router)  # /api/auth/...
 app.include_router(sow_router)  # /api/sow/...
+app.include_router(sow_roles_router)  # /api/sow/{id}/roles and /api/sow/{id}/collaborators
 app.include_router(review_router)  # /api/review/...
 app.include_router(finalize_router)  # /api/finalize/...
 app.include_router(rules_router)  # /api/rules/...

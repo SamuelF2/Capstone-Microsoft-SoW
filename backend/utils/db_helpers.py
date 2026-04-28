@@ -340,3 +340,162 @@ async def record_review_result(
         decision,
         json.dumps(conditions) if conditions else None,
     )
+
+# ── Roles and permissions ────────────────────────────────────────────────────────
+
+async def require_permission(conn, user_id: int, permission: str) -> None:
+    """Raise 403 if the user's role doesn't have the given permission.
+
+    Checks role_definitions.permissions JSONB array.
+    A wildcard permission '*' grants everything (system-admin).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT rd.permissions
+        FROM   users u
+        JOIN   role_definitions rd ON rd.role_key = u.role
+        WHERE  u.id = $1
+        """,
+        user_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User has no role assigned",
+        )
+
+    permissions = row["permissions"]
+    if isinstance(permissions, str):
+        import json
+        permissions = json.loads(permissions)
+
+    if "*" in permissions or permission in permissions:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Permission '{permission}' required",
+    )
+
+async def require_sow_manager(conn, sow_id: int, user_id: int) -> None:
+    """Raise 403 unless the user is the SoW manager for this SoW or a system-admin.
+
+    SoW manager is defined as having role 'sow-manager' in the collaboration
+    table for this SoW.
+    """
+    # system-admin bypasses everything
+    user_row = await conn.fetchrow("SELECT role FROM users WHERE id = $1", user_id)
+    if user_row and (user_row["role"] or "").lower() == "system-admin":
+        return
+
+    row = await conn.fetchrow(
+        """
+        SELECT 1 FROM collaboration
+        WHERE  sow_id = $1 AND user_id = $2 AND role = 'sow-manager'
+        LIMIT  1
+        """,
+        sow_id,
+        user_id,
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the SoW manager can perform this action",
+        )
+
+
+async def require_sow_permission(conn, sow_id: int, user_id: int, permission: str) -> None:
+    """Raise 403 if the user's SoW-scoped role doesn't have the given permission.
+
+    Checks sow_role_definitions.permissions for the user's role on this SoW.
+    system-admin and sow-manager (which has '*') always pass.
+    """
+    # system-admin bypasses everything
+    user_row = await conn.fetchrow("SELECT role FROM users WHERE id = $1", user_id)
+    if user_row and (user_row["role"] or "").lower() == "system-admin":
+        return
+
+    row = await conn.fetchrow(
+        """
+        SELECT srd.permissions
+        FROM   collaboration c
+        JOIN   sow_role_definitions srd
+               ON srd.sow_id = c.sow_id AND srd.role_key = c.role
+        WHERE  c.sow_id = $1 AND c.user_id = $2
+        LIMIT  1
+        """,
+        sow_id,
+        user_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission '{permission}' required",
+        )
+
+    permissions = row["permissions"]
+    if isinstance(permissions, str):
+        permissions = json.loads(permissions)
+
+    if "*" in permissions or permission in permissions:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Permission '{permission}' required",
+    )
+
+
+async def seed_sow_roles(conn, sow_id: int, creator_user_id: int) -> None:
+    """Seed default SoW-scoped roles and assign sow-manager to the creator.
+
+    Called inside the same transaction as SoW creation so roles always
+    exist for every SoW.
+    """
+    default_roles = [
+        (
+            "sow-manager",
+            "SoW Manager",
+            "Full control over this SoW",
+            ["*"],
+        ),
+        (
+            "reviewer",
+            "Reviewer",
+            "Can read the SoW and submit reviews",
+            ["sow.read", "review.read", "review.submit"],
+        ),
+        (
+            "viewer",
+            "Viewer",
+            "Read-only access to this SoW",
+            ["sow.read"],
+        ),
+    ]
+
+    for role_key, display_name, description, permissions in default_roles:
+        await conn.execute(
+            """
+            INSERT INTO sow_role_definitions
+                (sow_id, role_key, display_name, description, permissions, created_by)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+            ON CONFLICT (sow_id, role_key) DO NOTHING
+            """,
+            sow_id,
+            role_key,
+            display_name,
+            description,
+            json.dumps(permissions),
+            creator_user_id,
+        )
+
+    # Set the creator's collaboration role to sow-manager
+    await conn.execute(
+        """
+        UPDATE collaboration
+        SET    role = 'sow-manager'
+        WHERE  sow_id = $1 AND user_id = $2
+        """,
+        sow_id,
+        creator_user_id,
+    )

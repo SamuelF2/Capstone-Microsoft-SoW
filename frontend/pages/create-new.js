@@ -73,7 +73,7 @@ function FieldError({ message }) {
 
 export default function CreateNew() {
   const router = useRouter();
-  const { authFetch } = useAuth();
+  const { user, authFetch } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(INITIAL_FORM);
@@ -89,6 +89,12 @@ export default function CreateNew() {
 
   // Workflow template selection
   const [selectedWorkflowTemplateId, setSelectedWorkflowTemplateId] = useState(null);
+
+  //Group Collaborators
+  const [addMyGroup, setAddMyGroup] = useState(false);
+  const [userGroups, setUserGroups] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
+  const [groupsLoading, setGroupsLoading] = useState(false);
 
   // ── Unsaved-changes guard + draft autosave ─────────────────────────────
   // Dirty when any text field diverges from the initial blank form. Template
@@ -240,6 +246,23 @@ export default function CreateNew() {
       const sow = await res.json();
       const id = sow.id; // integer PK from PostgreSQL
 
+      // Add group collaborators if selected
+      if (selectedGroupId || addMyGroup) {
+        try {
+          await authFetch(`/api/sow/${id}/collaborators/sync-group`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              group_id: selectedGroupId || null,
+              use_creator_group: addMyGroup && !selectedGroupId,
+            }),
+          });
+        } catch {
+          // Non-fatal — SoW was created, group sync failed silently
+          console.warn('Group collaborator sync failed — add members manually');
+        }
+      }
+
       // Cache the SoW record in localStorage for offline auto-save
       const sowRecord = {
         id,
@@ -279,6 +302,18 @@ export default function CreateNew() {
     form.sowTitle && form.opportunityId && form.customerName && form.deliveryMethodology;
 
   const methodologies = ['Agile Sprint Delivery', 'Sure Step 365', 'Waterfall', 'Cloud Adoption'];
+
+  useEffect(() => {
+    if (!user) return;
+    // Attempt to read groups from the Entra token via /api/users/me/groups
+    // This will return [] if the App Registration hasn't enabled the groups claim
+    setGroupsLoading(true);
+    authFetch('/api/users/me/groups')
+      .then((res) => res.ok ? res.json() : { groups: [] })
+      .then((data) => setUserGroups(data.groups || []))
+      .catch(() => setUserGroups([]))
+      .finally(() => setGroupsLoading(false));
+  }, [user, authFetch]);
 
   return (
     <>
@@ -748,6 +783,76 @@ export default function CreateNew() {
                 onSelect={setSelectedWorkflowTemplateId}
                 authFetch={authFetch}
               />
+            </div>
+
+            {/* Group collaborators section */}
+            <div className="card" style={{ marginTop: 'var(--spacing-lg)' }}>
+              <h2
+                className="text-xl font-semibold mb-xl"
+                style={{
+                  paddingBottom: 'var(--spacing-md)',
+                  borderBottom: '1px solid var(--color-border-default)',
+                }}
+              >
+                Team Access
+              </h2>
+              <p className="text-sm text-secondary" style={{ marginBottom: 'var(--spacing-md)' }}>
+                Optionally add collaborators from your organization. Added members will have
+                read-only access to this SoW.
+              </p>
+
+              {userGroups.length > 0 ? (
+                // Entra groups are available — show a picker
+                <div>
+                  <label className="form-label">Select a group to add as viewers</label>
+                  <select
+                    className="form-select"
+                    value={selectedGroupId || ''}
+                    onChange={(e) => setSelectedGroupId(e.target.value || null)}
+                    style={{ maxWidth: '400px' }}
+                  >
+                    <option value="">No group — add individually later</option>
+                    {userGroups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-tertiary" style={{ marginTop: 4 }}>
+                    All members of the selected group will be added as viewers.
+                  </p>
+                </div>
+              ) : (
+                // Groups claim not configured — show checkbox fallback
+                <div>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 'var(--spacing-sm)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={addMyGroup}
+                      onChange={(e) => setAddMyGroup(e.target.checked)}
+                      style={{ marginTop: 3, accentColor: 'var(--color-accent-blue)' }}
+                    />
+                    <div>
+                      <span className="text-sm">
+                        Add my Entra ID group members as viewers
+                      </span>
+                      <p className="text-xs text-tertiary" style={{ margin: '2px 0 0' }}>
+                        {groupsLoading
+                          ? 'Checking group membership…'
+                          : 'Requires your organization\'s App Registration to have group claims enabled. ' +
+                            'If not configured, collaborators can be added manually after creation.'}
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              )}
             </div>
 
             {/* Actions */}

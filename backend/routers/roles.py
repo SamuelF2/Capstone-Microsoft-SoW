@@ -63,6 +63,15 @@ async def get_role(role_key: str, current_user: CurrentUser) -> RoleDefinition:
     return RoleDefinition(**d)
 
 
+@router.get(
+    "/me/role",
+    summary="Get the current user's role from the database",
+)
+async def get_my_role(current_user: CurrentUser) -> dict:
+    """Returns the role as stored in the database, not from the JWT."""
+    return {"role": current_user.role, "user_id": current_user.id}
+
+
 @router.post(
     "",
     response_model=RoleDefinition,
