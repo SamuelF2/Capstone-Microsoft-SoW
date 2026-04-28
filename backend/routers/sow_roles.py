@@ -30,8 +30,8 @@ from models import (
     SoWRoleDefinition,
     SoWRoleUpdate,
 )
-from utils.db_helpers import require_collaborator, require_sow_manager, seed_collaboration
 from pydantic import BaseModel
+from utils.db_helpers import require_collaborator, require_sow_manager, seed_collaboration
 
 router = APIRouter(prefix="/api/sow", tags=["sow-roles"])
 
@@ -60,8 +60,9 @@ async def list_sow_roles(sow_id: int, current_user: CurrentUser) -> list[SoWRole
             role_key=r["role_key"],
             display_name=r["display_name"],
             description=r["description"],
-            permissions=r["permissions"] if isinstance(r["permissions"], list)
-                else json.loads(r["permissions"]),
+            permissions=r["permissions"]
+            if isinstance(r["permissions"], list)
+            else json.loads(r["permissions"]),
             created_by=r["created_by"],
             created_at=r["created_at"],
         )
@@ -115,8 +116,9 @@ async def create_sow_role(
         role_key=row["role_key"],
         display_name=row["display_name"],
         description=row["description"],
-        permissions=row["permissions"] if isinstance(row["permissions"], list)
-            else json.loads(row["permissions"]),
+        permissions=row["permissions"]
+        if isinstance(row["permissions"], list)
+        else json.loads(row["permissions"]),
         created_by=row["created_by"],
         created_at=row["created_at"],
     )
@@ -152,8 +154,9 @@ async def update_sow_role(
                 role_key=existing["role_key"],
                 display_name=existing["display_name"],
                 description=existing["description"],
-                permissions=existing["permissions"] if isinstance(existing["permissions"], list)
-                    else json.loads(existing["permissions"]),
+                permissions=existing["permissions"]
+                if isinstance(existing["permissions"], list)
+                else json.loads(existing["permissions"]),
                 created_by=existing["created_by"],
                 created_at=existing["created_at"],
             )
@@ -171,7 +174,7 @@ async def update_sow_role(
         row = await conn.fetchrow(
             f"""
             UPDATE sow_role_definitions
-            SET    {', '.join(set_parts)}
+            SET    {", ".join(set_parts)}
             WHERE  sow_id = ${len(params) - 1} AND role_key = ${len(params)}
             RETURNING *
             """,
@@ -184,8 +187,9 @@ async def update_sow_role(
         role_key=row["role_key"],
         display_name=row["display_name"],
         description=row["description"],
-        permissions=row["permissions"] if isinstance(row["permissions"], list)
-            else json.loads(row["permissions"]),
+        permissions=row["permissions"]
+        if isinstance(row["permissions"], list)
+        else json.loads(row["permissions"]),
         created_by=row["created_by"],
         created_at=row["created_at"],
     )
@@ -307,7 +311,9 @@ async def add_collaborator(
                 detail="User is already a collaborator on this SoW",
             )
 
-        await seed_collaboration(conn, sow_id=sow_id, user_id=payload.user_id, role=payload.role_key)
+        await seed_collaboration(
+            conn, sow_id=sow_id, user_id=payload.user_id, role=payload.role_key
+        )
 
         row = await conn.fetchrow(
             """
@@ -474,6 +480,7 @@ async def get_my_sow_permissions(
     permissions = row["permissions"]
     if isinstance(permissions, str):
         import json
+
         permissions = json.loads(permissions)
 
     return {

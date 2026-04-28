@@ -22,7 +22,7 @@ export default function Account() {
   useEffect(() => {
     if (!user) return;
     authFetch(`${API}/api/roles`)
-      .then((res) => res.ok ? res.json() : [])
+      .then((res) => (res.ok ? res.json() : []))
       .then((data) => setAvailableRoles(data))
       .catch(() => {});
   }, [user, authFetch]);

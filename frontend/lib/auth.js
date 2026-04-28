@@ -208,36 +208,39 @@ export function AuthProvider({ children }) {
     [getAccessToken]
   );
 
-  const overrideRole = useCallback(async (role) => {
-    roleOverrideRef.current = role || null;
-    writeStoredRoleOverride(role || null);
-    setUser((prev) => {
-      if (!prev) return prev;
-      if (!role) {
+  const overrideRole = useCallback(
+    async (role) => {
+      roleOverrideRef.current = role || null;
+      writeStoredRoleOverride(role || null);
+      setUser((prev) => {
+        if (!prev) return prev;
+        if (!role) {
+          const base = prev._baseRole ?? prev.role;
+          const { _baseRole, ...rest } = prev;
+          return { ...rest, role: base };
+        }
         const base = prev._baseRole ?? prev.role;
-        const { _baseRole, ...rest } = prev;
-        return { ...rest, role: base };
-      }
-      const base = prev._baseRole ?? prev.role;
-      return { ...prev, role, _baseRole: base };
-    });
+        return { ...prev, role, _baseRole: base };
+      });
 
-    if (role) {
-      try {
-        const token = await getAccessToken();
-        await fetch(`${API}/api/users/me/role`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ role }),
-        });
-      } catch {
-        console.warn('overrideRole: failed to sync role to backend');
+      if (role) {
+        try {
+          const token = await getAccessToken();
+          await fetch(`${API}/api/users/me/role`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ role }),
+          });
+        } catch {
+          console.warn('overrideRole: failed to sync role to backend');
+        }
       }
-    }
-  }, [getAccessToken]);
+    },
+    [getAccessToken]
+  );
 
   const clearRoleOverride = useCallback(async () => {
     roleOverrideRef.current = null;

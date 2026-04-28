@@ -22,12 +22,12 @@ of a role).
 
 from __future__ import annotations
 
-import database
 import os
+
+import database
 from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Query, status
 from models import UserListEntry
-from models import UserResponse
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -105,6 +105,7 @@ async def list_users(
             """
         )
         return [UserListEntry(**dict(r)) for r in rows]
+
 
 @router.get(
     "/me/groups",

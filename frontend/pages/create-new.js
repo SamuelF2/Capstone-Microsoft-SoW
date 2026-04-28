@@ -309,7 +309,7 @@ export default function CreateNew() {
     // This will return [] if the App Registration hasn't enabled the groups claim
     setGroupsLoading(true);
     authFetch('/api/users/me/groups')
-      .then((res) => res.ok ? res.json() : { groups: [] })
+      .then((res) => (res.ok ? res.json() : { groups: [] }))
       .then((data) => setUserGroups(data.groups || []))
       .catch(() => setUserGroups([]))
       .finally(() => setGroupsLoading(false));
@@ -844,9 +844,14 @@ export default function CreateNew() {
                       <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                         Add my Entra ID group members as viewers
                       </span>
+                      <span className="text-sm">Add my Entra ID group members as viewers</span>
                       <p className="text-xs text-tertiary" style={{ margin: '2px 0 0' }}>
                         Group sync is not yet available — collaborators can be added manually
                         from the SoW manage page after creation.
+                        {groupsLoading
+                          ? 'Checking group membership…'
+                          : "Requires your organization's App Registration to have group claims enabled. " +
+                            'If not configured, collaborators can be added manually after creation.'}
                       </p>
                     </div>
                   </label>

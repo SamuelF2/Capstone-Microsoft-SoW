@@ -241,7 +241,7 @@ export default function DraftPage() {
         lastServerContentRef.current = JSON.stringify(content);
         setSowData(content);
         authFetch(`/api/sow/${id}/my-permissions`)
-          .then((res) => res.ok ? res.json() : { permissions: [] })
+          .then((res) => (res.ok ? res.json() : { permissions: [] }))
           .then((data) => setSowPermissions(data.permissions || []))
           .catch(() => setSowPermissions([]))
           .finally(() => setPermissionsLoading(false));
@@ -514,20 +514,31 @@ export default function DraftPage() {
 
   if (!canRead) {
     return (
-      <div style={{
-        minHeight: 'calc(100vh - 80px)',
-        backgroundColor: 'var(--color-bg-primary)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <div className="card text-center" style={{ padding: 'var(--spacing-3xl)', maxWidth: '440px' }}>
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          className="card text-center"
+          style={{ padding: 'var(--spacing-3xl)', maxWidth: '440px' }}
+        >
           <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>🔒</div>
           <h3 className="text-xl font-semibold mb-sm">{sowData?.sowTitle || 'SoW'}</h3>
-          <p className="text-secondary mb-sm">Status: <strong>{sowData?.status || 'draft'}</strong></p>
-          <p className="text-secondary mb-xl">
-            You have been added as a collaborator but do not have permission to view this SoW's contents.
-            Contact the SoW manager to request access.
+          <p className="text-secondary mb-sm">
+            Status: <strong>{sowData?.status || 'draft'}</strong>
           </p>
-          <Link href="/all-sows" className="btn btn-primary">Back to All SoWs</Link>
+          <p className="text-secondary mb-xl">
+            You have been added as a collaborator but do not have permission to view this SoW's
+            contents. Contact the SoW manager to request access.
+          </p>
+          <Link href="/all-sows" className="btn btn-primary">
+            Back to All SoWs
+          </Link>
         </div>
       </div>
     );
