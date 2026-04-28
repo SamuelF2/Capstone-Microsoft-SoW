@@ -22,10 +22,13 @@ of a role).
 
 from __future__ import annotations
 
+import os
+
 import database
 from auth import CurrentUser
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from models import UserListEntry
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -102,3 +105,71 @@ async def list_users(
             """
         )
         return [UserListEntry(**dict(r)) for r in rows]
+
+
+@router.get(
+    "/me/groups",
+    summary="Get the current user's Entra ID groups from their JWT claims",
+)
+async def get_my_groups(current_user: CurrentUser) -> dict:
+    """Return Entra ID groups from the user's JWT claims.
+
+    Returns an empty list when the App Registration does not have
+    groupMembershipClaims enabled — this is the expected degraded state
+    for most deployments until the App Registration is configured.
+
+    When groups ARE in the token, they are stored on the user record
+    during auth.py's get_current_user upsert. Currently returns []
+    until that storage is implemented.
+    """
+    # TODO: store groups claim during JWT validation in auth.py and
+    # return them here. For now, always returns empty so the frontend
+    # shows the checkbox fallback instead of a broken picker.
+    return {"groups": []}
+
+
+class RoleUpdatePayload(BaseModel):
+    role: str
+
+
+@router.patch(
+    "/me/role",
+    summary="[Dev/Test] Persist the current user's role to the database",
+)
+async def set_my_role(
+    payload: RoleUpdatePayload,
+    current_user: CurrentUser,
+) -> dict:
+    """Write the requested role to users.role in the database.
+
+    Blocked in production. Validates the role exists in role_definitions
+    before applying so only real role keys are accepted.
+    """
+    if os.getenv("ENV", "development") == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role self-assignment is disabled in production",
+        )
+
+    async with database.pg_pool.acquire() as conn:
+        valid = await conn.fetchval(
+            "SELECT 1 FROM role_definitions WHERE role_key = $1", payload.role
+        )
+        if not valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown role '{payload.role}'. Must be a key from role_definitions.",
+            )
+
+        row = await conn.fetchrow(
+            """
+            UPDATE users
+            SET    role = $1, updated_at = NOW()
+            WHERE  id = $2
+            RETURNING id, email, full_name, username, name, role, is_active, created_at, oid
+            """,
+            payload.role,
+            current_user.id,
+        )
+
+    return {"role": row["role"], "user_id": row["id"]}

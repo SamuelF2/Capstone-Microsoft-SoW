@@ -72,6 +72,7 @@ from utils.db_helpers import (
     require_author,
     require_collaborator,
     seed_collaboration,
+    seed_sow_roles,
 )
 from utils.esap import compute_esap_level
 from utils.role_labels import humanize_role as _humanize_role
@@ -336,6 +337,7 @@ async def create_sow(payload: SoWCreate, current_user: CurrentUser) -> SoWRespon
 
         # 4. Seed collaboration so the creator can access this SoW via /api/my-sows
         await seed_collaboration(conn, sow_id=row["id"], user_id=current_user.id)
+        await seed_sow_roles(conn, sow_id=row["id"], creator_user_id=current_user.id)
 
         # 5. Audit trail
         await insert_history(conn, sow_id=row["id"], user_id=current_user.id, change_type="created")
@@ -469,6 +471,7 @@ async def upload_sow(
 
         # Seed collaboration so the uploader can access via /api/my-sows
         await seed_collaboration(conn, sow_id=sow_id, user_id=current_user.id)
+        await seed_sow_roles(conn, sow_id=sow_id, creator_user_id=current_user.id)
 
         # Audit trail
         await insert_history(conn, sow_id=sow_id, user_id=current_user.id, change_type="created")

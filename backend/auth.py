@@ -153,8 +153,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserResponse:
                 email      = EXCLUDED.email,
                 full_name  = EXCLUDED.full_name,
                 name       = EXCLUDED.name,
-                role       = EXCLUDED.role,
                 updated_at = NOW()
+                -- role is intentionally NOT updated here so manual role
+                -- assignments (e.g. via PATCH /api/users/me/role) persist
+                -- across logins. The JWT role claim is only used on first insert.
             RETURNING id, email, full_name, username, name, role, is_active, created_at, oid
             """,
             oid,

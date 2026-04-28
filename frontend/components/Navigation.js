@@ -27,6 +27,7 @@ export default function Navigation() {
     { href: '/drm-dashboard', label: 'DRM Dashboard', roles: ['cpl', 'cdp', 'delivery-manager'] },
     { href: '/review-history', label: 'Review History' },
     { href: '/business-logic', label: 'Business Logic' },
+    { href: '/roles', label: 'Roles', roles: ['system-admin'] },
   ];
 
   // Human-readable label for the current (possibly-overridden) role.
