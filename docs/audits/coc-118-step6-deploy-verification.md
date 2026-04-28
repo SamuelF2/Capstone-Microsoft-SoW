@@ -514,5 +514,17 @@ Attempted via `az containerapp exec` from the api container into ml's internal e
 | 540 embeddings written | ✅ |
 | ml/web rollback regression | ✅ identified and patched (manual `az containerapp update`) |
 | Existing services healthy | ✅ all 5 `Running` and reachable |
-| `/context` returns 200 (authenticated) | ⏳ pending user-side frontend test |
-| Branch ready to push | ⏳ blocked on `/context` user test |
+| `/context` returns 200 (authenticated) | ✅ confirmed by user via the frontend AI-improve feature |
+| Branch ready to push | ✅ COC-118 step 3 closed end-to-end |
+
+---
+
+## Final unblock: postgres password drift + restart
+
+After the Job + ml/web restoration, frontend sign-in still 500'd on `/api/auth/me`. api startup logs showed `password authentication failed for user "cocoon"`. Root cause: the `postgres` Container App's running user `cocoon` had a password that matched neither the current Container-App-secret value (`i5fZ67DrmMs8IM4`) nor the `.env` value (`capstone202620222Password`). Postgres's secret had drifted relative to the password baked into its data volume by a long-ago `initdb`.
+
+Probe attempt: set api's `postgres-password` secret to `capstone202620222Password` (the .env candidate) — still failed authentication. Confirmed the actual postgres user password is a third value lost to history.
+
+Fix: restarted the `ca-postgres-nrflxor4bm2jw--0000001` revision via `az containerapp revision restart`. Container Apps storage is ephemeral by default (per `infra/modules/postgres-container.bicep:7-9`'s explicit comment: *"Data is lost on container restart. For the capstone demo this is acceptable"*), so `initdb` ran again with the current secret value, recreating user `cocoon` with `i5fZ67DrmMs8IM4`. Restarted the api replica afterwards. `/health` then reported `{"status":"healthy","neo4j":"connected","postgres":"connected"}`. Frontend sign-in worked. AI-improve feature worked end-to-end → `/context` returns 200.
+
+This is a pre-existing operational concern (not introduced by COC-118), but worth noting for the Key-Vault-secrets follow-up: centralized rotation would have prevented the drift entirely. Same exposure exists for `neo4j-password` — Neo4j happens to still match because no one has run `ALTER` on it, but the structural risk is identical.

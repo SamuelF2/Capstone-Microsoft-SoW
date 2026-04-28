@@ -3,11 +3,11 @@
 **Last touched:** 2026-04-28
 **Branch:** `feature/COC-118-managed-identity-auth`
 **Last commit:** `11b5478` — `COC-118 step 6 fix: NEO4J_URI/NEO4J_USER env vars on ingestion Job`
-**Branch is 5 commits ahead of origin, unpushed.** Don't push yet — `/context` not user-validated.
+**Branch is 6 commits ahead of origin, unpushed.** ✅ `/context` validated end-to-end via the frontend AI-improve feature — ready to push.
 
 ## Where you are
 
-**Almost done.** Step 6 plumbing is fully deployed and exercised. The ingestion Job has run end-to-end against the deployed Neo4j and populated the GraphRAG indexes. The only remaining task is **a single authenticated `/context` test from the deployed frontend** to formally close COC-118 step 3.
+**Done.** Step 6 plumbing is fully deployed, exercised, and end-to-end-validated. AI-improve feature on the deployed frontend works → `/context` returns 200 → COC-118 step 3 closed.
 
 Full evidence + every dead-end + cost analysis: `docs/audits/coc-118-step6-deploy-verification.md`.
 
@@ -32,29 +32,30 @@ Full evidence + every dead-end + cost analysis: `docs/audits/coc-118-step6-deplo
 
 ## Next action when you come back
 
-**Validate `/context` returns 200, then push + open PR.**
+**Push + open PR.** No more blockers in the COC-118 scope.
 
-```text
-1. Open https://ca-web-nrflxor4bm2jw.proudfield-c2158be3.eastus2.azurecontainerapps.io/
-2. Sign in.
-3. Trigger any feature that calls /context (e.g. anything driven by the GraphRAG retrieval step).
-4. Expect: 200 with retrieval results, NOT 500 with `db.index.vector.queryNodes` / `section_embeddings` errors.
+```bash
+git push -u origin feature/COC-118-managed-identity-auth
+gh pr create --base main --title "COC-118: ML→Foundry managed identity + Neo4j seeding Job"
 ```
 
-If it returns 200 → branch is ready: push and open PR.
+PR description should walk through the three logical chunks:
+1. ML→Foundry auth migrated to MI + cross-sub RBAC (commit `db610ef`)
+2. Container Apps Job for Neo4j data-seeding (commits `0ac2e00`, `c2487c9`, `81a5e78`, `11b5478`)
+3. Audit trail (commit `619f8d4`)
 
-If it still 500s → check `az monitor log-analytics query --workspace 03753e67-6d16-4cfd-967d-67df9e4ad958 --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'ca-ml-nrflxor4bm2jw' | order by TimeGenerated desc | take 30 | project Log_s"` for what ml is actually returning. The previous failure mode (missing index) is now ruled out.
+## Pending follow-ups (after PR is open)
 
-## Pending follow-ups (after `/context` 200)
-
-- Push the branch and open PR.
-- Delete the `AZURE_OPENAI_API_KEY` GitHub Secret (only after `/context` is green — ensures ML now fails-loud if MI auth ever breaks; that's desired).
+- Delete the `AZURE_OPENAI_API_KEY` GitHub Secret (now that `/context` is green via MI, the key is dead weight; ML will fail-loud if MI ever breaks — that's the desired SFI behaviour).
 - Ask Kirk to grant `Azure AI Developer` on Foundry-SOW to remaining team members' user principals before merge to main.
 - Notify team of MI auth migration (draft message exists in chat history).
-- File a follow-up ticket: **azd `prepackage`/`preprovision` hook to push images before provision** — closes both the `Microsoft.App/jobs` deploy-resolver gap AND the helloworld-rollback regression risk for ml/web on partial deploys.
-- File a separate ticket: **fix `main_new.py:69` and `enrich.py` to thread the CLI `--uri`/`--user`/`--password` through to `db.py`'s driver** instead of relying on env-var fallback. Code defect — the `# Ensure your db.py uses the provided uri/user/password` comment on line 69 promises something the code doesn't actually do.
-- File a separate ticket: **fix the api's postgres pool init** (`'NoneType' object has no attribute 'acquire'` on `/health`). Pre-existing, not introduced by COC-118.
-- Optional: **ml/Dockerfile.ingestion: switch base to python:3.11-slim** to skip the runtime `uv sync` / cpython-3.11.15 download. ~5 min runtime cost per Job execution; not load-bearing.
+
+### Separate tickets to file (not COC-118)
+
+- **azd `prepackage`/`preprovision` hook to push images before provision** — closes both the `Microsoft.App/jobs` deploy-resolver gap AND the helloworld-rollback regression that bit ml + web in this run.
+- **Move Container App secrets to Key Vault references** — would have prevented the postgres password drift that needed a data-wipe restart this session. Same structural exposure on `neo4j-password`, just hasn't bit yet. (See `docs/audits/auth-audit-2026-04-21.md` for the full SFI gap analysis.)
+- **Fix `main_new.py:69` and `enrich.py` to thread the CLI `--uri`/`--user`/`--password` through to `db.py`'s driver** instead of relying on env-var fallback. Code defect — the `# Ensure your db.py uses the provided uri/user/password` comment on line 69 promises something the code doesn't actually do. The Job's bicep env-var workaround masks this.
+- **ml/Dockerfile.ingestion: switch base to `python:3.11-slim`** to skip the wasted runtime `uv sync` / cpython-3.11.15 download. ~5 min cost per Job execution; not load-bearing but easy win.
 
 ## Sanity checklist when you sit back down
 
