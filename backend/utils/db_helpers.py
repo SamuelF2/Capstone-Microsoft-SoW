@@ -174,7 +174,7 @@ async def require_author(conn, sow_id: int, user_id: int) -> None:
     row = await conn.fetchrow(
         """
         SELECT 1 FROM collaboration
-        WHERE  sow_id = $1 AND user_id = $2 AND role = 'author'
+        WHERE  sow_id = $1 AND user_id = $2 AND role IN ('author', 'sow-manager')
         LIMIT  1
         """,
         sow_id,

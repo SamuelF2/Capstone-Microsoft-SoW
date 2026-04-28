@@ -25,7 +25,7 @@ from __future__ import annotations
 import database
 import os
 from auth import CurrentUser
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from models import UserListEntry
 from models import UserResponse
 from pydantic import BaseModel

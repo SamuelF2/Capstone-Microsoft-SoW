@@ -179,7 +179,8 @@ export default function DraftPage() {
   const [notFound, setNotFound] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
-  const [sowPermissions, setSowPermissions] = useState(null);
+  const [sowPermissions, setSowPermissions] = useState([]);
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
 
   // Persistence: load from backend on mount, debounced auto-save on edit.
   // The previous implementation used localStorage as the primary store,
@@ -242,7 +243,8 @@ export default function DraftPage() {
         authFetch(`/api/sow/${id}/my-permissions`)
           .then((res) => res.ok ? res.json() : { permissions: [] })
           .then((data) => setSowPermissions(data.permissions || []))
-          .catch(() => setSowPermissions([]));
+          .catch(() => setSowPermissions([]))
+          .finally(() => setPermissionsLoading(false));
         if (data.updated_at) setSavedAt(data.updated_at);
       } catch (err) {
         if (!cancelled) {
@@ -292,7 +294,7 @@ export default function DraftPage() {
         debounceTimerRef.current = null;
       }
     };
-  }, [sowData, id, authFetch]);
+  }, [sowData, id, authFetch, canWrite]);
 
   // Update a top-level section of the SoW data
   const updateSection = (section, value) => {
@@ -395,13 +397,15 @@ export default function DraftPage() {
     return Object.keys(val).some((k) => val[k]);
   })();
 
-  const canWrite = sowPermissions === null ||
+  const canWrite = !permissionsLoading && (
     sowPermissions.includes('*') ||
-    sowPermissions.includes('sow.write');
+    sowPermissions.includes('sow.write')
+  );
 
-  const canRead = sowPermissions === null ||
+  const canRead = !permissionsLoading && (
     canWrite ||
-    sowPermissions.includes('sow.read');
+    sowPermissions.includes('sow.read')
+  );
 
   const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
@@ -496,7 +500,19 @@ export default function DraftPage() {
     );
   }
 
-  if (sowPermissions !== null && !canRead) {
+  if (permissionsLoading) {
+    return (
+      <div style={{
+        minHeight: 'calc(100vh - 80px)',
+        backgroundColor: 'var(--color-bg-primary)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Spinner message="Loading permissions…" />
+      </div>
+    );
+  }
+
+  if (!canRead) {
     return (
       <div style={{
         minHeight: 'calc(100vh - 80px)',

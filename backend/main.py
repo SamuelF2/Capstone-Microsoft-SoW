@@ -771,27 +771,28 @@ async def lifespan(app: FastAPI):
                     )
                 print("Seeded default document requirements")
 
-                default_roles = [
-                    ("solution-architect", "Solution Architect", "Technical design and architecture review",
-                     ["review.read", "review.submit", "sow.read"]),
-                    ("sqa-reviewer", "SQA Reviewer", "Quality assurance review",
-                     ["review.read", "review.submit", "sow.read"]),
-                    ("cpl", "Customer Practice Lead", "Practice-level approval authority",
-                     ["review.read", "review.submit", "review.approve", "sow.read"]),
-                    ("cdp", "Customer Delivery Partner", "Delivery partnership approval",
-                     ["review.read", "review.submit", "review.approve", "sow.read"]),
-                    ("delivery-manager", "Delivery Manager", "Delivery oversight and approval",
-                     ["review.read", "review.submit", "review.approve", "sow.read"]),
-                    ("consultant", "Consultant", "Standard SoW author and editor",
-                     ["sow.read", "sow.write", "sow.create"]),
-                    ("system-admin", "System Admin", "Full platform access", ["*"]),
-                ]
-                for role_key, display_name, description, permissions in default_roles:
-                    await conn.execute("""
-                        INSERT INTO role_definitions (role_key, display_name, description, permissions, is_system)
-                        VALUES ($1, $2, $3, $4::jsonb, TRUE)
-                        ON CONFLICT (role_key) DO NOTHING
-                    """, role_key, display_name, description, json.dumps(permissions))
+            default_roles = [
+                ("solution-architect", "Solution Architect", "Technical design and architecture review",
+                 ["review.read", "review.submit", "sow.read"]),
+                ("sqa-reviewer", "SQA Reviewer", "Quality assurance review",
+                 ["review.read", "review.submit", "sow.read"]),
+                ("cpl", "Customer Practice Lead", "Practice-level approval authority",
+                 ["review.read", "review.submit", "review.approve", "sow.read"]),
+                ("cdp", "Customer Delivery Partner", "Delivery partnership approval",
+                 ["review.read", "review.submit", "review.approve", "sow.read"]),
+                ("delivery-manager", "Delivery Manager", "Delivery oversight and approval",
+                 ["review.read", "review.submit", "review.approve", "sow.read"]),
+                ("consultant", "Consultant", "Standard SoW author and editor",
+                 ["sow.read", "sow.write", "sow.create"]),
+                ("system-admin", "System Admin", "Full platform access", ["*"]),
+            ]
+            for role_key, display_name, description, permissions in default_roles:
+                await conn.execute("""
+                                    INSERT INTO role_definitions (role_key, display_name, description, permissions, is_system)
+                                    VALUES ($1, $2, $3, $4::jsonb, TRUE)
+                                    ON CONFLICT (role_key) DO NOTHING
+                                """, role_key, display_name, description, json.dumps(permissions))
+
 
             # Backfill any transitions that may be missing from previously-seeded
             # templates (the guard above skips re-seeding if the template exists).

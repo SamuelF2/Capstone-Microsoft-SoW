@@ -173,5 +173,15 @@ async def delete_role(role_key: str, current_user: CurrentUser) -> dict:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="System roles cannot be deleted. You can edit their display name and permissions.",
             )
+
+        users_with_role = await conn.fetchval(
+            "SELECT count(*) FROM users WHERE role = $1", role_key
+        )
+        if users_with_role:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Role '{role_key}' is assigned to {users_with_role} user(s) and cannot be deleted",
+            )
+
         await conn.execute("DELETE FROM role_definitions WHERE role_key = $1", role_key)
     return {"deleted": role_key}
