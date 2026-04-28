@@ -462,6 +462,7 @@ async def get_checklist(sow_id: int, current_user: CurrentUser) -> ReviewCheckli
         focus_areas=checklist_data.get("focusAreas", []),
         items=items,
         saved_responses=saved,
+        comments=assignment["comments"],
     )
 
 
@@ -903,6 +904,7 @@ async def get_assignment_checklist(
         focus_areas=checklist_data.get("focusAreas", []),
         items=items,
         saved_responses=saved,
+        comments=assignment["comments"],
         assignment_id=assignment["id"],
         sow_id=assignment["sow_id"],
         user_id=assignment["user_id"],

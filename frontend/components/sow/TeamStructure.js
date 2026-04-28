@@ -1,6 +1,7 @@
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 const emptyMember = () => ({
   id: genId('mem'),
@@ -101,53 +102,55 @@ export default function TeamStructure({ data, onChange }) {
       />
 
       {/* Team Members */}
-      <h3 className="text-lg font-semibold mb-md">Team Members</h3>
-      <HorizontalCardList style={{ marginBottom: 'var(--spacing-lg)' }}>
-        {members.map((member) => (
-          <MemberCard
-            key={member.id}
-            item={member}
-            onChange={changeMember}
-            onRemove={() => removeMember(member.id)}
-          />
-        ))}
-        <AddCardButton label="Add Member" onClick={addMember} />
-      </HorizontalCardList>
+      <div data-subsection="teamStructure:members">
+        <h3 className="text-lg font-semibold mb-md">Team Members</h3>
+        <HorizontalCardList style={{ marginBottom: 'var(--spacing-lg)' }}>
+          {members.map((member) => (
+            <MemberCard
+              key={member.id}
+              item={member}
+              onChange={changeMember}
+              onRemove={() => removeMember(member.id)}
+            />
+          ))}
+          <AddCardButton label="Add Member" onClick={addMember} />
+        </HorizontalCardList>
 
-      {/* Totals */}
-      <div
-        className="card"
-        style={{
-          marginBottom: 'var(--spacing-xl)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 'var(--spacing-lg)',
-        }}
-      >
-        {[
-          {
-            label: 'Total Onshore',
-            value: `${totalOnshore.toFixed(1)} days`,
-            color: 'var(--color-accent-blue)',
-          },
-          {
-            label: 'Total Offshore',
-            value: `${totalOffshore.toFixed(1)} days`,
-            color: 'var(--color-accent-purple)',
-          },
-          { label: 'Offshore %', value: `${offshorePercent}%`, color: 'var(--color-success)' },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ textAlign: 'center' }}>
-            <p className="text-sm text-secondary mb-xs">{label}</p>
-            <p className="text-2xl font-bold" style={{ color }}>
-              {value}
-            </p>
-          </div>
-        ))}
+        {/* Totals */}
+        <div
+          className="card"
+          style={{
+            marginBottom: 'var(--spacing-xl)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: 'var(--spacing-lg)',
+          }}
+        >
+          {[
+            {
+              label: 'Total Onshore',
+              value: `${totalOnshore.toFixed(1)} days`,
+              color: 'var(--color-accent-blue)',
+            },
+            {
+              label: 'Total Offshore',
+              value: `${totalOffshore.toFixed(1)} days`,
+              color: 'var(--color-accent-purple)',
+            },
+            { label: 'Offshore %', value: `${offshorePercent}%`, color: 'var(--color-success)' },
+          ].map(({ label, value, color }) => (
+            <div key={label} style={{ textAlign: 'center' }}>
+              <p className="text-sm text-secondary mb-xs">{label}</p>
+              <p className="text-2xl font-bold" style={{ color }}>
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Support Transition Plan */}
-      <div>
+      <div data-subsection="teamStructure:supportTransitionPlan">
         <h3 className="text-lg font-semibold mb-xs">Support Transition Plan</h3>
         <p
           className="text-sm text-secondary mb-md"
@@ -156,7 +159,7 @@ export default function TeamStructure({ data, onChange }) {
           Describe how the solution will be transitioned to the customer's operations team after
           go-live.
         </p>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={supportTransitionPlan}
           onChange={(e) => update({ supportTransitionPlan: e.target.value })}

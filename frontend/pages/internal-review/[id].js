@@ -10,7 +10,7 @@
  * Below both columns: Review Status footer showing all reviewer progress.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -24,9 +24,24 @@ import AttachmentManager from '../../components/AttachmentManager';
 import ActivityLog from '../../components/ActivityLog';
 import DecisionModal from '../../components/review/DecisionModal';
 import SoWContentPanel from '../../components/sow/SoWContentPanel';
+import UnsavedChangesModal from '../../components/UnsavedChangesModal';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
+import useUnsavedChangesWarning from '../../lib/hooks/useUnsavedChangesWarning';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
 import { STAGE_KEYS } from '../../lib/workflowStages';
+import { aiClient } from '../../lib/ai';
+import AIUnavailableBanner from '../../components/AIUnavailableBanner';
+
+// Stable signature for dirty detection across (checked, notes) per item +
+// free-text comments.  Sorted by id so server-returned order doesn't drift it.
+function reviewSignature(responses, comments) {
+  return JSON.stringify({
+    r: (responses || [])
+      .map((x) => [x.id, !!x.checked, x.notes || ''])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    c: comments || '',
+  });
+}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -38,8 +53,16 @@ export default function InternalReview() {
   // User-mutated state — re-seeded from the loaded payload on every refresh.
   const [responses, setResponses] = useState([]);
   const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
   const [comments, setComments] = useState('');
   const [contentTab, setContentTab] = useState('Overview');
+  // Baseline signature of (responses, comments) as last loaded / saved.  Kept in
+  // state (not a ref) so updates trigger a re-render and the `hasChanges` memo
+  // recomputes — otherwise clearing the baseline on save would leave the memo
+  // reading a stale cached value and the Unsaved-changes UI wouldn't clear.
+  // Comments never come from the server, so after load baseline always reflects
+  // an empty comments field — typing anything flips the surface to dirty.
+  const [baselineSig, setBaselineSig] = useState('');
 
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -71,15 +94,26 @@ export default function InternalReview() {
       let checkData = null;
       if (checkRes.ok) {
         checkData = await checkRes.json();
-        setResponses(checkData.saved_responses || []);
+        const saved = checkData.saved_responses || [];
+        const savedComments = checkData.comments || '';
+        setResponses(saved);
+        setComments(savedComments);
+        // Reset dirty baseline to whatever the server just returned.
+        setBaselineSig(reviewSignature(saved, savedComments));
       }
       const statusData = statusRes.ok ? await statusRes.json() : null;
 
-      // Load AI analysis if linked — fire it from inside the loader so the
-      // hook tracks it under the same loading flag.
+      // Load cached AI analysis if linked. The cached GET endpoint returns
+      // null for SoWs that have never been analyzed, which is fine — the
+      // panel just stays empty until the reviewer hits "Run AI analysis".
       if (sowData.ai_suggestion_id) {
-        const aiRes = await authFetch(`/api/sow/${id}/ai-analyze`, { signal });
-        if (aiRes.ok) setAiAnalysis(await aiRes.json());
+        const cached = await aiClient.cachedAnalysis(authFetch, id, { signal });
+        if (cached.ok) {
+          setAiAnalysis(cached.data || null);
+          setAiError(null);
+        } else {
+          setAiError(cached.error);
+        }
       }
 
       return { sow: sowData, checklist: checkData, reviewStatus: statusData };
@@ -97,10 +131,34 @@ export default function InternalReview() {
   const checklist = data?.checklist ?? null;
   const reviewStatus = data?.reviewStatus ?? null;
 
+  // ── Dirty detection ─────────────────────────────────────────────────────
+  // Declared above the save/submit/advance handlers so `allowNextNavigation`
+  // isn't a forward-reference via closure. Suppressed once the reviewer has
+  // completed — the page goes read-only and any remaining drift is benign.
+  const isMyReviewDone = reviewStatus?.assignments?.some(
+    (a) => a.status === 'completed' && a.stage === STAGE_KEYS.ASSIGNMENT_INTERNAL_REVIEW
+  );
+
+  const hasChanges = useMemo(
+    () => !isMyReviewDone && !loading && reviewSignature(responses, comments) !== baselineSig,
+    [isMyReviewDone, loading, responses, comments, baselineSig]
+  );
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+    allowNextNavigation,
+  } = useUnsavedChangesWarning(hasChanges);
+
   // ── Save progress ─────────────────────────────────────────────────────────
 
   async function handleSaveProgress() {
     setSaving(true);
+    // Snapshot the signature of what we're ACTUALLY sending — if the user
+    // keeps typing during the round-trip, we don't want to quietly mark
+    // those newer edits as clean when the request returns.
+    const payloadSig = reviewSignature(responses, comments);
     try {
       const res = await authFetch(`/api/review/${id}/save-progress`, {
         method: 'POST',
@@ -108,6 +166,7 @@ export default function InternalReview() {
         body: JSON.stringify({ checklist_responses: responses, comments }),
       });
       if (!res.ok) throw new Error('Save failed');
+      setBaselineSig(payloadSig);
       showToast('Progress saved');
     } catch (err) {
       showToast(err.message, 'error');
@@ -120,6 +179,8 @@ export default function InternalReview() {
 
   async function handleSubmitDecision(decision, extras = {}) {
     setSubmitting(true);
+    const submittedComments = extras.comments || comments || '';
+    const payloadSig = reviewSignature(responses, submittedComments);
     try {
       const res = await authFetch(`/api/review/${id}/submit`, {
         method: 'POST',
@@ -135,6 +196,9 @@ export default function InternalReview() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `Submission failed (${res.status})`);
       }
+      // Reset dirty baseline so the unsaved-changes modal doesn't intercept the
+      // post-submit redirect while refresh() is still in flight.
+      setBaselineSig(payloadSig);
       setModal(null);
       showToast(
         decision === 'rejected' ? 'SoW returned to draft' : 'Review submitted successfully'
@@ -143,7 +207,10 @@ export default function InternalReview() {
       // server's view — the assignment may have flipped to "completed".
       await refresh();
       if (decision === 'rejected') {
-        setTimeout(() => router.push('/my-reviews'), 1500);
+        setTimeout(() => {
+          allowNextNavigation();
+          router.push('/my-reviews');
+        }, 1500);
       }
     } catch (err) {
       showToast(err.message, 'error');
@@ -163,7 +230,10 @@ export default function InternalReview() {
         throw new Error(body.detail || `Advance failed (${res.status})`);
       }
       showToast('Advanced to DRM Review');
-      setTimeout(() => router.push('/all-sows'), 1500);
+      setTimeout(() => {
+        allowNextNavigation();
+        router.push('/all-sows');
+      }, 1500);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -175,15 +245,15 @@ export default function InternalReview() {
 
   async function handleRunAI() {
     setRunningAI(true);
-    try {
-      const res = await authFetch(`/api/sow/${id}/ai-analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      setAiAnalysis(await res.json());
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, id);
+    setRunningAI(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setRunningAI(false);
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
     }
   }
 
@@ -194,9 +264,6 @@ export default function InternalReview() {
     responses.find((r) => r.id === i.id && r.checked)
   );
   const canApprove = requiredItems.length === 0 || checkedRequired.length === requiredItems.length;
-  const isMyReviewDone = reviewStatus?.assignments?.some(
-    (a) => a.status === 'completed' && a.stage === STAGE_KEYS.ASSIGNMENT_INTERNAL_REVIEW
-  );
 
   // ── Loading / error states ────────────────────────────────────────────────
 
@@ -264,6 +331,12 @@ export default function InternalReview() {
           submitting={submitting}
         />
       )}
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
 
       <div
         style={{
@@ -500,6 +573,9 @@ export default function InternalReview() {
                   </div>
 
                   {/* AI Panel */}
+                  {aiError && (
+                    <AIUnavailableBanner error={aiError} context="analysis" onRetry={handleRunAI} />
+                  )}
                   <AISuggestionsPanel
                     analysisResult={aiAnalysis}
                     collapsed={true}
@@ -547,10 +623,23 @@ export default function InternalReview() {
                     <div
                       style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}
                     >
+                      {hasChanges && !saving && (
+                        <span
+                          className="text-xs"
+                          style={{
+                            color: 'var(--color-warning)',
+                            fontWeight: 600,
+                            textAlign: 'right',
+                          }}
+                        >
+                          ● Unsaved changes
+                        </span>
+                      )}
                       <button
                         className="btn btn-secondary"
                         onClick={handleSaveProgress}
-                        disabled={saving}
+                        disabled={saving || !hasChanges}
+                        style={{ opacity: saving || !hasChanges ? 0.6 : 1 }}
                       >
                         {saving ? 'Saving...' : 'Save Progress'}
                       </button>

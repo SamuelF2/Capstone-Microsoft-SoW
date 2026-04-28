@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import TwoColumnGrid from './ui/TwoColumnGrid';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 function ScopeList({
   title,
@@ -113,7 +114,7 @@ function ScopeList({
             >
               ⠿
             </span>
-            <textarea
+            <HighlightedTextarea
               className="form-textarea"
               value={item.text}
               onChange={(e) => onTextChange(listKey, item.id, e.target.value)}
@@ -238,28 +239,32 @@ export default function ProjectScope({ data, onChange }) {
       />
 
       <TwoColumnGrid>
-        <ScopeList
-          title="In Scope"
-          items={inScope}
-          listKey="inScope"
-          onAdd={handleAdd}
-          onRemove={handleRemove}
-          onTextChange={handleTextChange}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        />
-        <ScopeList
-          title="Out of Scope"
-          items={outOfScope}
-          listKey="outOfScope"
-          onAdd={handleAdd}
-          onRemove={handleRemove}
-          onTextChange={handleTextChange}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-        />
+        <div data-subsection="projectScope:inScope">
+          <ScopeList
+            title="In Scope"
+            items={inScope}
+            listKey="inScope"
+            onAdd={handleAdd}
+            onRemove={handleRemove}
+            onTextChange={handleTextChange}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          />
+        </div>
+        <div data-subsection="projectScope:outOfScope">
+          <ScopeList
+            title="Out of Scope"
+            items={outOfScope}
+            listKey="outOfScope"
+            onAdd={handleAdd}
+            onRemove={handleRemove}
+            onTextChange={handleTextChange}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          />
+        </div>
       </TwoColumnGrid>
     </div>
   );

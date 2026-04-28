@@ -26,9 +26,24 @@ import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
 import ActivityLog from '../../components/ActivityLog';
 import DecisionModal from '../../components/review/DecisionModal';
+import UnsavedChangesModal from '../../components/UnsavedChangesModal';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
+import useUnsavedChangesWarning from '../../lib/hooks/useUnsavedChangesWarning';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
 import { roleLabel, STAGE_KEYS } from '../../lib/workflowStages';
+import { aiClient } from '../../lib/ai';
+import AIUnavailableBanner from '../../components/AIUnavailableBanner';
+
+// DRM comments are entered in the DecisionModal at submit time, not at the page
+// level — so dirty detection only hashes checklist responses. Sorted by id so
+// server-returned order variations don't register as drift.
+function responsesSignature(responses) {
+  return JSON.stringify(
+    (responses || [])
+      .map((x) => [x.id, !!x.checked, x.notes || ''])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+  );
+}
 
 const DECISION_COLORS = {
   approved: 'var(--color-success)',
@@ -485,6 +500,12 @@ export default function DrmReview() {
   // Local UI state — checklist responses are mutated by the user, so they
   // live outside the loaded payload (they get re-seeded on every refresh).
   const [responses, setResponses] = useState([]);
+  // Baseline signature of responses as last loaded / saved — used for dirty
+  // detection to drive the unsaved-changes modal and Save button state.
+  // Kept in state (not a ref) so clearing the baseline on save triggers the
+  // `hasChanges` memo to recompute — otherwise the Unsaved-changes indicator
+  // would linger with a stale cached value until another state change.
+  const [baselineSig, setBaselineSig] = useState('');
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
@@ -494,6 +515,10 @@ export default function DrmReview() {
   const [modal, setModal] = useState(null); // null | 'approved' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiError, setAiError] = useState(null);
+  const [insightsData, setInsightsData] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
 
   // ── Loader: parallel-fetches sow + checklist + status + workflow ────────
   const load = useCallback(
@@ -519,7 +544,20 @@ export default function DrmReview() {
       // Reseed checklist responses from the freshly loaded data — this is
       // intentionally outside the returned payload so the hook owns the
       // server state and React owns the user-mutated state.
-      setResponses(checklistData.saved_responses || []);
+      const saved = checklistData.saved_responses || [];
+      setResponses(saved);
+      setBaselineSig(responsesSignature(saved));
+
+      // Pull cached AI analysis from the canonical endpoint. The previous
+      // implementation read sow.ai_suggestion which doesn't exist on the
+      // /api/sow/{id} payload, so the panel was always empty.
+      const cached = await aiClient.cachedAnalysis(authFetch, id, { signal });
+      if (cached.ok) {
+        setAiAnalysis(cached.data || null);
+        setAiError(null);
+      } else {
+        setAiError(cached.error);
+      }
 
       return {
         sow: sowData,
@@ -548,6 +586,28 @@ export default function DrmReview() {
   const checklistRole = data?.checklistRole ?? '';
   const reviewStatus = data?.reviewStatus ?? null;
   const workflowData = data?.workflowData ?? null;
+
+  // ── Dirty detection ─────────────────────────────────────────────────────
+  // Declared above the save/submit/send-back handlers so `allowNextNavigation`
+  // isn't a forward-reference via closure. Skipped when the current user's
+  // review is already done (the page is read-only in that branch) and while
+  // the initial load is still in flight (baseline hasn't been seeded yet).
+  const myDrmAssignment = (reviewStatus?.assignments || []).find(
+    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.reviewer_role === checklistRole
+  );
+  const isMyDone = myDrmAssignment?.status === 'completed';
+
+  const hasChanges = useMemo(
+    () => !isMyDone && !loading && responsesSignature(responses) !== baselineSig,
+    [isMyDone, loading, responses, baselineSig]
+  );
+
+  const {
+    showModal: showUnsavedModal,
+    confirmLeave: confirmUnsavedLeave,
+    cancelLeave: cancelUnsavedLeave,
+    allowNextNavigation,
+  } = useUnsavedChangesWarning(hasChanges);
 
   // Compute send-back targets from workflow on_send_back transitions
   const sendBackTargets = useMemo(() => {
@@ -598,8 +658,34 @@ export default function DrmReview() {
     return () => ctrl.abort();
   }, [id, user, checklistRole, authFetch]);
 
+  // Load role-specific AI insights (gracefully degrades — returns empty if ML
+  // endpoint not yet shipped)
+  useEffect(() => {
+    if (!id || !user || !checklistRole) return;
+    const ctrl = new AbortController();
+    setInsightsLoading(true);
+    aiClient
+      .insights(authFetch, id, checklistRole, { signal: ctrl.signal })
+      .then((result) => {
+        if (!ctrl.signal.aborted) {
+          setInsightsData(result.ok ? result.data : null);
+        }
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setInsightsData(null);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setInsightsLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [id, user, checklistRole, authFetch]);
+
   async function handleSaveProgress() {
     setSaving(true);
+    // Snapshot the signature of what we're ACTUALLY sending — if the user
+    // keeps editing during the round-trip, those newer edits stay dirty
+    // instead of being silently marked clean on success.
+    const payloadSig = responsesSignature(responses);
     try {
       const res = await authFetch(`/api/review/${id}/save-progress`, {
         method: 'POST',
@@ -607,6 +693,10 @@ export default function DrmReview() {
         body: JSON.stringify({ checklist_responses: responses, comments: '' }),
       });
       if (!res.ok) throw new Error('Save failed');
+      // Reset dirty baseline to what we just successfully persisted.  loadAll()
+      // below will overwrite it again with the server response, but doing it
+      // here first avoids a transient "unsaved" flash while the reload runs.
+      setBaselineSig(payloadSig);
       showToast('Progress saved');
       await loadAll();
     } catch (err) {
@@ -618,6 +708,7 @@ export default function DrmReview() {
 
   async function handleDecisionSubmit({ decision, comments, conditions }) {
     setSubmitting(true);
+    const payloadSig = responsesSignature(responses);
     try {
       const res = await authFetch(`/api/review/${id}/submit`, {
         method: 'POST',
@@ -628,12 +719,18 @@ export default function DrmReview() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `Submit failed (${res.status})`);
       }
+      // Clear dirty state immediately so the post-submit redirect isn't
+      // intercepted by the unsaved-changes modal.
+      setBaselineSig(payloadSig);
       const resBody = await res.json().catch(() => ({}));
       setModal(null);
 
       if (resBody.auto_advanced) {
         showToast('Review submitted — automatically advanced to next stage');
-        setTimeout(() => router.push('/drm-dashboard'), 1500);
+        setTimeout(() => {
+          allowNextNavigation();
+          router.push('/drm-dashboard');
+        }, 1500);
         return;
       }
 
@@ -671,7 +768,9 @@ export default function DrmReview() {
         throw new Error(err.detail || `Send-back failed (${res.status})`);
       }
       setModal(null);
+      setBaselineSig(responsesSignature(responses));
       showToast('SoW sent back for revision');
+      allowNextNavigation();
       router.replace('/drm-dashboard');
     } catch (err) {
       showToast(err.message, 'error');
@@ -702,15 +801,15 @@ export default function DrmReview() {
 
   async function handleRunAI() {
     setAiLoading(true);
-    try {
-      const res = await authFetch(`/api/sow/${id}/analyze`, { method: 'POST' });
-      if (!res.ok) throw new Error('AI analysis failed');
-      await loadAll();
+    setAiError(null);
+    const result = await aiClient.runAnalysis(authFetch, id);
+    setAiLoading(false);
+    if (result.ok) {
+      setAiAnalysis(result.data);
       showToast('AI analysis complete');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setAiLoading(false);
+    } else {
+      setAiError(result.error);
+      showToast(result.error.message, 'error');
     }
   }
 
@@ -723,12 +822,6 @@ export default function DrmReview() {
       (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.status === 'completed'
     ) ?? false;
 
-  // More precise: is the current user's assignment done?
-  const myDrmAssignment = (reviewStatus?.assignments || []).find(
-    (a) => a.stage === STAGE_KEYS.ASSIGNMENT_DRM_APPROVAL && a.reviewer_role === checklistRole
-  );
-  const isMyDone = myDrmAssignment?.status === 'completed';
-
   const requiredIds = checklistItems.filter((i) => i.required).map((i) => i.id);
   const checkedIds = responses.filter((r) => r.checked).map((r) => r.id);
   const allRequiredChecked = requiredIds.every((id) => checkedIds.includes(id));
@@ -737,7 +830,7 @@ export default function DrmReview() {
   const canAdvance = gatingMet && sow?.status === STAGE_KEYS.DRM_REVIEW;
   const alreadyApproved = sow?.status === 'approved';
 
-  const aiResult = sow?.ai_suggestion || null;
+  const aiResult = aiAnalysis;
 
   if (loading) {
     return (
@@ -812,6 +905,12 @@ export default function DrmReview() {
           availableStages={sendBackTargets}
         />
       )}
+
+      <UnsavedChangesModal
+        open={showUnsavedModal}
+        onStay={cancelUnsavedLeave}
+        onLeave={confirmUnsavedLeave}
+      />
 
       <div
         style={{
@@ -995,6 +1094,98 @@ export default function DrmReview() {
                   summaryData={summaryData}
                   loading={summaryLoading}
                 />
+
+                {/* AI role-specific insights — hidden when endpoint not shipped */}
+                {insightsLoading && (
+                  <div
+                    style={{
+                      marginTop: 'var(--spacing-md)',
+                      padding: 'var(--spacing-md)',
+                      borderRadius: 'var(--radius-lg)',
+                      border: '1px solid var(--color-border-default)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--color-text-tertiary)',
+                      }}
+                    >
+                      Loading AI insights…
+                    </span>
+                  </div>
+                )}
+                {!insightsLoading && insightsData?.summary && (
+                  <div
+                    style={{
+                      marginTop: 'var(--spacing-md)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-lg)',
+                      overflow: 'hidden',
+                      backgroundColor: 'var(--color-bg-primary)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: 'var(--spacing-sm) var(--spacing-md)',
+                        borderBottom: '1px solid var(--color-border-default)',
+                        backgroundColor: 'var(--color-bg-secondary)',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 'var(--font-size-xs)',
+                          fontWeight: 'var(--font-weight-semibold)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          color: 'var(--color-text-tertiary)',
+                        }}
+                      >
+                        AI Insights
+                      </span>
+                    </div>
+                    <div style={{ padding: 'var(--spacing-md)' }}>
+                      <p
+                        style={{
+                          margin: '0 0 var(--spacing-sm)',
+                          fontSize: 'var(--font-size-sm)',
+                          color: 'var(--color-text-primary)',
+                          lineHeight: 'var(--line-height-relaxed)',
+                        }}
+                      >
+                        {insightsData.summary}
+                      </p>
+                      {Array.isArray(insightsData.flags) && insightsData.flags.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            marginTop: 'var(--spacing-xs)',
+                          }}
+                        >
+                          {insightsData.flags.map((flag, i) => (
+                            <div
+                              key={i}
+                              style={{
+                                fontSize: 'var(--font-size-xs)',
+                                color: 'var(--color-warning)',
+                                padding: '2px 0 2px 8px',
+                              }}
+                            >
+                              ⚠{' '}
+                              {typeof flag === 'string'
+                                ? flag
+                                : flag.message || JSON.stringify(flag)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1054,6 +1245,9 @@ export default function DrmReview() {
               </div>
 
               {/* AI panel */}
+              {aiError && (
+                <AIUnavailableBanner error={aiError} context="analysis" onRetry={handleRunAI} />
+              )}
               <AISuggestionsPanel
                 analysisResult={aiResult}
                 collapsed={true}
@@ -1075,11 +1269,26 @@ export default function DrmReview() {
                     gap: 'var(--spacing-sm)',
                   }}
                 >
+                  {hasChanges && !saving && (
+                    <span
+                      className="text-xs"
+                      style={{
+                        color: 'var(--color-warning)',
+                        fontWeight: 600,
+                        textAlign: 'center',
+                      }}
+                    >
+                      ● Unsaved changes
+                    </span>
+                  )}
                   <button
                     className="btn btn-secondary btn-sm"
                     onClick={handleSaveProgress}
-                    disabled={saving}
-                    style={{ width: '100%' }}
+                    disabled={saving || !hasChanges}
+                    style={{
+                      width: '100%',
+                      opacity: saving || !hasChanges ? 0.6 : 1,
+                    }}
                   >
                     {saving ? 'Saving…' : 'Save Progress'}
                   </button>

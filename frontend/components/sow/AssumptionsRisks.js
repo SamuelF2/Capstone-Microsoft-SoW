@@ -1,6 +1,7 @@
 import { genId } from '../../lib/ids';
 import SectionHeader from './ui/SectionHeader';
 import { HorizontalCardList, ListCard, AddCardButton } from './ui/HorizontalCardList';
+import HighlightedTextarea from './ui/HighlightedTextarea';
 
 const ASSUMPTION_LABELS = ['Assumption', 'Technical', 'Customer Responsibility', 'Other'];
 const SEVERITY_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
@@ -37,7 +38,7 @@ function AssumptionCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Description
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.text}
           onChange={(e) => onChange({ ...item, text: e.target.value })}
@@ -57,7 +58,7 @@ function ResponsibilityCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Responsibility
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.text}
           onChange={(e) => onChange({ ...item, text: e.target.value })}
@@ -77,7 +78,7 @@ function RiskCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Risk Description <span style={{ color: 'var(--color-error)' }}>*</span>
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.description}
           onChange={(e) => onChange({ ...item, description: e.target.value })}
@@ -127,7 +128,7 @@ function RiskCard({ item, onChange, onRemove }) {
         <label className="form-label" style={{ fontSize: 'var(--font-size-xs)' }}>
           Mitigation Strategy
         </label>
-        <textarea
+        <HighlightedTextarea
           className="form-textarea"
           value={item.mitigation}
           onChange={(e) => onChange({ ...item, mitigation: e.target.value })}
@@ -198,65 +199,71 @@ export default function AssumptionsRisks({ data, onChange }) {
       />
 
       {/* Assumptions */}
-      <SectionDivider
-        title="Assumptions"
-        description="List all assumptions underpinning the scope, timeline, and cost of this engagement."
-      />
-      <HorizontalCardList>
-        {assumptions.map((item) => (
-          <AssumptionCard
-            key={item.id}
-            item={item}
-            onChange={changeAssumption}
-            onRemove={() => removeAssumption(item.id)}
-          />
-        ))}
-        <AddCardButton
-          label="Add Assumption"
-          onClick={addAssumption}
-          width="200px"
-          minHeight="160px"
+      <div data-subsection="assumptionsRisks:assumptions">
+        <SectionDivider
+          title="Assumptions"
+          description="List all assumptions underpinning the scope, timeline, and cost of this engagement."
         />
-      </HorizontalCardList>
+        <HorizontalCardList>
+          {assumptions.map((item) => (
+            <AssumptionCard
+              key={item.id}
+              item={item}
+              onChange={changeAssumption}
+              onRemove={() => removeAssumption(item.id)}
+            />
+          ))}
+          <AddCardButton
+            label="Add Assumption"
+            onClick={addAssumption}
+            width="200px"
+            minHeight="160px"
+          />
+        </HorizontalCardList>
+      </div>
 
       {/* Customer Responsibilities */}
-      <SectionDivider
-        title="Customer Responsibilities"
-        description="Define the actions and obligations the customer must fulfil for the project to succeed."
-      />
-      <HorizontalCardList>
-        {customerResponsibilities.map((item) => (
-          <ResponsibilityCard
-            key={item.id}
-            item={item}
-            onChange={changeResponsibility}
-            onRemove={() => removeResponsibility(item.id)}
-          />
-        ))}
-        <AddCardButton
-          label="Add Responsibility"
-          onClick={addResponsibility}
-          width="200px"
-          minHeight="160px"
+      <div data-subsection="assumptionsRisks:customerResponsibilities">
+        <SectionDivider
+          title="Customer Responsibilities"
+          description="Define the actions and obligations the customer must fulfil for the project to succeed."
         />
-      </HorizontalCardList>
+        <HorizontalCardList>
+          {customerResponsibilities.map((item) => (
+            <ResponsibilityCard
+              key={item.id}
+              item={item}
+              onChange={changeResponsibility}
+              onRemove={() => removeResponsibility(item.id)}
+            />
+          ))}
+          <AddCardButton
+            label="Add Responsibility"
+            onClick={addResponsibility}
+            width="200px"
+            minHeight="160px"
+          />
+        </HorizontalCardList>
+      </div>
 
       {/* Risks */}
-      <SectionDivider
-        title="Risks"
-        description="Identify potential risks to project delivery along with their severity and mitigation plans."
-      />
-      <HorizontalCardList>
-        {risks.map((item) => (
-          <RiskCard
-            key={item.id}
-            item={item}
-            onChange={changeRisk}
-            onRemove={() => removeRisk(item.id)}
-          />
-        ))}
-        <AddCardButton label="Add Risk" onClick={addRisk} width="200px" minHeight="160px" />
-      </HorizontalCardList>
+      <div data-subsection="assumptionsRisks:risks">
+        <SectionDivider
+          title="Risks"
+          description="Identify potential risks to project delivery along with their severity and mitigation plans."
+        />
+        <HorizontalCardList>
+          {risks.map((item) => (
+            <RiskCard
+              key={item.id}
+              item={item}
+              onChange={changeRisk}
+              onRemove={() => removeRisk(item.id)}
+            />
+          ))}
+          <AddCardButton label="Add Risk" onClick={addRisk} width="200px" minHeight="160px" />
+        </HorizontalCardList>
+      </div>
     </div>
   );
 }

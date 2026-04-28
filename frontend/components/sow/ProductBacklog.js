@@ -122,7 +122,7 @@ export default function ProductBacklog({ data, onChange }) {
   const totalPoints = items.reduce((sum, i) => sum + (parseInt(i.storyPoints) || 0), 0);
 
   return (
-    <div>
+    <div data-subsection="productBacklog:items">
       <SectionHeader
         title="Product Backlog"
         description="Define the initial product backlog for this engagement. Each item represents a user story or feature to be delivered."

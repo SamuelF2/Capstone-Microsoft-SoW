@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -10,8 +10,133 @@ import WorkflowProgress from '../../components/WorkflowProgress';
 import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
 import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPanel';
 import ActivityLog from '../../components/ActivityLog';
+import ContextSidebar from '../../components/ai-context/ContextSidebar';
+import AssistChat from '../../components/ai-assist/AssistChat';
+import SectionImproveModal from '../../components/ai-assist/SectionImproveModal';
+import SidebarConnector from '../../components/ai-assist/SidebarConnector';
 import { getTabConfig } from '../../lib/draftTabs';
 import { STAGE_KEYS } from '../../lib/workflowStages';
+import {
+  hydrateIds,
+  getSubSectionLabel,
+  getSubSectionFieldKey,
+  extractSubSectionText,
+} from '../../lib/sectionSchemas';
+import { BannedPhrasesProvider } from '../../contexts/BannedPhrasesContext';
+
+// Map a tab key (from draftTabs registry) to the sowData fields the AI
+// context sidebar should query against. Falls back to the tab key itself.
+const TAB_KEY_TO_SOW_FIELDS = {
+  overview: ['executiveSummary'],
+  scope: ['projectScope', 'cloudAdoptionScope'],
+  approach: ['agileApproach', 'productBacklog'],
+  deliverables: ['deliverables', 'phasesDeliverables'],
+  phases: ['phasesDeliverables'],
+  backlog: ['productBacklog'],
+  team: ['teamStructure'],
+  pricing: ['pricing'],
+  assumptions: ['assumptionsRisks'],
+  'assumptions-risks': ['assumptionsRisks'],
+  support: ['supportTransition'],
+  'support-transition': ['supportTransition'],
+  migration: ['migrationStrategy', 'workloadAssessment'],
+};
+
+/**
+ * Extract human-readable text from a structured section value.
+ * Avoids JSON.stringify, which produces garbage for objects and confuses
+ * the AI prompt / "Original" panel in the improve modal.
+ */
+function sectionToText(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+
+  // executiveSummary: { content: "..." }
+  if (typeof value.content === 'string') return value.content;
+
+  const lines = [];
+
+  // projectScope / cloudAdoptionScope: { inScope: [{text}], outOfScope: [{text}] }
+  if (Array.isArray(value.inScope) || Array.isArray(value.outOfScope)) {
+    if (value.inScope?.length) {
+      lines.push('In Scope:');
+      value.inScope.forEach((item) => lines.push(`- ${item.text || ''}`));
+    }
+    if (value.outOfScope?.length) {
+      lines.push('Out of Scope:');
+      value.outOfScope.forEach((item) => lines.push(`- ${item.text || ''}`));
+    }
+    return lines.join('\n');
+  }
+
+  // deliverables: [{ name, description, acceptanceCriteria, ... }]
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        const parts = [];
+        if (item.name) parts.push(item.name);
+        if (item.description) parts.push(item.description);
+        if (item.acceptanceCriteria) parts.push(`Acceptance: ${item.acceptanceCriteria}`);
+        if (item.text) parts.push(item.text);
+        return parts.join('\n') || JSON.stringify(item);
+      })
+      .join('\n\n');
+  }
+
+  // teamStructure: { members: [...], supportTransitionPlan: "..." }
+  if (Array.isArray(value.members)) {
+    value.members.forEach((m) => {
+      lines.push(
+        `${m.role || 'Role'}: ${m.assignedPerson || 'TBD'} (${m.onshore || 0} onshore, ${m.offshore || 0} offshore)`
+      );
+    });
+    if (value.supportTransitionPlan)
+      lines.push(`\nSupport Transition Plan:\n${value.supportTransitionPlan}`);
+    return lines.join('\n');
+  }
+
+  // assumptionsRisks: { assumptions: [...], customerResponsibilities: [...], risks: [...] }
+  if (Array.isArray(value.assumptions) || Array.isArray(value.risks)) {
+    if (value.assumptions?.length) {
+      lines.push('Assumptions:');
+      value.assumptions.forEach((a) =>
+        lines.push(`- [${a.label || 'Assumption'}] ${a.text || ''}`)
+      );
+    }
+    if (value.customerResponsibilities?.length) {
+      lines.push('Customer Responsibilities:');
+      value.customerResponsibilities.forEach((r) => lines.push(`- ${r.text || ''}`));
+    }
+    if (value.risks?.length) {
+      lines.push('Risks:');
+      value.risks.forEach((r) =>
+        lines.push(
+          `- [${r.severity || 'Medium'}] ${r.description || ''}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`
+        )
+      );
+    }
+    return lines.join('\n');
+  }
+
+  // Fallback: walk string properties (avoids numeric-key garbage from corrupted objects)
+  const textFields = Object.entries(value)
+    .filter(([k, v]) => typeof v === 'string' && !/^\d+$/.test(k))
+    .map(([, v]) => v);
+  return textFields.join('\n\n') || JSON.stringify(value);
+}
+
+function extractFocusedText(sowData, tabKey) {
+  if (!sowData || !tabKey) return '';
+  const fields = TAB_KEY_TO_SOW_FIELDS[tabKey] || [tabKey];
+  const parts = [];
+  for (const f of fields) {
+    const v = sowData[f];
+    if (!v) continue;
+    parts.push(sectionToText(v));
+  }
+  return parts.join('\n\n');
+}
 
 // ─── Methodology badge colours ────────────────────────────────────────────────
 
@@ -67,6 +192,8 @@ export default function DraftPage() {
   //   can cancel it before its own PATCH to prevent a save race.
   const lastServerContentRef = useRef(null);
   const debounceTimerRef = useRef(null);
+  const gridRef = useRef(null);
+  const sidebarRef = useRef(null);
 
   // Load SoW from backend
   useEffect(() => {
@@ -88,7 +215,24 @@ export default function DraftPage() {
           return;
         }
         const data = await res.json();
-        const content = data.content || {};
+        const content = { ...(data.content || {}) };
+        // The backend stores methodology in its own column, not inside the
+        // content JSONB.  Merge it into the in-memory sowData under the key
+        // the tab/registry + readiness checks already expect, so every tab
+        // resolves to its methodology-specific config instead of falling
+        // through to the "No content configured" placeholder.
+        if (!content.deliveryMethodology && data.methodology) {
+          content.deliveryMethodology = data.methodology;
+        }
+        // Mirror other top-level fields the header row renders directly
+        // from sowData (title, customer, opportunity, deal value, status).
+        if (!content.sowTitle && data.title) content.sowTitle = data.title;
+        if (!content.customerName && data.customer_name) content.customerName = data.customer_name;
+        if (!content.opportunityId && data.opportunity_id)
+          content.opportunityId = data.opportunity_id;
+        if (content.dealValue == null && data.deal_value != null)
+          content.dealValue = data.deal_value;
+        if (!content.status && data.status) content.status = data.status;
         // Snapshot the loaded content so the auto-save effect can detect
         // that the next sowData change came from the server (not the user)
         // and skip the redundant PATCH-back.
@@ -150,17 +294,72 @@ export default function DraftPage() {
   };
 
   const [showConfirm, setShowConfirm] = useState(false);
-  const [similarSows, setSimilarSows] = useState([]);
   const [showActivity, setShowActivity] = useState(false);
+  const [improveModalOpen, setImproveModalOpen] = useState(false);
+  const [improveBtnHover, setImproveBtnHover] = useState(false);
+  const [bannedPhrases, setBannedPhrases] = useState([]);
+  const [focusedSubSection, setFocusedSubSection] = useState(null);
 
-  // Fetch similar SoWs from AI proxy (non-blocking, silent fail)
-  useEffect(() => {
-    if (!id || !authFetch) return;
-    authFetch(`/api/ai/sow/${id}/similar`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setSimilarSows(data))
-      .catch(() => {});
-  }, [id, authFetch]);
+  // Track which sub-section the user last interacted with via focus/click.
+  // Reads the closest data-subsection attribute from the event target.
+  const handleContentFocus = useCallback((e) => {
+    const el = e.target.closest?.('[data-subsection]');
+    if (el) setFocusedSubSection(el.getAttribute('data-subsection'));
+  }, []);
+
+  // Replace a banned phrase in the focused section's text fields.
+  const handleFixPhrase = (phrase, suggestion) => {
+    if (!phrase || suggestion == null) return;
+    const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
+    if (fields.length === 0) return;
+    const fieldKey = fields[0];
+    const current = sowData?.[fieldKey];
+    if (current == null) return;
+
+    const re = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const replaceInStr = (s) => (typeof s === 'string' ? s.replace(re, suggestion) : s);
+
+    if (typeof current === 'string') {
+      updateSection(fieldKey, replaceInStr(current));
+    } else if (typeof current === 'object' && !Array.isArray(current)) {
+      const updated = { ...current };
+      // Walk known text fields in structured sections
+      for (const key of Object.keys(updated)) {
+        const val = updated[key];
+        if (typeof val === 'string') {
+          updated[key] = replaceInStr(val);
+        } else if (Array.isArray(val)) {
+          updated[key] = val.map((item) => {
+            if (typeof item === 'string') return replaceInStr(item);
+            if (typeof item === 'object' && item !== null) {
+              const patched = { ...item };
+              for (const ik of Object.keys(patched)) {
+                if (typeof patched[ik] === 'string') patched[ik] = replaceInStr(patched[ik]);
+              }
+              return patched;
+            }
+            return item;
+          });
+        }
+      }
+      updateSection(fieldKey, updated);
+    } else if (Array.isArray(current)) {
+      updateSection(
+        fieldKey,
+        current.map((item) => {
+          if (typeof item === 'string') return replaceInStr(item);
+          if (typeof item === 'object' && item !== null) {
+            const patched = { ...item };
+            for (const ik of Object.keys(patched)) {
+              if (typeof patched[ik] === 'string') patched[ik] = replaceInStr(patched[ik]);
+            }
+            return patched;
+          }
+          return item;
+        })
+      );
+    }
+  };
 
   // ── Methodology-aware readiness checks ────────────────────────────────────
   const methodology = sowData?.deliveryMethodology;
@@ -289,6 +488,9 @@ export default function DraftPage() {
     bg: 'var(--color-bg-tertiary)',
     color: 'var(--color-text-secondary)',
   };
+
+  const activeTabConfig = tabs[activeTab] || null;
+  const focusedSectionText = extractFocusedText(sowData, activeTabConfig?.key);
 
   return (
     <>
@@ -522,7 +724,11 @@ export default function DraftPage() {
             {tabs.map((tab, idx) => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(idx)}
+                onClick={() => {
+                  setActiveTab(idx);
+                  setFocusedSubSection(null);
+                  setImproveModalOpen(false);
+                }}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -573,30 +779,175 @@ export default function DraftPage() {
           </div>
         </div>
 
-        {/* Tab content */}
+        {/* Tab content + AI context sidebar */}
         <div
+          ref={gridRef}
           style={{
+            position: 'relative',
             maxWidth: 'var(--container-xl)',
             margin: '0 auto',
             padding: 'var(--spacing-2xl) var(--spacing-xl)',
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) 320px',
+            gap: 'var(--spacing-xl)',
+            alignItems: 'start',
           }}
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, x: 12 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -12 }}
-              transition={{ duration: 0.2 }}
-            >
-              {tabs.length > 0 && tabs[activeTab] ? (
-                tabs[activeTab].render(sowData, updateSection)
-              ) : (
-                <p className="text-secondary">No content configured for this methodology.</p>
-              )}
-            </motion.div>
-          </AnimatePresence>
+          {/* SVG connector lines from subsection to sidebar */}
+          <SidebarConnector
+            containerRef={gridRef}
+            sidebarRef={sidebarRef}
+            focusedSubSection={focusedSubSection}
+            visible={improveBtnHover && !improveModalOpen}
+          />
+
+          {/* Section editor — always visible */}
+          <div
+            style={{ minWidth: 0 }}
+            onFocusCapture={handleContentFocus}
+            onClickCapture={handleContentFocus}
+          >
+            {/* Sub-section highlight when hovering "Improve with AI" */}
+            {improveBtnHover && focusedSubSection && (
+              <style>{`
+                [data-subsection="${focusedSubSection}"] {
+                  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35),
+                              0 0 24px rgba(59, 130, 246, 0.12);
+                  border-radius: var(--radius-lg);
+                  transition: box-shadow 0.2s ease, background-color 0.2s ease;
+                  background-color: rgba(59, 130, 246, 0.07);
+                }
+              `}</style>
+            )}
+            <BannedPhrasesProvider phrases={bannedPhrases} fixPhrase={handleFixPhrase}>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {tabs.length > 0 && tabs[activeTab] ? (
+                    tabs[activeTab].render(sowData, updateSection)
+                  ) : (
+                    <p className="text-secondary">No content configured for this methodology.</p>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </BannedPhrasesProvider>
+          </div>
+
+          {/* Sidebar column */}
+          <div
+            ref={sidebarRef}
+            style={{
+              position: 'sticky',
+              top: 'clamp(var(--spacing-md), calc(50vh - 300px), 30vh)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--spacing-md)',
+            }}
+          >
+            <div style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+              <ContextSidebar
+                authFetch={authFetch}
+                sowId={id}
+                focusedSectionText={focusedSectionText}
+                focusedSectionLabel={activeTabConfig?.label}
+                onBannedPhrasesChange={setBannedPhrases}
+                onFixPhrase={handleFixPhrase}
+              />
+            </div>
+
+            {/* Improve with AI button — below context sidebar */}
+            {activeTabConfig && focusedSectionText?.trim() && !improveModalOpen && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setImproveModalOpen(true)}
+                onMouseEnter={() => setImproveBtnHover(true)}
+                onMouseLeave={() => setImproveBtnHover(false)}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                  fontSize: 'var(--font-size-sm)',
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-word',
+                  textAlign: 'center',
+                }}
+              >
+                <span style={{ fontSize: '14px' }}>&#10024;</span>
+                Improve{focusedSubSection ? ` ${getSubSectionLabel(focusedSubSection)}` : ''} with
+                AI
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Centred "Improve with AI" modal */}
+        <SectionImproveModal
+          open={improveModalOpen}
+          onClose={() => {
+            setImproveModalOpen(false);
+            setImproveBtnHover(false);
+          }}
+          onAccept={(value) => {
+            const fieldKey = focusedSubSection
+              ? getSubSectionFieldKey(focusedSubSection)
+              : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0];
+            if (!fieldKey) return;
+
+            // When a sub-section is focused (e.g. "agileApproach:sprints"),
+            // merge only the improved sub-field into the parent object instead
+            // of replacing the entire parent — this preserves sibling fields.
+            const subField = focusedSubSection ? focusedSubSection.split(':')[1] : null;
+
+            if (typeof value === 'object' && value !== null) {
+              const hydrated = hydrateIds(fieldKey, value);
+              if (
+                subField &&
+                typeof hydrated === 'object' &&
+                !Array.isArray(hydrated) &&
+                subField in hydrated
+              ) {
+                setSowData((prev) => ({
+                  ...prev,
+                  [fieldKey]: { ...prev[fieldKey], [subField]: hydrated[subField] },
+                }));
+              } else {
+                updateSection(fieldKey, hydrated);
+              }
+            } else if (subField) {
+              // Plain text for a sub-section — merge into parent object
+              setSowData((prev) => ({
+                ...prev,
+                [fieldKey]: { ...prev[fieldKey], [subField]: value },
+              }));
+            } else {
+              updateSection(fieldKey, value);
+            }
+          }}
+          authFetch={authFetch}
+          sowId={id}
+          sectionLabel={
+            (focusedSubSection && getSubSectionLabel(focusedSubSection)) || activeTabConfig?.label
+          }
+          originalText={
+            focusedSubSection
+              ? extractSubSectionText(focusedSubSection, sowData)
+              : focusedSectionText
+          }
+          sectionKey={
+            focusedSubSection
+              ? getSubSectionFieldKey(focusedSubSection)
+              : (TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [])[0]
+          }
+        />
 
         {/* Bottom navigation */}
         <div
@@ -719,88 +1070,6 @@ export default function DraftPage() {
           </div>
         </div>
 
-        {/* Similar SoWs Panel */}
-        {similarSows.length > 0 && (
-          <div
-            style={{
-              maxWidth: 'var(--container-xl)',
-              margin: '0 auto',
-              padding: '0 var(--spacing-xl) var(--spacing-lg)',
-            }}
-          >
-            <div className="card">
-              <h3
-                className="text-base font-semibold"
-                style={{
-                  marginBottom: 'var(--spacing-md)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--spacing-sm)',
-                }}
-              >
-                <span style={{ color: 'var(--color-accent-purple-light)' }}>&#128279;</span>
-                Similar SoWs
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-                {similarSows.map((s, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      padding: 'var(--spacing-sm) var(--spacing-md)',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--color-bg-tertiary)',
-                    }}
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{s.title}</p>
-                      {s.methodology && <p className="text-xs text-tertiary">{s.methodology}</p>}
-                      {s.overlap_areas?.length > 0 && (
-                        <div
-                          style={{
-                            display: 'flex',
-                            gap: 'var(--spacing-xs)',
-                            marginTop: 2,
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          {s.overlap_areas.map((a) => (
-                            <span
-                              key={a}
-                              style={{
-                                fontSize: 'var(--font-size-xs)',
-                                padding: '1px 6px',
-                                borderRadius: 'var(--radius-full)',
-                                backgroundColor: 'rgba(139,92,246,0.1)',
-                                color: 'var(--color-accent-purple-light)',
-                              }}
-                            >
-                              {a}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: 'var(--font-size-sm)',
-                        fontWeight: 600,
-                        color: 'var(--color-accent-purple-light)',
-                        whiteSpace: 'nowrap',
-                        marginLeft: 'var(--spacing-md)',
-                      }}
-                    >
-                      {Math.round(s.similarity * 100)}% match
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Activity Log Panel */}
         <div
           style={{
@@ -833,6 +1102,29 @@ export default function DraftPage() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Docked AI assistant */}
+        <div
+          style={{
+            position: 'fixed',
+            right: 'var(--spacing-lg)',
+            bottom: 'var(--spacing-lg)',
+            width: 360,
+            maxWidth: 'calc(100vw - var(--spacing-lg) * 2)',
+            zIndex: 900,
+          }}
+        >
+          <AssistChat
+            authFetch={authFetch}
+            sowId={id}
+            onInsert={(text) => {
+              const fields = TAB_KEY_TO_SOW_FIELDS[activeTabConfig?.key] || [];
+              if (fields.length > 0) {
+                updateSection(fields[0], text);
+              }
+            }}
+          />
         </div>
 
         {/* Confirmation modal */}
