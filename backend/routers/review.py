@@ -748,11 +748,48 @@ async def _apply_review_decision(
         )
 
     # For approving decisions: every required checklist item must be checked.
+    # Source the required-item set from the same workflow-snapshot-aware
+    # config the reviewer's checklist UI uses (``_get_role_checklist_config``).
+    # The static ``_load_checklist`` returns ``items: []`` for any role not in
+    # ``review-checklists.json`` (e.g. Microsoft Default Workflow roles like
+    # ``responsible-ai-lead``), which would silently pass the gate.
     if payload.decision in ("approved", "approved-with-conditions"):
-        checklist_data = _load_checklist(assignment["reviewer_role"])
-        required_ids = {
-            item["id"] for item in checklist_data.get("items", []) if item.get("required")
-        }
+        role_cfg = await _get_role_checklist_config(conn, assignment)
+        configured_mode = (role_cfg or {}).get("checklist_mode")
+        required_ids: set[str] = set()
+
+        if configured_mode == "manual":
+            # Manual mode: every author-curated item is required.
+            seed_items = (role_cfg or {}).get("checklist_items") or []
+            required_ids = {
+                str(item.get("id"))
+                for item in seed_items
+                if item.get("id") is not None and (item.get("text") or "").strip()
+            }
+        elif configured_mode == "ai":
+            # AI mode: the per-assignment cache holds the exact items the
+            # reviewer was shown. Every cached item is required.
+            cache_row = await conn.fetchrow(
+                "SELECT items FROM reviewer_checklist_cache WHERE assignment_id = $1",
+                assignment["id"],
+            )
+            if cache_row is not None:
+                raw_items = cache_row["items"]
+                if isinstance(raw_items, str):
+                    raw_items = json.loads(raw_items)
+                if isinstance(raw_items, list):
+                    required_ids = {
+                        str(item.get("id")) for item in raw_items if item.get("id") is not None
+                    }
+
+        if not required_ids:
+            # Legacy SoW with no workflow snapshot, or AI mode with no cache
+            # yet. Fall back to the hardcoded checklist's `required` flag.
+            checklist_data = _load_checklist(assignment["reviewer_role"])
+            required_ids = {
+                item["id"] for item in checklist_data.get("items", []) if item.get("required")
+            }
+
         checked_ids = {r["id"] for r in payload.checklist_responses if r.get("checked")}
         missing = required_ids - checked_ids
         if missing:

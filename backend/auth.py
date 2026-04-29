@@ -13,6 +13,7 @@ Usage in a route:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Annotated
 
@@ -27,6 +28,8 @@ from models import UserResponse
 # Mirror frontend/pages/account.js AVAILABLE_ROLES — keep these in lockstep.
 # This is the testing-only Role Override surface; the JWT-derived role from
 # Entra ID is still the source of truth in the database.
+# system-admin is intentionally excluded: allowing it here would let any
+# authenticated user self-escalate past require_system_admin gates.
 _OVERRIDABLE_ROLES = {
     "consultant",
     "solution-architect",
@@ -34,8 +37,11 @@ _OVERRIDABLE_ROLES = {
     "cpl",
     "cdp",
     "delivery-manager",
-    "system-admin",
 }
+
+# Role override is a dev/test affordance only. Disabled in production so a
+# stolen JWT can't be combined with a header to assume any other persona.
+_ROLE_OVERRIDE_ENV_ALLOWED = {"development", "test"}
 
 logger = logging.getLogger(__name__)
 
@@ -203,10 +209,11 @@ async def get_current_user(
             detail="Account is inactive",
         )
 
-    # Testing-only role swap. Only known roles are accepted so a typo
-    # ("admin", "sysadmin") falls through silently rather than locking the
-    # caller out of every role-gated route.
-    if role_override:
+    # Testing-only role swap. Only honored in development/test; the override
+    # set excludes system-admin so it can never grant elevated privilege. A
+    # typo ("admin", "sysadmin") falls through silently rather than locking
+    # the caller out of every role-gated route.
+    if role_override and os.getenv("ENV", "development") in _ROLE_OVERRIDE_ENV_ALLOWED:
         normalized = role_override.strip().lower()
         if normalized in _OVERRIDABLE_ROLES:
             user = user.model_copy(update={"role": normalized})

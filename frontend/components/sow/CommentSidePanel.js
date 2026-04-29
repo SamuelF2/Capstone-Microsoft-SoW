@@ -523,8 +523,8 @@ function ThreadCard({
   );
 }
 
-function cardActionStyle() {
-  return {
+function cardActionStyle(variant) {
+  const base = {
     background: 'none',
     border: '1px solid var(--color-border-default)',
     borderRadius: 'var(--radius-sm)',
@@ -533,4 +533,14 @@ function cardActionStyle() {
     fontSize: '11px',
     color: 'var(--color-text-secondary)',
   };
+  // Destructive variant — flag accidental thread deletion with the same
+  // red treatment used elsewhere for irreversible actions.
+  if (variant === 'delete') {
+    return {
+      ...base,
+      borderColor: 'var(--color-error)',
+      color: 'var(--color-error)',
+    };
+  }
+  return base;
 }

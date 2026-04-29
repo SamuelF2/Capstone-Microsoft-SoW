@@ -1897,10 +1897,17 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
-        if row["status"] in ("finalized", "rejected"):
+        # Allowlist: AI analysis may only be (re)run while the SoW is still in
+        # the authoring/AI-review window. Once it has advanced into a review
+        # stage, reviewers are reading the cached ``ai_suggestion`` row and we
+        # must not let a collaborator silently overwrite it from underneath.
+        if row["status"] not in ("draft", "ai_review"):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"SoW status is '{row['status']}'; AI analysis cannot be recomputed on a closed SoW",
+                detail=(
+                    f"SoW status is '{row['status']}'; AI analysis can only be "
+                    "run while the SoW is in 'draft' or 'ai_review'."
+                ),
             )
 
         try:
