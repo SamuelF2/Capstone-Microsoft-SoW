@@ -169,6 +169,49 @@ export const aiClient = {
       ...opts,
     });
   },
+
+  // ── Schema proposals (admin-only) ──────────────────────────────────────
+  // Backed by /api/ai/schema/proposals* — the dashboard at
+  // /schema-proposals consumes these. `reviewed_by` is server-stamped from
+  // the caller's identity so we never send it from here.
+  schemaProposals(authFetch, { status, kind, sort, signal } = {}) {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (kind) params.set('kind', kind);
+    if (sort) params.set('sort', sort);
+    const qs = params.toString();
+    return call(authFetch, `/api/ai/schema/proposals${qs ? `?${qs}` : ''}`, { signal });
+  },
+  approveProposal(authFetch, proposalId, { tags, note } = {}, opts) {
+    const body = {};
+    if (tags) body.tags = tags;
+    if (note) body.note = note;
+    return call(authFetch, `/api/ai/schema/proposals/${proposalId}/approve`, {
+      method: 'POST',
+      body,
+      ...opts,
+    });
+  },
+  rejectProposal(authFetch, proposalId, { tags, note } = {}, opts) {
+    const body = {};
+    if (tags) body.tags = tags;
+    if (note) body.note = note;
+    return call(authFetch, `/api/ai/schema/proposals/${proposalId}/reject`, {
+      method: 'POST',
+      body,
+      ...opts,
+    });
+  },
+  bulkReviewProposals(authFetch, { ids, action, tags, note }, opts) {
+    const body = { ids, action };
+    if (tags) body.tags = tags;
+    if (note) body.note = note;
+    return call(authFetch, '/api/ai/schema/proposals/bulk-review', {
+      method: 'POST',
+      body,
+      ...opts,
+    });
+  },
 };
 
 export default aiClient;

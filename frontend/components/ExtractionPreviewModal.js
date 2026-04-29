@@ -33,6 +33,7 @@
 import { useMemo, useState } from 'react';
 import Modal from './Modal';
 import { hydrateIds, renderStructured, isStructuredSection } from '../lib/sectionSchemas';
+import { confidenceBadge } from '../lib/confidence';
 
 // Sections the AI knows how to extract, in the order they appear in the
 // modal. Mirrors the list in backend/utils/section_schemas.py — keep in
@@ -59,20 +60,6 @@ const SECTION_LABELS = {
 // Adjust after smoke tests if the LLM's self-reported confidence proves
 // poorly calibrated.
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.6;
-
-function confidenceBadge(score) {
-  if (score == null) return null;
-  let label = 'Low';
-  let color = '#6b7280';
-  if (score >= 0.7) {
-    label = 'High';
-    color = '#059669';
-  } else if (score >= 0.4) {
-    label = 'Medium';
-    color = '#d97706';
-  }
-  return { label: `${label} confidence (${Math.round(score * 100)}%)`, color };
-}
 
 function isEmptyValue(value) {
   if (value == null) return true;

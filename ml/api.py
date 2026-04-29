@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from dotenv import load_dotenv
@@ -476,36 +477,240 @@ def get_approval(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+# ── Schema proposals (LLM-discovered node/edge/section types) ────────────────
+
+
+class ProposalReviewRequest(BaseModel):
+    """Body for single-proposal approve/reject endpoints.
+
+    ``reviewed_by`` is overwritten by the backend proxy (``routers/ai.py``)
+    with the caller's email so the client cannot spoof identity. Tags and
+    note are optional reviewer annotations mirrored from the CLI's
+    ``review-proposal`` command.
+    """
+
+    reviewed_by: str = "human"
+    tags: list[str] | None = None
+    note: str | None = None
+
+
+class BulkProposalReviewRequest(BaseModel):
+    """Body for ``POST /schema/proposals/bulk-review``.
+
+    A single ``note`` and ``tags`` payload is applied to every proposal in
+    ``ids``. The Cypher runs inside a single ``execute_write`` transaction
+    so a missing id rolls back the whole batch.
+    """
+
+    ids: list[str]
+    action: str  # "approve" | "reject"
+    reviewed_by: str = "human"
+    tags: list[str] | None = None
+    note: str | None = None
+
+
+_PROPOSAL_RETURN_CLAUSE = """
+RETURN p.proposal_id AS id,
+       p.kind AS kind,
+       p.label AS label,
+       p.description AS description,
+       p.confidence AS confidence,
+       p.accepted AS accepted,
+       coalesce(p.rejected, false) AS rejected,
+       coalesce(p.tags, []) AS tags,
+       p.usage_count AS uses,
+       p.source_doc AS source,
+       p.source_section AS source_section,
+       p.note AS note,
+       p.proposed_at AS proposed_at,
+       p.reviewed_at AS reviewed_at,
+       p.reviewed_by AS reviewed_by
+"""
+
+
+def _proposal_order_clause(sort: str | None) -> str:
+    """Translate a UI sort key into a Cypher ORDER BY clause.
+
+    Accepted values: ``confidence-desc`` (default), ``confidence-asc``,
+    ``date-desc``, ``date-asc``, ``uses-desc``. Anything unrecognised
+    falls back to the default — frontend already enumerates the options
+    so we don't bother with a 400.
+    """
+    mapping = {
+        "confidence-desc": "p.confidence DESC, p.usage_count DESC",
+        "confidence-asc": "p.confidence ASC, p.usage_count DESC",
+        "date-desc": "p.proposed_at DESC",
+        "date-asc": "p.proposed_at ASC",
+        "uses-desc": "p.usage_count DESC, p.confidence DESC",
+    }
+    return f"ORDER BY {mapping.get(sort or '', mapping['confidence-desc'])}"
+
+
 @app.get("/schema/proposals")
 def get_schema_proposals(
     status: str | None = Query(None, regex="^(pending|accepted|rejected)$"),
-    kind: str | None = Query(None),
+    kind: str | None = Query(None, regex="^(node|edge|section_type)$"),
+    sort: str | None = Query(None),
 ):
-    """List schema evolution proposals generated during ingestion."""
+    """List schema evolution proposals generated during ingestion.
+
+    Filtering happens in Cypher; sorting is honoured server-side so the
+    dashboard can refetch on every filter change without re-sorting in JS.
+    """
     filters = []
     if status == "pending":
         filters.append("p.accepted = false AND coalesce(p.rejected, false) = false")
     elif status == "accepted":
         filters.append("p.accepted = true")
     elif status == "rejected":
-        filters.append("p.rejected = true")
+        filters.append("coalesce(p.rejected, false) = true")
     if kind:
         filters.append(f"p.kind = '{kind}'")
 
     where = f"WHERE {' AND '.join(filters)}" if filters else ""
+    order = _proposal_order_clause(sort)
 
     with _driver.session() as session:
         return session.run(
-            f"""
-            MATCH (p:SchemaProposal) {where}
-            RETURN p.proposal_id AS id, p.kind AS kind, p.label AS label,
-                   p.confidence AS confidence, p.accepted AS accepted,
-                   p.rejected AS rejected, p.tags AS tags,
-                   p.usage_count AS uses, p.source_doc AS source,
-                   p.description AS description
-            ORDER BY p.confidence DESC, p.usage_count DESC
-            """
+            f"MATCH (p:SchemaProposal) {where} {_PROPOSAL_RETURN_CLAUSE} {order}"
         ).data()
+
+
+def _apply_review_tx(
+    tx,
+    *,
+    ids: list[str],
+    action: str,
+    reviewed_by: str,
+    tags: list[str] | None,
+    note: str | None,
+    ts: str,
+):
+    """Cypher write helper for both single and bulk review endpoints.
+
+    Uses ``UNWIND`` so a one-element ``ids`` list and a multi-element
+    list go through the same code path. Optional ``tags`` and ``note``
+    are only SET when supplied so a re-review doesn't clobber a prior
+    annotation with ``null``.
+    """
+    accepted_val = action == "approve"
+    rejected_val = action == "reject"
+    set_parts = [
+        "p.accepted = $accepted",
+        "p.rejected = $rejected",
+        "p.reviewed_by = $reviewed_by",
+        "p.reviewed_at = $ts",
+    ]
+    params: dict[str, Any] = {
+        "ids": ids,
+        "accepted": accepted_val,
+        "rejected": rejected_val,
+        "reviewed_by": reviewed_by,
+        "ts": ts,
+    }
+    if tags is not None:
+        set_parts.append("p.tags = $tags")
+        params["tags"] = list(tags)
+    if note is not None:
+        set_parts.append("p.note = $note")
+        params["note"] = note
+
+    tx.run(
+        f"""
+        UNWIND $ids AS pid
+        MATCH (p:SchemaProposal {{proposal_id: pid}})
+        SET {", ".join(set_parts)}
+        """,
+        **params,
+    )
+
+
+def _fetch_proposal(session, proposal_id: str) -> dict | None:
+    row = session.run(
+        f"MATCH (p:SchemaProposal {{proposal_id: $pid}}) {_PROPOSAL_RETURN_CLAUSE}",
+        pid=proposal_id,
+    ).single()
+    return dict(row) if row else None
+
+
+@app.post("/schema/proposals/{proposal_id}/approve")
+def approve_schema_proposal(proposal_id: str, body: ProposalReviewRequest):
+    """Mark a single SchemaProposal as accepted. Returns the refreshed row."""
+    ts = datetime.now(UTC).isoformat()
+    with _driver.session() as session:
+        if not _fetch_proposal(session, proposal_id):
+            raise HTTPException(status_code=404, detail=f"Proposal {proposal_id} not found")
+        session.execute_write(
+            _apply_review_tx,
+            ids=[proposal_id],
+            action="approve",
+            reviewed_by=body.reviewed_by,
+            tags=body.tags,
+            note=body.note,
+            ts=ts,
+        )
+        return _fetch_proposal(session, proposal_id)
+
+
+@app.post("/schema/proposals/{proposal_id}/reject")
+def reject_schema_proposal(proposal_id: str, body: ProposalReviewRequest):
+    """Mark a single SchemaProposal as rejected. Returns the refreshed row."""
+    ts = datetime.now(UTC).isoformat()
+    with _driver.session() as session:
+        if not _fetch_proposal(session, proposal_id):
+            raise HTTPException(status_code=404, detail=f"Proposal {proposal_id} not found")
+        session.execute_write(
+            _apply_review_tx,
+            ids=[proposal_id],
+            action="reject",
+            reviewed_by=body.reviewed_by,
+            tags=body.tags,
+            note=body.note,
+            ts=ts,
+        )
+        return _fetch_proposal(session, proposal_id)
+
+
+@app.post("/schema/proposals/bulk-review")
+def bulk_review_schema_proposals(body: BulkProposalReviewRequest):
+    """Approve or reject many proposals in one Cypher transaction.
+
+    Missing ids cause the whole batch to roll back so partial failures
+    don't leave the queue in an inconsistent state.
+    """
+    from datetime import UTC, datetime
+
+    if body.action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="action must be 'approve' or 'reject'")
+    if not body.ids:
+        return {"updated": 0, "ids": [], "action": body.action}
+
+    ts = datetime.now(UTC).isoformat()
+    with _driver.session() as session:
+        # Verify all ids exist before mutating so the transaction can roll
+        # back cleanly. UNWIND alone would silently no-op missing ids.
+        result = session.run(
+            "MATCH (p:SchemaProposal) WHERE p.proposal_id IN $ids RETURN p.proposal_id AS id",
+            ids=body.ids,
+        ).data()
+        found = {r["id"] for r in result}
+        missing = [i for i in body.ids if i not in found]
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Proposals not found: {missing}",
+            )
+
+        session.execute_write(
+            _apply_review_tx,
+            ids=body.ids,
+            action=body.action,
+            reviewed_by=body.reviewed_by,
+            tags=body.tags,
+            note=body.note,
+            ts=ts,
+        )
+    return {"updated": len(body.ids), "ids": body.ids, "action": body.action}
 
 
 @app.get("/graph/summary")
