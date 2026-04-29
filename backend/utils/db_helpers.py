@@ -162,6 +162,20 @@ async def create_assignment_with_prior(
     )
 
 
+def require_system_admin(user) -> None:
+    """Raise 403 unless the caller holds the ``system-admin`` role.
+
+    Synchronous because ``role`` is already populated on the
+    ``UserResponse`` returned by ``get_current_user`` — no DB hit
+    needed. Used by admin-only routes (e.g. schema-proposal review).
+    """
+    if (getattr(user, "role", None) or "").lower() != "system-admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System admin access required",
+        )
+
+
 async def require_author(conn, sow_id: int, user_id: int) -> None:
     """Raise 403 unless the caller is the SoW's author or a system-admin.
 

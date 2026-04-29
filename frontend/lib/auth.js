@@ -164,12 +164,18 @@ export function AuthProvider({ children }) {
   const authFetch = useCallback(
     async (url, options = {}) => {
       const token = await getAccessToken();
+      // Mirror the testing-only role override on every request so the
+      // backend's role gates honour the same simulated role the UI is
+      // showing. Cleared automatically when the override is cleared
+      // (Account → Settings → "Clear override") or on sign-out.
+      const override = roleOverrideRef.current;
       const doFetch = (t) =>
         fetch(url, {
           ...options,
           headers: {
             ...options.headers,
             ...(t ? { Authorization: `Bearer ${t}` } : {}),
+            ...(override ? { 'X-Role-Override': override } : {}),
           },
         });
 

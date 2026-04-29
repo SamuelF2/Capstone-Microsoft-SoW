@@ -47,6 +47,19 @@ html {
   --color-error: #ef4444;
   --color-info: #3b82f6;
 
+  /* Colors - Status (RGB channels for use in rgba()).
+     Mirror the hex values above. Use these when you need a tinted
+     background or border at an arbitrary opacity, e.g.
+       background: rgba(var(--color-success-rgb), 0.12);
+     so the source of truth stays the hex token above and consumers
+     don't fork the palette with hand-typed rgba values. */
+  --color-success-rgb: 74, 222, 128;
+  --color-warning-rgb: 251, 191, 36;
+  --color-error-rgb: 239, 68, 68;
+  --color-info-rgb: 59, 130, 246;
+  --color-accent-blue-rgb: 0, 120, 212;
+  --color-accent-purple-light-rgb: 139, 92, 246;
+
   /* Colors - Border */
   --color-border-default: #333333;
   --color-border-light: #444444;

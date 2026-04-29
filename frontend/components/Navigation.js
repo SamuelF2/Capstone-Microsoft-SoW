@@ -25,8 +25,11 @@ export default function Navigation() {
     { href: '/ai-review', label: 'AI Review' },
     { href: '/my-reviews', label: 'My Reviews' },
     { href: '/drm-dashboard', label: 'DRM Dashboard', roles: ['cpl', 'cdp', 'delivery-manager'] },
-    { href: '/review-history', label: 'Review History' },
     { href: '/business-logic', label: 'Business Logic' },
+    // Empty `roles: []` combined with the filter below gates this link to
+    // system-admin only — `[].includes(...)` is always false, so the link
+    // only renders when `isSystemAdmin` is true.
+    { href: '/schema-proposals', label: 'Schema Proposals', roles: [] },
     { href: '/roles', label: 'Roles', roles: ['system-admin'] },
   ];
 

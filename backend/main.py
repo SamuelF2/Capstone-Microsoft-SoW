@@ -57,6 +57,8 @@ from routers.review import router as review_router
 from routers.roles import router as roles_router
 from routers.rules import router as rules_router
 from routers.sow import router as sow_router
+from routers.sow_comments import router as sow_comments_router
+from routers.sow_extraction import router as sow_extraction_router
 from routers.sow_roles import router as sow_roles_router
 from routers.users import router as users_router
 from routers.workflow import router as workflow_router
@@ -604,6 +606,37 @@ async def lifespan(app: FastAPI):
                 ADD COLUMN IF NOT EXISTS parallel_branches JSONB;
             """)
 
+            # Microsoft Default Workflow: per-role conditional requirement and
+            # per-transition skip condition. Both are JSONB predicates evaluated
+            # against sow_documents.metadata.microsoft_workflow at runtime.
+            await conn.execute("""
+                ALTER TABLE workflow_template_stage_roles
+                ADD COLUMN IF NOT EXISTS required_if JSONB;
+            """)
+            await conn.execute("""
+                ALTER TABLE workflow_template_transitions
+                ADD COLUMN IF NOT EXISTS skip_condition JSONB;
+            """)
+
+            # Per-role review checklist: AI-suggested vs manual mode plus
+            # author-authored items (seeds in AI mode, literal items in manual).
+            await conn.execute("""
+                ALTER TABLE workflow_template_stage_roles
+                ADD COLUMN IF NOT EXISTS checklist_mode TEXT NOT NULL DEFAULT 'ai';
+            """)
+            await conn.execute("""
+                ALTER TABLE workflow_template_stage_roles
+                ADD COLUMN IF NOT EXISTS checklist_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+            """)
+
+            # Per-role permission tier: 'suggest' (default) lets reviewers
+            # leave comments AND propose content edits; 'comment' allows
+            # comments only; 'view' is read-only.
+            await conn.execute("""
+                ALTER TABLE workflow_template_stage_roles
+                ADD COLUMN IF NOT EXISTS permission_tier TEXT NOT NULL DEFAULT 'suggest';
+            """)
+
             # ------------------------------------------------------------------ #
             # 13b. WORKFLOW STAGE DOCUMENT REQUIREMENTS  (Phase 4)               #
             # Must be after workflow_templates to satisfy FK constraint.          #
@@ -619,6 +652,78 @@ async def lifespan(app: FastAPI):
                     UNIQUE(template_id, stage_key, document_type)
                 );
             """)
+
+            # ------------------------------------------------------------------ #
+            # 13c. REVIEWER CHECKLIST CACHE                                       #
+            # Per-assignment cache so each reviewer sees a stable list across     #
+            # reloads. UNIQUE(assignment_id) lets ON CONFLICT DO UPDATE handle    #
+            # concurrent regenerate clicks.                                       #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS reviewer_checklist_cache (
+                    id                SERIAL PRIMARY KEY,
+                    assignment_id     INTEGER NOT NULL UNIQUE REFERENCES review_assignments(id) ON DELETE CASCADE,
+                    role_key          TEXT NOT NULL,
+                    mode              TEXT NOT NULL,
+                    items             JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    sow_content_hash  TEXT,
+                    generated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+
+            # ------------------------------------------------------------------ #
+            # 13d. SOW COMMENTS  (anchored highlights with threaded replies)      #
+            # Comments are scoped to a SoW and anchored by                        #
+            # (section_key, offset_start, offset_end) into the flattened plain    #
+            # text of that section. ``anchor_text`` is a verbatim copy used to    #
+            # detect staleness after author edits.                                #
+            # ------------------------------------------------------------------ #
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS sow_comment_threads (
+                    id            SERIAL PRIMARY KEY,
+                    sow_id        INTEGER NOT NULL REFERENCES sow_documents(id) ON DELETE CASCADE,
+                    author_id     INTEGER NOT NULL REFERENCES users(id),
+                    section_key   TEXT NOT NULL,
+                    offset_start  INTEGER NOT NULL,
+                    offset_end    INTEGER NOT NULL,
+                    anchor_text   TEXT NOT NULL,
+                    resolved_at   TIMESTAMPTZ,
+                    resolved_by   INTEGER REFERENCES users(id),
+                    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sow_comment_threads_sow
+                ON sow_comment_threads(sow_id);
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS sow_comment_messages (
+                    id          SERIAL PRIMARY KEY,
+                    thread_id   INTEGER NOT NULL REFERENCES sow_comment_threads(id) ON DELETE CASCADE,
+                    author_id   INTEGER NOT NULL REFERENCES users(id),
+                    body        TEXT NOT NULL,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sow_comment_messages_thread
+                ON sow_comment_messages(thread_id);
+            """)
+
+            # Suggested edits: a thread with kind='suggestion' carries a
+            # ``replacement_text`` and a separate apply/reject lifecycle.
+            # Existing threads default to 'comment' so legacy rows behave
+            # as before this column existed.
+            for ddl in [
+                "ALTER TABLE sow_comment_threads ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'comment';",
+                "ALTER TABLE sow_comment_threads ADD COLUMN IF NOT EXISTS replacement_text TEXT;",
+                "ALTER TABLE sow_comment_threads ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ;",
+                "ALTER TABLE sow_comment_threads ADD COLUMN IF NOT EXISTS applied_by INTEGER REFERENCES users(id);",
+                "ALTER TABLE sow_comment_threads ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;",
+                "ALTER TABLE sow_comment_threads ADD COLUMN IF NOT EXISTS rejected_by INTEGER REFERENCES users(id);",
+            ]:
+                await conn.execute(ddl)
 
             # ------------------------------------------------------------------ #
             # 14. SEED DEFAULT WORKFLOW TEMPLATE                                  #
@@ -771,6 +876,14 @@ async def lifespan(app: FastAPI):
                     )
                 print("Seeded default document requirements")
 
+            # Seed the Microsoft Default Workflow alongside the ESAP one. The
+            # function is idempotent on template name, so it's safe to call on
+            # every startup.
+            from seeds.microsoft_workflow import seed_microsoft_default_workflow
+
+            await seed_microsoft_default_workflow(conn)
+
+            # Seed default role definitions (idempotent via ON CONFLICT DO NOTHING)
             default_roles = [
                 (
                     "solution-architect",
@@ -813,66 +926,15 @@ async def lifespan(app: FastAPI):
             for role_key, display_name, description, permissions in default_roles:
                 await conn.execute(
                     """
-                                    INSERT INTO role_definitions (role_key, display_name, description, permissions, is_system)
-                                    VALUES ($1, $2, $3, $4::jsonb, TRUE)
-                                    ON CONFLICT (role_key) DO NOTHING
-                                """,
+                    INSERT INTO role_definitions (role_key, display_name, description, permissions, is_system)
+                    VALUES ($1, $2, $3, $4::jsonb, TRUE)
+                    ON CONFLICT (role_key) DO NOTHING
+                    """,
                     role_key,
                     display_name,
                     description,
                     json.dumps(permissions),
                 )
-                default_roles = [
-                    (
-                        "solution-architect",
-                        "Solution Architect",
-                        "Technical design and architecture review",
-                        ["review.read", "review.submit", "sow.read"],
-                    ),
-                    (
-                        "sqa-reviewer",
-                        "SQA Reviewer",
-                        "Quality assurance review",
-                        ["review.read", "review.submit", "sow.read"],
-                    ),
-                    (
-                        "cpl",
-                        "Customer Practice Lead",
-                        "Practice-level approval authority",
-                        ["review.read", "review.submit", "review.approve", "sow.read"],
-                    ),
-                    (
-                        "cdp",
-                        "Customer Delivery Partner",
-                        "Delivery partnership approval",
-                        ["review.read", "review.submit", "review.approve", "sow.read"],
-                    ),
-                    (
-                        "delivery-manager",
-                        "Delivery Manager",
-                        "Delivery oversight and approval",
-                        ["review.read", "review.submit", "review.approve", "sow.read"],
-                    ),
-                    (
-                        "consultant",
-                        "Consultant",
-                        "Standard SoW author and editor",
-                        ["sow.read", "sow.write", "sow.create"],
-                    ),
-                    ("system-admin", "System Admin", "Full platform access", ["*"]),
-                ]
-                for role_key, display_name, description, permissions in default_roles:
-                    await conn.execute(
-                        """
-                        INSERT INTO role_definitions (role_key, display_name, description, permissions, is_system)
-                        VALUES ($1, $2, $3, $4::jsonb, TRUE)
-                        ON CONFLICT (role_key) DO NOTHING
-                    """,
-                        role_key,
-                        display_name,
-                        description,
-                        json.dumps(permissions),
-                    )
 
             # Backfill any transitions that may be missing from previously-seeded
             # templates (the guard above skips re-seeding if the template exists).
@@ -1212,6 +1274,8 @@ app.add_middleware(
 app.include_router(status_router)  # /status  (HTML status page)
 app.include_router(auth_router)  # /api/auth/...
 app.include_router(sow_router)  # /api/sow/...
+app.include_router(sow_comments_router)  # /api/sow/{id}/comments/...
+app.include_router(sow_extraction_router)  # /api/sow/{id}/extract-from-document, apply-extraction
 app.include_router(sow_roles_router)  # /api/sow/{id}/roles and /api/sow/{id}/collaborators
 app.include_router(review_router)  # /api/review/...
 app.include_router(finalize_router)  # /api/finalize/...

@@ -74,6 +74,8 @@ from utils.db_helpers import (
     seed_collaboration,
     seed_sow_roles,
 )
+from utils.document_text import extract_text_docx as _extract_text_docx
+from utils.document_text import extract_text_pdf as _extract_text_pdf
 from utils.esap import compute_esap_level
 from utils.role_labels import humanize_role as _humanize_role
 
@@ -1081,43 +1083,7 @@ _METHODOLOGY_RULES_KEY: dict[str, str] = {
 }
 
 
-def _extract_text_pdf(file_path: str) -> str:
-    """Extract text from a PDF file using PyPDF2."""
-    from PyPDF2 import PdfReader
-
-    reader = PdfReader(file_path)
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(pages)
-
-
-def _extract_text_docx(file_path: str) -> str:
-    """Extract text from a DOCX file without external dependencies by reading
-    the document.xml inside the .docx ZIP and extracting text nodes.
-    """
-    import zipfile
-    from xml.etree import ElementTree as ET
-
-    try:
-        with zipfile.ZipFile(file_path) as z:
-            xml = z.read("word/document.xml")
-    except (zipfile.BadZipFile, KeyError):
-        return ""
-
-    try:
-        tree = ET.fromstring(xml)
-    except ET.ParseError:
-        return ""
-
-    # WordprocessingML namespace
-    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-
-    paragraphs: list[str] = []
-    for p in tree.findall(".//w:p", ns):
-        texts = [t.text for t in p.findall(".//w:t", ns) if t.text]
-        if texts:
-            paragraphs.append("".join(texts))
-
-    return "\n".join(paragraphs)
+# Text extractors are imported at the top of the file from utils.document_text.
 
 
 def _detect_sections(full_text: str, required_sections: list[dict]) -> list[SectionResult]:
@@ -1931,10 +1897,17 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SoW not found")
 
+        # Allowlist: AI analysis may only be (re)run while the SoW is still in
+        # the authoring/AI-review window. Once it has advanced into a review
+        # stage, reviewers are reading the cached ``ai_suggestion`` row and we
+        # must not let a collaborator silently overwrite it from underneath.
         if row["status"] not in ("draft", "ai_review"):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"SoW status is '{row['status']}', must be 'draft' or 'ai_review' for AI analysis",
+                detail=(
+                    f"SoW status is '{row['status']}'; AI analysis can only be "
+                    "run while the SoW is in 'draft' or 'ai_review'."
+                ),
             )
 
         try:

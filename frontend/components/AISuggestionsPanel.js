@@ -12,7 +12,7 @@
  * loading          boolean — show spinner while analysis is running
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 function formatGeneratedAt(iso) {
   if (!iso) return null;
@@ -76,11 +76,25 @@ export default function AISuggestionsPanel({
   showRunButton = false,
   onRunAnalysis,
   loading = false,
+  autoRun = false,
 }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [activeTab, setActiveTab] = useState('violations');
 
   const hasData = analysisResult != null;
+
+  // Auto-run analysis on first mount when no cached result is present.
+  // Reviewers land with risks/violations already populated instead of
+  // hunting for the "Run AI Analysis" button.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (!autoRun) return;
+    if (autoRanRef.current) return;
+    if (hasData || loading) return;
+    if (typeof onRunAnalysis !== 'function') return;
+    autoRanRef.current = true;
+    onRunAnalysis();
+  }, [autoRun, hasData, loading, onRunAnalysis]);
   const highCount = hasData
     ? (analysisResult.violations || []).filter((v) => v.severity === 'high').length
     : 0;

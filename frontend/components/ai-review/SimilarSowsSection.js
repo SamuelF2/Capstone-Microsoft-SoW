@@ -9,8 +9,32 @@ export default function SimilarSowsSection({ similarSows }) {
         className="text-lg font-semibold mb-lg"
         style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
       >
-        <span style={{ color: 'var(--color-accent-purple-light)' }}>&#128279;</span> Similar SoWs in
-        Knowledge Graph
+        {/* Inline SVG link icon (was 🔗 emoji) — picks up the purple
+            accent so the heading reads as part of the dark theme,
+            matching the line-art glyphs in the sibling sections. */}
+        <span
+          style={{
+            color: 'var(--color-accent-purple-light)',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+          aria-hidden="true"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+          </svg>
+        </span>{' '}
+        Similar SoWs in Knowledge Graph
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
         {similarSows.map((s, i) => (
@@ -37,7 +61,7 @@ export default function SimilarSowsSection({ similarSows }) {
               style={{
                 padding: '4px 12px',
                 borderRadius: 'var(--radius-full)',
-                backgroundColor: 'rgba(139,92,246,0.12)',
+                backgroundColor: 'rgba(var(--color-accent-purple-light-rgb), 0.12)',
                 color: 'var(--color-accent-purple-light)',
                 fontSize: 'var(--font-size-sm)',
                 fontWeight: 600,
