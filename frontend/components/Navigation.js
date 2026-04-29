@@ -31,6 +31,7 @@ export default function Navigation() {
     // system-admin only — `[].includes(...)` is always false, so the link
     // only renders when `isSystemAdmin` is true.
     { href: '/schema-proposals', label: 'Schema Proposals', roles: [] },
+    { href: '/roles', label: 'Roles', roles: ['system-admin'] },
   ];
 
   // Human-readable label for the current (possibly-overridden) role.

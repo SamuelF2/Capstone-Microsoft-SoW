@@ -13,11 +13,10 @@ import { getMsalInstance, loginRequest } from './msalConfig';
 
 const AuthContext = createContext(null);
 
+// Module-level constant — not inside the component.
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 // sessionStorage key used to persist the testing-only role override.
-// Cleared on logout, when the tab closes, or via the "Clear override"
-// button in Account settings.  We deliberately use sessionStorage rather
-// than localStorage so a stray test override can't bleed across browser
-// sessions or follow a user back into a real review queue weeks later.
 const ROLE_OVERRIDE_KEY = 'role-override';
 
 function readStoredRoleOverride() {
@@ -42,15 +41,9 @@ function writeStoredRoleOverride(role) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  // Kept as a ref so it's preserved across re-renders and applied to every
-  // user load (even after relogin).
   const roleOverrideRef = useRef(null);
   const msalRef = useRef(getMsalInstance());
   const tokenRef = useRef(null);
-  // Single in-flight token acquisition shared across concurrent callers.
-  // Without this, ten parallel `authFetch()` calls each trigger their own
-  // `acquireTokenSilent` round-trip and (worse) can race to open ten popups
-  // when the silent path falls back to interactive.
   const tokenPromiseRef = useRef(null);
 
   // Apply the stored role override to a freshly loaded user object.
@@ -60,13 +53,9 @@ export function AuthProvider({ children }) {
     return override ? { ...rawUser, role: override, _baseRole: rawUser.role } : rawUser;
   }, []);
 
-  // ── Token acquisition (silent with interactive fallback) ──────────────────
-  // Uses the ID token (not a custom API access token) for backend auth.
-  // The ID token contains all claims the backend needs (oid, name, email, roles)
-  // and avoids the need to configure "Expose an API" scopes in the App Registration.
   const _acquireTokenInner = async (msal) => {
     const account = msal.getActiveAccount();
-    if (!account) return tokenRef.current; // fallback to cached token
+    if (!account) return tokenRef.current;
 
     try {
       const response = await msal.acquireTokenSilent({
@@ -76,15 +65,12 @@ export function AuthProvider({ children }) {
       tokenRef.current = response.idToken;
       return response.idToken;
     } catch (err) {
-      // If silent fails, try popup — but if that also fails (COOP, blocked),
-      // fall back to the last known good token
       if (err instanceof InteractionRequiredAuthError || err instanceof BrowserAuthError) {
         try {
           const response = await msal.acquireTokenPopup(loginRequest);
           tokenRef.current = response.idToken;
           return response.idToken;
         } catch {
-          // Popup blocked or COOP issue — use cached token if still valid
           return tokenRef.current;
         }
       }
@@ -92,9 +78,6 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // Public, deduplicated token acquisition.  All concurrent callers share
-  // the same in-flight promise; once it resolves, the slot is cleared so the
-  // next request will trigger a fresh acquire.
   const _acquireToken = (msal) => {
     if (tokenPromiseRef.current) return tokenPromiseRef.current;
     const p = _acquireTokenInner(msal).finally(() => {
@@ -104,10 +87,7 @@ export function AuthProvider({ children }) {
     return p;
   };
 
-  // ── Initialize MSAL and rehydrate session ─────────────────────────────────
   useEffect(() => {
-    // Rehydrate the stored role override before we load the user so it's
-    // applied to the very first render.
     roleOverrideRef.current = readStoredRoleOverride();
 
     const init = async () => {
@@ -119,13 +99,11 @@ export function AuthProvider({ children }) {
 
       try {
         await msal.initialize();
-        // Required on every page load to complete any in-progress redirect flows
         await msal.handleRedirectPromise();
 
         const accounts = msal.getAllAccounts();
         if (accounts.length > 0) {
           msal.setActiveAccount(accounts[0]);
-          // Fetch user profile from backend
           const token = await _acquireToken(msal);
           if (token) {
             const res = await fetch('/api/auth/me', {
@@ -143,22 +121,18 @@ export function AuthProvider({ children }) {
     init();
   }, [applyRoleOverride]);
 
-  /** Get a token for API calls. */
   const getAccessToken = useCallback(async () => {
     const msal = msalRef.current;
     if (!msal) return tokenRef.current;
     return _acquireToken(msal);
   }, []);
 
-  /** Sign in via Microsoft popup. */
   const login = useCallback(async () => {
     const msal = msalRef.current;
     if (!msal) throw new Error('MSAL not initialized — is NEXT_PUBLIC_AZURE_CLIENT_ID set?');
 
     const response = await msal.loginPopup(loginRequest);
     msal.setActiveAccount(response.account);
-
-    // Cache the ID token
     tokenRef.current = response.idToken;
 
     const meRes = await fetch('/api/auth/me', {
@@ -172,7 +146,6 @@ export function AuthProvider({ children }) {
     }
   }, [applyRoleOverride]);
 
-  /** Sign out via Microsoft popup. Also clears the role override. */
   const logout = useCallback(async () => {
     const msal = msalRef.current;
     if (msal) {
@@ -188,16 +161,6 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  /**
-   * Fetch wrapper that automatically acquires and attaches the Entra
-   * ID token as a Bearer header.
-   *
-   * On a 401 we make exactly one attempt to refresh the token and retry the
-   * request — covers the common case of an expired ID token.  If the retry
-   * also returns 401 (or the refresh fails), we drop client state and bounce
-   * the user to the login page so they don't get stuck on a dead screen
-   * spamming failed requests.
-   */
   const authFetch = useCallback(
     async (url, options = {}) => {
       const token = await getAccessToken();
@@ -219,7 +182,6 @@ export function AuthProvider({ children }) {
       let res = await doFetch(token);
       if (res.status !== 401) return res;
 
-      // First 401 — force a token refresh and retry once.
       tokenRef.current = null;
       tokenPromiseRef.current = null;
       let fresh = null;
@@ -233,7 +195,6 @@ export function AuthProvider({ children }) {
         if (res.status !== 401) return res;
       }
 
-      // Still 401 → auth is genuinely dead.  Clear local state and redirect.
       try {
         tokenRef.current = null;
         roleOverrideRef.current = null;
@@ -253,31 +214,68 @@ export function AuthProvider({ children }) {
     [getAccessToken]
   );
 
-  /**
-   * Override the user's role locally for testing purposes. Persists to
-   * localStorage so the override survives reloads. The original role is kept
-   * as `user._baseRole` so the UI can show both if needed.
-   */
-  const overrideRole = useCallback((role) => {
-    roleOverrideRef.current = role || null;
-    writeStoredRoleOverride(role || null);
+  const overrideRole = useCallback(
+    async (role) => {
+      roleOverrideRef.current = role || null;
+      writeStoredRoleOverride(role || null);
+      setUser((prev) => {
+        if (!prev) return prev;
+        if (!role) {
+          const base = prev._baseRole ?? prev.role;
+          const { _baseRole, ...rest } = prev;
+          return { ...rest, role: base };
+        }
+        const base = prev._baseRole ?? prev.role;
+        return { ...prev, role, _baseRole: base };
+      });
+
+      if (role) {
+        try {
+          const token = await getAccessToken();
+          await fetch(`${API}/api/users/me/role`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ role }),
+          });
+        } catch {
+          console.warn('overrideRole: failed to sync role to backend');
+        }
+      }
+    },
+    [getAccessToken]
+  );
+
+  const clearRoleOverride = useCallback(async () => {
+    roleOverrideRef.current = null;
+    writeStoredRoleOverride(null);
+
+    const baseRole = user?._baseRole;
     setUser((prev) => {
       if (!prev) return prev;
-      if (!role) {
-        // Clearing: revert to the original role if we stashed one.
-        const base = prev._baseRole ?? prev.role;
-        const { _baseRole, ...rest } = prev;
-        return { ...rest, role: base };
-      }
       const base = prev._baseRole ?? prev.role;
-      return { ...prev, role, _baseRole: base };
+      const { _baseRole, ...rest } = prev;
+      return { ...rest, role: base };
     });
-  }, []);
 
-  /** Clear any active role override and revert to the user's real role. */
-  const clearRoleOverride = useCallback(() => {
-    overrideRole(null);
-  }, [overrideRole]);
+    if (baseRole) {
+      try {
+        const token = await getAccessToken();
+        await fetch(`${API}/api/users/me/role`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ role: baseRole }),
+        });
+      } catch {
+        console.warn('clearRoleOverride: failed to sync role to backend');
+      }
+    }
+  }, [getAccessToken, user]);
 
   return (
     <AuthContext.Provider

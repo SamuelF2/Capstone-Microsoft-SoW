@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useAuth } from '../lib/auth';
 
@@ -13,8 +13,19 @@ const AVAILABLE_ROLES = [
 ];
 
 export default function Account() {
-  const { user, overrideRole, clearRoleOverride } = useAuth();
+  const { user, authFetch, overrideRole, clearRoleOverride } = useAuth();
   const [activeSection, setActiveSection] = useState('profile');
+  const [availableRoles, setAvailableRoles] = useState([]);
+
+  const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+  useEffect(() => {
+    if (!user) return;
+    authFetch(`${API}/api/roles`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setAvailableRoles(data))
+      .catch(() => {});
+  }, [user, authFetch]);
 
   const userData = {
     name: user?.full_name || user?.name || user?.email?.split('@')[0] || '—',
@@ -220,9 +231,9 @@ export default function Account() {
                   <option value="" disabled>
                     Select a role…
                   </option>
-                  {AVAILABLE_ROLES.map(({ value, label }) => (
-                    <option key={value} value={value}>
-                      {label}
+                  {availableRoles.map(({ role_key, display_name }) => (
+                    <option key={role_key} value={role_key}>
+                      {display_name}
                     </option>
                   ))}
                 </select>

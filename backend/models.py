@@ -236,6 +236,34 @@ class CollaborationEntry(BaseModel):
     role: str | None = None
 
 
+class RoleDefinition(BaseModel):
+    id: int
+    role_key: str
+    display_name: str
+    description: str | None = None
+    permissions: list[str] = []
+    is_system: bool = False
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RoleCreate(BaseModel):
+    role_key: str = Field(
+        ..., pattern=r"^[a-z0-9\-]+$", description="Lowercase letters, numbers, hyphens only"
+    )
+    display_name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = None
+    permissions: list[str] = []
+
+
+class RoleUpdate(BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    permissions: list[str] | None = None
+
+
 # ── Document Parsing ────────────────────────────────────────────────────────
 
 
@@ -973,3 +1001,53 @@ class SowCommentsListResponse(BaseModel):
 
     tier: Literal["view", "comment", "suggest"]
     threads: list[SowCommentThread]
+
+
+# ── Per-SoW Roles ─────────────────────────────────────────────────────────────
+
+
+class SoWRoleCreate(BaseModel):
+    role_key: str = Field(..., pattern=r"^[a-z0-9\-]+$")
+    display_name: str = Field(..., min_length=1)
+    description: str | None = None
+    permissions: list[str] = []
+
+
+class SoWRoleUpdate(BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    permissions: list[str] | None = None
+
+
+class SoWRoleDefinition(BaseModel):
+    id: int
+    sow_id: int
+    role_key: str
+    display_name: str
+    description: str | None = None
+    permissions: list[str]
+    created_by: int | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── Per-SoW Collaborators ─────────────────────────────────────────────────────
+
+
+class CollaboratorAdd(BaseModel):
+    user_id: int
+    role_key: str
+
+
+class CollaboratorUpdate(BaseModel):
+    role_key: str
+
+
+class CollaboratorResponse(BaseModel):
+    user_id: int
+    email: str
+    full_name: str | None = None
+    role_key: str
+    added_at: datetime | None = None
