@@ -43,7 +43,7 @@ export default function ChecklistSection({ checklist }) {
               padding: 'var(--spacing-sm) var(--spacing-md)',
               borderRadius: 'var(--radius-md)',
               cursor: 'pointer',
-              backgroundColor: it.checked ? 'rgba(74,222,128,0.05)' : 'transparent',
+              backgroundColor: it.checked ? 'rgba(var(--color-success-rgb), 0.05)' : 'transparent',
               transition: 'background-color var(--transition-base)',
             }}
           >

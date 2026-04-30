@@ -10,7 +10,34 @@ export default function SectionAnalysisSection({ sections, missingKeywords }) {
         className="text-lg font-semibold mb-lg"
         style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
       >
-        <span style={{ color: 'var(--color-accent-blue)' }}>&#128196;</span> Section Analysis
+        {/* Inline SVG (instead of the previous 📄 emoji) so the icon
+            picks up the theme accent color and matches the line-art
+            glyphs used in the other AI-review section headers. */}
+        <span
+          style={{
+            color: 'var(--color-accent-blue)',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+          aria-hidden="true"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="8" y1="13" x2="16" y2="13" />
+            <line x1="8" y1="17" x2="16" y2="17" />
+          </svg>
+        </span>{' '}
+        Section Analysis
         <span
           style={{
             marginLeft: 'auto',
@@ -50,8 +77,10 @@ export default function SectionAnalysisSection({ sections, missingKeywords }) {
                   borderRadius: 'var(--radius-full)',
                   fontSize: 'var(--font-size-xs)',
                   fontWeight: 600,
-                  backgroundColor: s.found ? 'rgba(74,222,128,0.12)' : 'rgba(239,68,68,0.12)',
-                  color: s.found ? '#4ade80' : '#ef4444',
+                  backgroundColor: s.found
+                    ? 'rgba(var(--color-success-rgb), 0.12)'
+                    : 'rgba(var(--color-error-rgb), 0.12)',
+                  color: s.found ? 'var(--color-success)' : 'var(--color-error)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
                 }}
@@ -122,9 +151,9 @@ export default function SectionAnalysisSection({ sections, missingKeywords }) {
                   padding: '2px 10px',
                   borderRadius: 'var(--radius-full)',
                   fontSize: 'var(--font-size-xs)',
-                  backgroundColor: 'rgba(251,191,36,0.12)',
-                  color: '#fbbf24',
-                  border: '1px solid rgba(251,191,36,0.3)',
+                  backgroundColor: 'rgba(var(--color-warning-rgb), 0.12)',
+                  color: 'var(--color-warning)',
+                  border: '1px solid rgba(var(--color-warning-rgb), 0.3)',
                 }}
               >
                 {kw}

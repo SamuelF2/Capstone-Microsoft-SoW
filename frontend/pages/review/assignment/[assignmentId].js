@@ -101,6 +101,7 @@ export default function AssignmentReviewPage() {
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runningAI, setRunningAI] = useState(false);
+  const [regeneratingChecklist, setRegeneratingChecklist] = useState(false);
   const [modal, setModal] = useState(null); // null | 'rejected' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [progressRefreshKey, setProgressRefreshKey] = useState(0);
@@ -540,6 +541,32 @@ export default function AssignmentReviewPage() {
     }
   }
 
+  // ── Regenerate AI-suggested review checklist ────────────────────────────
+  async function handleRegenerateChecklist() {
+    if (!assignmentId) return;
+    setRegeneratingChecklist(true);
+    try {
+      const res = await authFetch(`/api/review/assignment/${assignmentId}/checklist/regenerate`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const detail = typeof body.detail === 'string' ? body.detail : body.detail?.message;
+        throw new Error(detail || `Regenerate failed (${res.status})`);
+      }
+      const fresh = await res.json();
+      // Replace the embedded checklist subtree on the loader payload.
+      // Reviewer's existing `responses` survive because items keep stable ids
+      // when the LLM reuses them; orphaned ids get rendered unchecked.
+      setData((prev) => (prev ? { ...prev, checklist: fresh } : prev));
+      showToast('Checklist regenerated');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRegeneratingChecklist(false);
+    }
+  }
+
   // ── Send back (workflow-driven) ──────────────────────────────────────────
   async function handleSendBack({ target_stage, comments: sbComments, action_items }) {
     if (!sowId) return;
@@ -976,7 +1003,7 @@ export default function AssignmentReviewPage() {
                     minHeight: 0,
                   }}
                 >
-                  <SoWDocumentReader sow={sow} />
+                  <SoWDocumentReader sow={sow} onContentChange={refresh} />
                 </div>
 
                 {/* Drag handle */}
@@ -1130,6 +1157,11 @@ export default function AssignmentReviewPage() {
                         responses={responses}
                         onChange={setResponses}
                         readOnly={isMyReviewDone}
+                        mode={checklist.mode}
+                        generatedAt={checklist.generated_at}
+                        sowChanged={checklist.sow_changed}
+                        regenerating={regeneratingChecklist}
+                        onRegenerate={handleRegenerateChecklist}
                       />
                     </div>
 
@@ -1144,10 +1176,11 @@ export default function AssignmentReviewPage() {
                     <div style={{ flexShrink: 0 }}>
                       <AISuggestionsPanel
                         analysisResult={aiAnalysis}
-                        collapsed={true}
+                        collapsed={false}
                         showRunButton={true}
                         onRunAnalysis={handleRunAI}
                         loading={runningAI}
+                        autoRun
                       />
                     </div>
 
