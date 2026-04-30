@@ -21,9 +21,10 @@ Deal Overview (root)
 python run.py
 
 # With Azure OpenAI for realistic narrative text:
-pip install openai
+# Auth uses DefaultAzureCredential — run `az login` first.
+# Your user principal needs `Azure AI Developer` on the Foundry resource.
+pip install openai azure-identity
 export AZURE_OPENAI_ENDPOINT="https://sow-foundry.cognitiveservices.azure.com"
-export AZURE_OPENAI_API_KEY="your_key_here"
 export AZURE_OPENAI_DEPLOYMENT="gpt-5-mini"
 * on Powershell use $env:VARNAME="name"
 python run.py

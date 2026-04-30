@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# Ingestion Job image — bakes ml/ source AND Data/ source so the Container Apps
+# Job can run `python main_new.py ingest` + `python main_new.py enrich` against
+# the deployed Neo4j without needing external data staging.
+#
+# Built from the repo root (NOT from ml/) so the COPY can pick up Data/, which
+# lives one level above ml/.
+# =============================================================================
+FROM python:3.12-slim
+
+# Runtime libs (mirrors ml/Dockerfile):
+#   build-essential — for wheels that need compilation
+#   libgomp1        — OpenMP symbols used by torch/numpy via sentence-transformers
+#                     (the enrichment step loads sentence-transformers/all-MiniLM-L6-v2)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv (same as ml/Dockerfile)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+WORKDIR /app
+
+# Install ml deps first for layer caching — only re-runs if pyproject.toml or
+# uv.lock change, not on every Data/ or source edit.
+COPY ml/pyproject.toml ml/uv.lock /app/ml/
+WORKDIR /app/ml
+RUN uv sync --frozen --no-dev
+
+# Application source + source data. Data/ lives at repo root and is NOT in
+# ml/Dockerfile's image; this is the whole reason the Job uses its own image.
+WORKDIR /app
+COPY ml/ /app/ml/
+COPY Data/ /app/Data/
+
+WORKDIR /app/ml
+
+# Defaults exist for `docker run <image>` debugging only — the Container Apps
+# Job's command/args (set in infra/modules/ingestion-job.bicep) override both.
+ENTRYPOINT ["uv", "run", "python", "main_new.py"]
+CMD ["--help"]

@@ -39,6 +39,9 @@ resource postgres 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
   tags: union(tags, { 'azd-service-name': 'postgres' })
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
 
@@ -132,3 +135,4 @@ resource postgres 'Microsoft.App/containerApps@2024-03-01' = {
 output id string = postgres.id
 output name string = postgres.name
 output fqdn string = postgres.properties.configuration.ingress.fqdn
+output principalId string = postgres.identity.principalId

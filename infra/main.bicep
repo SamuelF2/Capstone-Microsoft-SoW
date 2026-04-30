@@ -8,8 +8,10 @@
 //   - Azure Container Registry (stores Docker images)
 //   - Container App: api (FastAPI backend)
 //   - Container App: web (Next.js frontend)
+//   - Container App: ml (FastAPI GraphRAG service)
 //   - Container App: neo4j (graph database)
 //   - Container App: postgres (relational database)
+//   - Container Apps Job: ingestion (manual-trigger Neo4j data seeding)
 //   - Log Analytics Workspace (monitoring/logging)
 //
 // NOTE: PostgreSQL runs as a container because Azure Database for PostgreSQL
@@ -61,6 +63,29 @@ param azureAiKey string = ''
 
 @description('Microsoft Entra ID Application (Client) ID')
 param azureAdClientId string = ''
+
+// --- Azure OpenAI / Foundry params for the ML Container App ---
+// Auth uses managed identity + RBAC (see foundry-rbac module below).
+@description('Azure OpenAI / Foundry endpoint URL used by the ML service')
+param azureOpenAiEndpoint string = ''
+
+@description('Azure OpenAI deployment name used by the ML service')
+param azureOpenAiDeployment string = ''
+
+@description('Azure OpenAI API version used by the ML service')
+param azureOpenAiApiVersion string = ''
+
+@description('Subscription ID where the existing Foundry resource lives')
+param foundrySubscriptionId string = '0a96bee6-0b0e-4a8e-8ef7-cc83cb272a81'
+
+@description('Resource group containing the existing Foundry account')
+param foundryResourceGroup string = 'RG-SOW'
+
+@description('Name of the existing Foundry account')
+param foundryAccountName string = 'Foundry-SOW'
+
+@description('Image name for the ingestion service (set by azd via SERVICE_INGESTION_IMAGE_NAME; falls back to a :latest reference on the env-suffixed repo if unset, e.g. on first deploy before any image build has run)')
+param serviceIngestionImageName string = ''
 
 // ---------------------------------------------------------------------------
 // Variables
@@ -167,6 +192,69 @@ module neo4j 'modules/neo4j-container.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
+// Container App: ML / GraphRAG (FastAPI retrieval + LLM authoring service)
+// ---------------------------------------------------------------------------
+
+module ml 'modules/ml-container.bicep' = {
+  name: 'ml'
+  scope: rg
+  params: {
+    name: '${abbrs.appContainerApps}ml-${resourceToken}'
+    location: location
+    tags: tags
+    containerAppsEnvironmentId: containerAppsEnv.outputs.id
+    containerRegistryName: containerRegistry.outputs.name
+    azureOpenAiEndpoint: azureOpenAiEndpoint
+    azureOpenAiDeployment: azureOpenAiDeployment
+    azureOpenAiApiVersion: azureOpenAiApiVersion
+    neo4jUri: 'bolt://${neo4j.outputs.name}:7687'
+    neo4jPassword: neo4jPassword
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Container Apps Job: Ingestion (Neo4j data seeding — manual trigger)
+// ---------------------------------------------------------------------------
+// Declared BEFORE foundryRbac so ingestionJob.outputs.principalId is available
+// to add to that module's principalIds list. The Job needs Azure AI Developer
+// on Foundry-SOW for the same reason the ML container does — it runs
+// main_new.py ingest, which makes hundreds of LLM calls during seeding.
+
+module ingestionJob 'modules/ingestion-job.bicep' = {
+  name: 'ingestion-job'
+  scope: rg
+  params: {
+    jobName: 'caj-ingest-${resourceToken}'
+    location: location
+    tags: tags
+    containerAppsEnvironmentId: containerAppsEnv.outputs.id
+    containerRegistryName: containerRegistry.outputs.name
+    image: !empty(serviceIngestionImageName) ? serviceIngestionImageName : 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+    neo4jName: neo4j.outputs.name
+    neo4jPassword: neo4jPassword
+    foundryEndpoint: azureOpenAiEndpoint
+    foundryDeployment: azureOpenAiDeployment
+    foundryApiVersion: azureOpenAiApiVersion
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-Sub RBAC: Grant ML + Ingestion MIs access to Foundry-SOW
+// ---------------------------------------------------------------------------
+
+module foundryRbac 'modules/foundry-rbac.bicep' = {
+  name: 'foundry-rbac'
+  scope: resourceGroup(foundrySubscriptionId, foundryResourceGroup)
+  params: {
+    foundryAccountName: foundryAccountName
+    principalIds: [
+      ml.outputs.principalId
+      ingestionJob.outputs.principalId
+    ]
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Container App: API (FastAPI Backend)
 // ---------------------------------------------------------------------------
 
@@ -194,6 +282,7 @@ module api 'modules/container-app.bicep' = {
       { name: 'AZURE_AI_ENDPOINT', secretRef: 'azure-ai-endpoint' }
       { name: 'AZURE_AI_KEY', secretRef: 'azure-ai-key' }
       { name: 'AZURE_AD_CLIENT_ID', value: azureAdClientId }
+      { name: 'GRAPHRAG_API_URL', value: 'https://${ml.outputs.fqdn}' }
     ]
     secrets: [
       { name: 'neo4j-password', value: neo4jPassword }
@@ -239,3 +328,10 @@ output WEB_URL string = 'https://${web.outputs.fqdn}'
 output NEO4J_FQDN string = neo4j.outputs.fqdn
 output POSTGRES_FQDN string = postgres.outputs.fqdn
 output AZURE_RESOURCE_GROUP string = rg.name
+
+// Managed identity principal IDs for downstream RBAC role assignments (COC-118)
+output apiPrincipalId string = api.outputs.principalId
+output webPrincipalId string = web.outputs.principalId
+output postgresPrincipalId string = postgres.outputs.principalId
+output neo4jPrincipalId string = neo4j.outputs.principalId
+output mlPrincipalId string = ml.outputs.principalId
