@@ -37,6 +37,10 @@ from models import (
     ReviewSubmitPayload,
     SendBackPayload,
 )
+from services.workflow_engine import (
+    _is_role_active,
+    _load_sow_microsoft_metadata,
+)
 from utils.db_helpers import (
     insert_history,
     record_review_result,
@@ -315,16 +319,14 @@ async def _get_required_roles(conn, sow_id: int, stage_key: str, esap_level: str
         if isinstance(row["workflow_data"], dict)
         else json.loads(row["workflow_data"])
     )
+    sow_meta = await _load_sow_microsoft_metadata(conn, sow_id)
     for stage in data.get("stages", []):
         if stage["stage_key"] == stage_key:
-            roles = []
-            for role in stage.get("roles", []):
-                if not role.get("is_required", True):
-                    continue
-                esap_list = role.get("esap_levels")
-                if esap_list is None or esap_level in esap_list:
-                    roles.append(role["role_key"])
-            return roles
+            return [
+                role["role_key"]
+                for role in stage.get("roles", [])
+                if _is_role_active(role, esap_level, sow_meta)
+            ]
     return []
 
 
@@ -348,6 +350,144 @@ def _load_checklist(role: str) -> dict:
             "items": [],
         },
     )
+
+
+# ── Per-role checklist (workflow-driven) ─────────────────────────────────────
+
+
+async def _get_role_checklist_config(conn, assignment: dict) -> dict | None:
+    """Find the WorkflowStageRoleConfig matching this assignment.
+
+    Reads the per-SoW workflow snapshot in ``sow_workflow.workflow_data`` so
+    in-flight reviews stay pinned to the workflow contract that was in
+    effect when the SoW entered review (later template edits don't shift
+    the rules under their feet).
+
+    Returns ``{"checklist_mode": str, "checklist_items": list, "is_required": bool}``
+    or ``None`` if no role row matches (legacy/seeded SoWs without snapshots).
+    """
+    from services.workflow_engine import _stage_key_from_assignment_stage
+
+    row = await conn.fetchrow(
+        "SELECT workflow_data FROM sow_workflow WHERE sow_id = $1",
+        assignment["sow_id"],
+    )
+    if not row:
+        return None
+    raw = row["workflow_data"]
+    wd = raw if isinstance(raw, dict) else json.loads(raw)
+
+    stage_key = _stage_key_from_assignment_stage(wd, assignment["stage"]) or assignment["stage"]
+    target_role = assignment["reviewer_role"]
+    for stage in wd.get("stages", []):
+        if stage.get("stage_key") != stage_key:
+            continue
+        for role in stage.get("roles", []):
+            if role.get("role_key") == target_role:
+                return {
+                    "checklist_mode": role.get("checklist_mode") or "ai",
+                    "checklist_items": role.get("checklist_items") or [],
+                    "is_required": role.get("is_required", True),
+                }
+    return None
+
+
+async def _fetch_sow_for_checklist(conn, sow_id: int) -> dict:
+    """Pull the SoW row used as the AI generation context."""
+    row = await conn.fetchrow(
+        "SELECT id, title, content, methodology, deal_value FROM sow_documents WHERE id = $1",
+        sow_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SoW for assignment not found",
+        )
+    raw_content = row["content"]
+    if isinstance(raw_content, str):
+        try:
+            content = json.loads(raw_content)
+        except json.JSONDecodeError:
+            content = {}
+    elif isinstance(raw_content, dict):
+        content = raw_content
+    else:
+        content = {}
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "content": content,
+        "methodology": row["methodology"],
+        "deal_value": row["deal_value"],
+    }
+
+
+async def _generate_ai_checklist_items(
+    *,
+    sow: dict,
+    role_key: str,
+    role_display: str,
+    seed_items: list[dict],
+    current_user: CurrentUser,
+) -> list[dict]:
+    """Call the ML service to generate checklist items grounded in the SoW.
+
+    Returns a list of ``{"id": str, "text": str}`` dicts. Raises
+    HTTPException(503) if the ML service is unavailable — callers handle
+    that the same way other AI endpoints do.
+    """
+    from utils.sow_text import flatten_sow_content
+
+    from routers.ai import _proxy_post  # local import to avoid circular
+
+    flattened = flatten_sow_content(sow.get("content"))
+    body = {
+        "sow_id": sow.get("id"),
+        "sow_title": sow.get("title"),
+        "sow_content": flattened,
+        "role_key": role_key,
+        "role_display": role_display,
+        "seed_items": [
+            {"id": item.get("id"), "text": item.get("text")}
+            for item in (seed_items or [])
+            if item.get("text")
+        ],
+    }
+    raw = await _proxy_post("/assist/checklist", json_body=body, timeout=45.0, user=current_user)
+    items = raw.get("items") if isinstance(raw, dict) else None
+    if not isinstance(items, list):
+        return []
+    out: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        text = (item.get("text") or "").strip()
+        if not text:
+            continue
+        item_id = (item.get("id") or "").strip()
+        if not item_id:
+            import uuid
+
+            item_id = f"ai-{uuid.uuid4().hex[:12]}"
+        out.append({"id": item_id, "text": text})
+    return out
+
+
+def _items_for_response(items: list[dict], category_label: str) -> list[ChecklistItemModel]:
+    """Wrap raw {id, text} dicts in ChecklistItemModel with a default
+    category so the existing reviewer UI keeps grouping cleanly."""
+    out: list[ChecklistItemModel] = []
+    for item in items:
+        out.append(
+            ChecklistItemModel(
+                id=str(item.get("id") or ""),
+                text=str(item.get("text") or ""),
+                required=False,
+                category=category_label,
+                helpText=None,
+            )
+        )
+    return out
 
 
 # ── GET /api/review/assigned ──────────────────────────────────────────────────
@@ -428,11 +568,13 @@ async def get_assigned_reviews(
 async def get_checklist(sow_id: int, current_user: CurrentUser) -> ReviewChecklistResponse:
     """Return checklist items for the current user's review assignment on this SoW.
 
-    Includes any previously saved checklist_responses so reviewers can resume.
+    Routes through the same workflow-driven flow as ``/assignment/{id}/checklist``
+    so the author's per-role configuration applies on legacy SoW-id-scoped
+    pages too. Picks the most relevant assignment when the user has more
+    than one (pending → in_progress → other) so reviewers with multi-role
+    assignments cycle through them.
     """
     async with database.pg_pool.acquire() as conn:
-        # Prefer a pending/in-progress assignment so authors with multiple
-        # role assignments cycle through them one at a time.
         assignment = await conn.fetchrow(
             """SELECT * FROM review_assignments
                WHERE sow_id = $1 AND user_id = $2
@@ -441,28 +583,24 @@ async def get_checklist(sow_id: int, current_user: CurrentUser) -> ReviewCheckli
             sow_id,
             current_user.id,
         )
-
     if not assignment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="SoW not found",
         )
 
-    role = assignment["reviewer_role"]
-    checklist_data = _load_checklist(role)
-    items = [ChecklistItemModel(**item) for item in checklist_data.get("items", [])]
-
-    saved = assignment["checklist_responses"]
-    if isinstance(saved, str):
-        saved = json.loads(saved)
-
+    full = await get_assignment_checklist(assignment["id"], current_user)
     return ReviewChecklistResponse(
-        reviewer_role=role,
-        display_name=checklist_data.get("displayName", _ROLE_DISPLAY_NAMES.get(role, role)),
-        focus_areas=checklist_data.get("focusAreas", []),
-        items=items,
-        saved_responses=saved,
-        comments=assignment["comments"],
+        reviewer_role=full.reviewer_role,
+        display_name=full.display_name,
+        focus_areas=full.focus_areas,
+        items=full.items,
+        saved_responses=full.saved_responses,
+        comments=full.comments,
+        mode=full.mode,
+        sow_changed=full.sow_changed,
+        generated_at=full.generated_at,
+        assignment_id=full.assignment_id,
     )
 
 
@@ -610,11 +748,48 @@ async def _apply_review_decision(
         )
 
     # For approving decisions: every required checklist item must be checked.
+    # Source the required-item set from the same workflow-snapshot-aware
+    # config the reviewer's checklist UI uses (``_get_role_checklist_config``).
+    # The static ``_load_checklist`` returns ``items: []`` for any role not in
+    # ``review-checklists.json`` (e.g. Microsoft Default Workflow roles like
+    # ``responsible-ai-lead``), which would silently pass the gate.
     if payload.decision in ("approved", "approved-with-conditions"):
-        checklist_data = _load_checklist(assignment["reviewer_role"])
-        required_ids = {
-            item["id"] for item in checklist_data.get("items", []) if item.get("required")
-        }
+        role_cfg = await _get_role_checklist_config(conn, assignment)
+        configured_mode = (role_cfg or {}).get("checklist_mode")
+        required_ids: set[str] = set()
+
+        if configured_mode == "manual":
+            # Manual mode: every author-curated item is required.
+            seed_items = (role_cfg or {}).get("checklist_items") or []
+            required_ids = {
+                str(item.get("id"))
+                for item in seed_items
+                if item.get("id") is not None and (item.get("text") or "").strip()
+            }
+        elif configured_mode == "ai":
+            # AI mode: the per-assignment cache holds the exact items the
+            # reviewer was shown. Every cached item is required.
+            cache_row = await conn.fetchrow(
+                "SELECT items FROM reviewer_checklist_cache WHERE assignment_id = $1",
+                assignment["id"],
+            )
+            if cache_row is not None:
+                raw_items = cache_row["items"]
+                if isinstance(raw_items, str):
+                    raw_items = json.loads(raw_items)
+                if isinstance(raw_items, list):
+                    required_ids = {
+                        str(item.get("id")) for item in raw_items if item.get("id") is not None
+                    }
+
+        if not required_ids:
+            # Legacy SoW with no workflow snapshot, or AI mode with no cache
+            # yet. Fall back to the hardcoded checklist's `required` flag.
+            checklist_data = _load_checklist(assignment["reviewer_role"])
+            required_ids = {
+                item["id"] for item in checklist_data.get("items", []) if item.get("required")
+            }
+
         checked_ids = {r["id"] for r in payload.checklist_responses if r.get("checked")}
         missing = required_ids - checked_ids
         if missing:
@@ -883,26 +1058,154 @@ async def get_assignment_checklist(
 ) -> AssignmentChecklistResponse:
     """Return the checklist + saved responses for one assignment id.
 
-    Unlike the legacy ``/{sow_id}/checklist`` endpoint, this scopes by
-    assignment id so a user holding multiple roles on the same SoW can open
-    each one independently.
+    Three sources, in priority order:
+
+    1. ``reviewer_checklist_cache`` row matching this assignment — used as-is
+       when the cached mode still matches the workflow config.
+    2. The workflow snapshot's role config: ``manual`` → return the author's
+       items verbatim; ``ai`` → call the ML service, persist to cache, return.
+    3. Legacy ``review-checklists.json`` fallback when no workflow config is
+       attached (used by SoWs created before checklist authoring shipped, or
+       when AI is configured but seed items aren't enough and ML is offline).
+
+    Each reviewer's cached row is independent — parallel reviewers on the
+    same role get their own AI-generated lists, and a manual list is shared
+    by-id so checked state survives author edits to the seed items.
     """
+    from utils.sow_text import hash_sow_content
+
     async with database.pg_pool.acquire() as conn:
         assignment = await _load_authorized_assignment(conn, assignment_id, current_user)
 
-    role = assignment["reviewer_role"]
-    checklist_data = _load_checklist(role)
-    items = [ChecklistItemModel(**item) for item in checklist_data.get("items", [])]
+        role = assignment["reviewer_role"]
+        role_display = _ROLE_DISPLAY_NAMES.get(role, role)
+        role_cfg = await _get_role_checklist_config(conn, assignment)
+        sow = await _fetch_sow_for_checklist(conn, assignment["sow_id"])
+        current_hash = hash_sow_content(sow["content"])
 
-    saved = assignment["checklist_responses"]
-    if isinstance(saved, str):
-        saved = json.loads(saved)
+        cache_row = await conn.fetchrow(
+            "SELECT mode, items, sow_content_hash, generated_at "
+            "FROM reviewer_checklist_cache WHERE assignment_id = $1",
+            assignment_id,
+        )
+
+        configured_mode = (role_cfg or {}).get("checklist_mode")
+        seed_items = (role_cfg or {}).get("checklist_items") or []
+
+        cached_items: list[dict] | None = None
+        cached_mode: str | None = None
+        cached_hash: str | None = None
+        cached_gen_at = None
+        if cache_row is not None:
+            cached_mode = cache_row["mode"]
+            raw_items = cache_row["items"]
+            if isinstance(raw_items, str):
+                raw_items = json.loads(raw_items)
+            cached_items = raw_items if isinstance(raw_items, list) else []
+            cached_hash = cache_row["sow_content_hash"]
+            cached_gen_at = cache_row["generated_at"]
+
+        # Decide what to serve.
+        items: list[dict] = []
+        mode: str = "legacy"
+        focus_areas: list[str] = []
+        category_label = "Review"
+        generated_at = cached_gen_at
+
+        # Cache hit when the stored mode still matches the configured mode.
+        cache_valid = (
+            cached_items is not None
+            and configured_mode is not None
+            and cached_mode == configured_mode
+        )
+
+        if cache_valid:
+            items = cached_items or []
+            mode = cached_mode or "ai"
+        elif configured_mode == "manual":
+            mode = "manual"
+            if seed_items:
+                items = [
+                    {"id": str(it.get("id")), "text": str(it.get("text") or "")}
+                    for it in seed_items
+                    if (it.get("text") or "").strip()
+                ]
+            else:
+                # Empty manual list — fall back to legacy hardcoded items so
+                # the reviewer is never stranded with a blank screen while
+                # the author iterates on their list.
+                legacy = _load_checklist(role)
+                items = [
+                    {"id": item["id"], "text": item["text"]} for item in legacy.get("items", [])
+                ]
+                focus_areas = legacy.get("focusAreas", []) or []
+                role_display = legacy.get("displayName", role_display)
+                mode = "legacy"
+            await _upsert_checklist_cache(
+                conn,
+                assignment_id=assignment_id,
+                role_key=role,
+                mode=mode,
+                items=items,
+                content_hash=current_hash,
+            )
+        elif configured_mode == "ai":
+            try:
+                items = await _generate_ai_checklist_items(
+                    sow=sow,
+                    role_key=role,
+                    role_display=role_display,
+                    seed_items=seed_items,
+                    current_user=current_user,
+                )
+                mode = "ai"
+                await _upsert_checklist_cache(
+                    conn,
+                    assignment_id=assignment_id,
+                    role_key=role,
+                    mode=mode,
+                    items=items,
+                    content_hash=current_hash,
+                )
+                generated_at = datetime.now(UTC)
+            except HTTPException:
+                # ML offline — degrade to seeds (if any) or legacy hardcoded
+                # so the reviewer can still work. We deliberately do NOT
+                # cache this fallback; the next load will retry the LLM.
+                if seed_items:
+                    items = [
+                        {"id": str(it.get("id")), "text": str(it.get("text") or "")}
+                        for it in seed_items
+                        if (it.get("text") or "").strip()
+                    ]
+                    mode = "manual"
+                else:
+                    legacy = _load_checklist(role)
+                    items = [
+                        {"id": item["id"], "text": item["text"]} for item in legacy.get("items", [])
+                    ]
+                    focus_areas = legacy.get("focusAreas", []) or []
+                    role_display = legacy.get("displayName", role_display)
+                    mode = "legacy"
+        else:
+            # No workflow snapshot found at all — use the hardcoded fallback.
+            legacy = _load_checklist(role)
+            items = [{"id": item["id"], "text": item["text"]} for item in legacy.get("items", [])]
+            focus_areas = legacy.get("focusAreas", []) or []
+            role_display = legacy.get("displayName", role_display)
+            mode = "legacy"
+
+        saved = assignment["checklist_responses"]
+        if isinstance(saved, str):
+            saved = json.loads(saved)
+
+        sow_changed = bool(cached_hash and cached_hash != current_hash and cache_valid)
 
     return AssignmentChecklistResponse(
         reviewer_role=role,
-        display_name=checklist_data.get("displayName", _ROLE_DISPLAY_NAMES.get(role, role)),
-        focus_areas=checklist_data.get("focusAreas", []),
-        items=items,
+        display_name=role_display,
+        focus_areas=focus_areas,
+        items=_items_for_response(items, category_label),
         saved_responses=saved,
         comments=assignment["comments"],
         assignment_id=assignment["id"],
@@ -911,6 +1214,110 @@ async def get_assignment_checklist(
         stage=assignment["stage"],
         assignment_status=assignment["status"],
         decision=assignment["decision"],
+        mode=mode,
+        sow_changed=sow_changed,
+        generated_at=generated_at,
+    )
+
+
+async def _upsert_checklist_cache(
+    conn,
+    *,
+    assignment_id: int,
+    role_key: str,
+    mode: str,
+    items: list[dict],
+    content_hash: str,
+) -> None:
+    """Insert-or-update the per-assignment checklist cache row."""
+    await conn.execute(
+        """
+        INSERT INTO reviewer_checklist_cache
+            (assignment_id, role_key, mode, items, sow_content_hash, generated_at)
+        VALUES ($1, $2, $3, $4::jsonb, $5, NOW())
+        ON CONFLICT (assignment_id) DO UPDATE
+        SET role_key         = EXCLUDED.role_key,
+            mode             = EXCLUDED.mode,
+            items            = EXCLUDED.items,
+            sow_content_hash = EXCLUDED.sow_content_hash,
+            generated_at     = EXCLUDED.generated_at
+        """,
+        assignment_id,
+        role_key,
+        mode,
+        json.dumps(items),
+        content_hash,
+    )
+
+
+@router.post(
+    "/assignment/{assignment_id}/checklist/regenerate",
+    response_model=AssignmentChecklistResponse,
+    summary="Regenerate the AI checklist for a specific assignment",
+)
+async def regenerate_assignment_checklist(
+    assignment_id: int,
+    current_user: CurrentUser,
+) -> AssignmentChecklistResponse:
+    """Force a fresh AI generation, overwriting the cache row.
+
+    Only valid when the workflow role is configured for ``ai`` mode. Manual
+    roles return 409 because there is nothing to regenerate — the items are
+    authored upstream in the workflow editor.
+    """
+    from utils.sow_text import hash_sow_content
+
+    async with database.pg_pool.acquire() as conn:
+        assignment = await _load_authorized_assignment(conn, assignment_id, current_user)
+        role = assignment["reviewer_role"]
+        role_display = _ROLE_DISPLAY_NAMES.get(role, role)
+        role_cfg = await _get_role_checklist_config(conn, assignment)
+        configured_mode = (role_cfg or {}).get("checklist_mode") or "ai"
+        if configured_mode != "ai":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This role is configured with a manual checklist; nothing to regenerate.",
+            )
+        seed_items = (role_cfg or {}).get("checklist_items") or []
+        sow = await _fetch_sow_for_checklist(conn, assignment["sow_id"])
+        current_hash = hash_sow_content(sow["content"])
+
+        items = await _generate_ai_checklist_items(
+            sow=sow,
+            role_key=role,
+            role_display=role_display,
+            seed_items=seed_items,
+            current_user=current_user,
+        )
+        await _upsert_checklist_cache(
+            conn,
+            assignment_id=assignment_id,
+            role_key=role,
+            mode="ai",
+            items=items,
+            content_hash=current_hash,
+        )
+
+        saved = assignment["checklist_responses"]
+        if isinstance(saved, str):
+            saved = json.loads(saved)
+
+    return AssignmentChecklistResponse(
+        reviewer_role=role,
+        display_name=role_display,
+        focus_areas=[],
+        items=_items_for_response(items, "Review"),
+        saved_responses=saved,
+        comments=assignment["comments"],
+        assignment_id=assignment["id"],
+        sow_id=assignment["sow_id"],
+        user_id=assignment["user_id"],
+        stage=assignment["stage"],
+        assignment_status=assignment["status"],
+        decision=assignment["decision"],
+        mode="ai",
+        sow_changed=False,
+        generated_at=datetime.now(UTC),
     )
 
 
@@ -1170,7 +1577,9 @@ async def advance_sow(sow_id: int, current_user: CurrentUser) -> dict:
                     ),
                 )
 
-            active_branches = [k for k, v in parallel_branches.items() if v != "completed"]
+            active_branches = [
+                k for k, v in parallel_branches.items() if v not in ("completed", "skipped")
+            ]
 
             # Aggregate outstanding roles across every active branch so the
             # caller gets a single 409 listing everything that's still pending.

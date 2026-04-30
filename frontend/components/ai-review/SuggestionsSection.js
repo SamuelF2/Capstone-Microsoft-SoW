@@ -71,8 +71,8 @@ export default function SuggestionsSection({ suggestions }) {
                   style={{
                     padding: 'var(--spacing-sm) var(--spacing-md)',
                     borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'rgba(239,68,68,0.06)',
-                    borderLeft: '3px solid rgba(239,68,68,0.4)',
+                    backgroundColor: 'rgba(var(--color-error-rgb), 0.06)',
+                    borderLeft: '3px solid rgba(var(--color-error-rgb), 0.4)',
                     marginBottom: 'var(--spacing-sm)',
                   }}
                 >
@@ -94,8 +94,8 @@ export default function SuggestionsSection({ suggestions }) {
                 style={{
                   padding: 'var(--spacing-sm) var(--spacing-md)',
                   borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'rgba(74,222,128,0.06)',
-                  borderLeft: '3px solid rgba(74,222,128,0.4)',
+                  backgroundColor: 'rgba(var(--color-success-rgb), 0.06)',
+                  borderLeft: '3px solid rgba(var(--color-success-rgb), 0.4)',
                   marginBottom: 'var(--spacing-sm)',
                 }}
               >

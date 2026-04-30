@@ -9,6 +9,7 @@ import AttachmentManager from '../../components/AttachmentManager';
 import WorkflowProgress from '../../components/WorkflowProgress';
 import WorkflowReadOnlySummary from '../../components/sow/WorkflowReadOnlySummary';
 import ReviewerAssignmentPanel from '../../components/sow/ReviewerAssignmentPanel';
+import MicrosoftWorkflowFlags from '../../components/sow/MicrosoftWorkflowFlags';
 import ActivityLog from '../../components/ActivityLog';
 import ContextSidebar from '../../components/ai-context/ContextSidebar';
 import AssistChat from '../../components/ai-assist/AssistChat';
@@ -179,6 +180,12 @@ export default function DraftPage() {
   const [notFound, setNotFound] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
+  // Microsoft workflow: full SoW metadata (so PATCHes can preserve sibling
+  // keys) and a flag indicating the SoW is using the Microsoft template.
+  const [sowMetadata, setSowMetadata] = useState(null);
+  const [isMicrosoftWorkflow, setIsMicrosoftWorkflow] = useState(false);
+  const [sowPermissions, setSowPermissions] = useState([]);
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
 
   // Persistence: load from backend on mount, debounced auto-save on edit.
   // The previous implementation used localStorage as the primary store,
@@ -194,6 +201,34 @@ export default function DraftPage() {
   const debounceTimerRef = useRef(null);
   const gridRef = useRef(null);
   const sidebarRef = useRef(null);
+
+  // Hydrate a server SoW response into the shape sowData expects: the
+  // backend keeps methodology, title, customer, etc. in their own SoW
+  // columns (not inside content JSONB), so we mirror them onto
+  // top-level keys the tabs and readiness checks already read from. Used
+  // by both initial load and the AI-extraction apply callback so a
+  // re-hydrate after auto-fill keeps every derived field consistent.
+  const hydrateContentFromServer = useCallback((data, prev = null) => {
+    const content = { ...(data.content || {}) };
+    if (!content.deliveryMethodology && data.methodology) {
+      content.deliveryMethodology = data.methodology;
+    }
+    if (!content.sowTitle && data.title) content.sowTitle = data.title;
+    if (!content.customerName && data.customer_name) content.customerName = data.customer_name;
+    if (!content.opportunityId && data.opportunity_id) content.opportunityId = data.opportunity_id;
+    if (content.dealValue == null && data.deal_value != null) content.dealValue = data.deal_value;
+    if (!content.status && data.status) content.status = data.status;
+    // Preserve any locally-derived keys the server doesn't echo back
+    // (e.g. UI-only flags). The server's content fields take precedence
+    // because the apply-extraction call just wrote them, but anything
+    // exclusive to the previous in-memory copy survives.
+    if (prev) {
+      for (const k of Object.keys(prev)) {
+        if (content[k] === undefined) content[k] = prev[k];
+      }
+    }
+    return content;
+  }, []);
 
   // Load SoW from backend
   useEffect(() => {
@@ -215,29 +250,20 @@ export default function DraftPage() {
           return;
         }
         const data = await res.json();
-        const content = { ...(data.content || {}) };
-        // The backend stores methodology in its own column, not inside the
-        // content JSONB.  Merge it into the in-memory sowData under the key
-        // the tab/registry + readiness checks already expect, so every tab
-        // resolves to its methodology-specific config instead of falling
-        // through to the "No content configured" placeholder.
-        if (!content.deliveryMethodology && data.methodology) {
-          content.deliveryMethodology = data.methodology;
-        }
-        // Mirror other top-level fields the header row renders directly
-        // from sowData (title, customer, opportunity, deal value, status).
-        if (!content.sowTitle && data.title) content.sowTitle = data.title;
-        if (!content.customerName && data.customer_name) content.customerName = data.customer_name;
-        if (!content.opportunityId && data.opportunity_id)
-          content.opportunityId = data.opportunity_id;
-        if (content.dealValue == null && data.deal_value != null)
-          content.dealValue = data.deal_value;
-        if (!content.status && data.status) content.status = data.status;
+        const content = hydrateContentFromServer(data);
         // Snapshot the loaded content so the auto-save effect can detect
         // that the next sowData change came from the server (not the user)
         // and skip the redundant PATCH-back.
         lastServerContentRef.current = JSON.stringify(content);
         setSowData(content);
+        // Capture full metadata so MicrosoftWorkflowFlags edits can PATCH
+        // back without dropping sibling keys (workOrderNumber etc.).
+        setSowMetadata(data.metadata || {});
+        authFetch(`/api/sow/${id}/my-permissions`)
+          .then((res) => (res.ok ? res.json() : { permissions: [] }))
+          .then((data) => setSowPermissions(data.permissions || []))
+          .catch(() => setSowPermissions([]))
+          .finally(() => setPermissionsLoading(false));
         if (data.updated_at) setSavedAt(data.updated_at);
       } catch (err) {
         if (!cancelled) {
@@ -249,7 +275,24 @@ export default function DraftPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, authFetch]);
+  }, [id, authFetch, hydrateContentFromServer]);
+
+  // Apply an AI-extraction result returned by AttachmentManager. The
+  // server has already written the new content, so we update local
+  // state in lockstep and prime ``lastServerContentRef`` with the same
+  // serialized snapshot — without that, the auto-save effect would
+  // immediately PATCH the new content back as if the user had typed it.
+  const handleContentExtracted = useCallback(
+    (updatedSow) => {
+      if (!updatedSow) return;
+      const merged = hydrateContentFromServer(updatedSow, sowData);
+      lastServerContentRef.current = JSON.stringify(merged);
+      setSowData(merged);
+      if (updatedSow.metadata) setSowMetadata(updatedSow.metadata || {});
+      if (updatedSow.updated_at) setSavedAt(updatedSow.updated_at);
+    },
+    [hydrateContentFromServer, sowData]
+  );
 
   // Debounced auto-save: 750ms after the last edit, PATCH the SoW content
   // to /api/sow/{id}.  Skips when the current state already matches the
@@ -257,6 +300,7 @@ export default function DraftPage() {
   // and any redundant re-renders that don't actually change content).
   useEffect(() => {
     if (!sowData || !id || !authFetch) return;
+    if (!canWrite) return;
     const serialized = JSON.stringify(sowData);
     if (serialized === lastServerContentRef.current) return;
 
@@ -286,7 +330,52 @@ export default function DraftPage() {
         debounceTimerRef.current = null;
       }
     };
-  }, [sowData, id, authFetch]);
+  }, [sowData, id, authFetch, canWrite]);
+
+  // Detect whether this SoW uses the Microsoft Default Workflow by inspecting
+  // its workflow snapshot for the gateway stage_key. Structural — survives
+  // template renames as long as the seed keeps the gateway key.
+  useEffect(() => {
+    if (!id || !authFetch) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(`/api/workflow/sow/${id}`);
+        if (!res.ok || cancelled) return;
+        const wf = await res.json();
+        const stages = wf?.workflow_data?.stages || [];
+        const isMs = stages.some((s) => s.stage_key === 'microsoft_parallel_branches');
+        if (!cancelled) setIsMicrosoftWorkflow(isMs);
+      } catch {
+        // Snapshot fetch failure is non-fatal — flags section just won't render.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, authFetch]);
+
+  // Update microsoft_workflow flags by PATCHing /api/sow/{id} with the
+  // merged metadata. Other metadata keys (workOrderNumber, customerLegalName)
+  // are preserved by spreading the prior metadata first.
+  const updateMicrosoftWorkflowFlags = useCallback(
+    async (next) => {
+      if (!id || !authFetch) return;
+      const merged = { ...(sowMetadata || {}), microsoft_workflow: next };
+      setSowMetadata(merged);
+      try {
+        const res = await authFetch(`/api/sow/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metadata: merged }),
+        });
+        if (res.ok) setSavedAt(new Date().toISOString());
+      } catch {
+        // Silent fail — author can re-edit to retry.
+      }
+    },
+    [id, authFetch, sowMetadata]
+  );
 
   // Update a top-level section of the SoW data
   const updateSection = (section, value) => {
@@ -389,6 +478,11 @@ export default function DraftPage() {
     return Object.keys(val).some((k) => val[k]);
   })();
 
+  const canWrite =
+    !permissionsLoading && (sowPermissions.includes('*') || sowPermissions.includes('sow.write'));
+
+  const canRead = !permissionsLoading && (canWrite || sowPermissions.includes('sow.read'));
+
   const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
   // Submit the SoW for review.  The backend resolves the SoW's workflow to
@@ -478,6 +572,54 @@ export default function DraftPage() {
         }}
       >
         <Spinner message="Loading SoW…" />
+      </div>
+    );
+  }
+
+  if (permissionsLoading) {
+    return (
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Spinner message="Loading permissions…" />
+      </div>
+    );
+  }
+
+  if (!canRead) {
+    return (
+      <div
+        style={{
+          minHeight: 'calc(100vh - 80px)',
+          backgroundColor: 'var(--color-bg-primary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <div
+          className="card text-center"
+          style={{ padding: 'var(--spacing-3xl)', maxWidth: '440px' }}
+        >
+          <div style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>🔒</div>
+          <h3 className="text-xl font-semibold mb-sm">{sowData?.sowTitle || 'SoW'}</h3>
+          <p className="text-secondary mb-sm">
+            Status: <strong>{sowData?.status || 'draft'}</strong>
+          </p>
+          <p className="text-secondary mb-xl">
+            You have been added as a collaborator but do not have permission to view this SoW's
+            contents. Contact the SoW manager to request access.
+          </p>
+          <Link href="/all-sows" className="btn btn-primary">
+            Back to All SoWs
+          </Link>
+        </div>
       </div>
     );
   }
@@ -676,6 +818,15 @@ export default function DraftPage() {
             <div style={{ marginTop: 'var(--spacing-sm)' }}>
               <WorkflowReadOnlySummary sowId={id} />
             </div>
+            {isMicrosoftWorkflow && (
+              <div style={{ marginTop: 'var(--spacing-md)' }}>
+                <MicrosoftWorkflowFlags
+                  data={sowMetadata?.microsoft_workflow}
+                  onChange={updateMicrosoftWorkflowFlags}
+                  readOnly={(sowData.status || 'draft') !== 'draft'}
+                />
+              </div>
+            )}
             <div style={{ marginTop: 'var(--spacing-md)' }}>
               <ReviewerAssignmentPanel
                 sowId={id}
@@ -829,7 +980,7 @@ export default function DraftPage() {
                   transition={{ duration: 0.2 }}
                 >
                   {tabs.length > 0 && tabs[activeTab] ? (
-                    tabs[activeTab].render(sowData, updateSection)
+                    tabs[activeTab].render(sowData, canWrite ? updateSection : () => {}, !canWrite)
                   ) : (
                     <p className="text-secondary">No content configured for this methodology.</p>
                   )}
@@ -990,8 +1141,8 @@ export default function DraftPage() {
               <button
                 className="btn btn-primary"
                 onClick={() => setShowConfirm(true)}
-                disabled={isSubmitting || !allRequiredMet}
-                style={{ opacity: isSubmitting || !allRequiredMet ? 0.6 : 1 }}
+                disabled={isSubmitting || !allRequiredMet || !canWrite}
+                style={{ opacity: isSubmitting || !allRequiredMet || !canWrite ? 0.6 : 1 }}
               >
                 {isSubmitting ? 'Submitting…' : 'Submit for Review →'}
               </button>
@@ -1020,6 +1171,8 @@ export default function DraftPage() {
             readOnly={false}
             showRequirements={true}
             authFetch={authFetch}
+            currentContent={sowData}
+            onContentExtracted={handleContentExtracted}
           />
         </div>
 

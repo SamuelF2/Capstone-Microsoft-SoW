@@ -297,7 +297,17 @@ function StageForm({ node, onChange, onDelete, nodes, edges }) {
   // Role list mutators
   const addRole = () =>
     patch({
-      roles: [...(stage.roles || []), { role_key: '', is_required: true, esap_levels: null }],
+      roles: [
+        ...(stage.roles || []),
+        {
+          role_key: '',
+          is_required: true,
+          esap_levels: null,
+          checklist_mode: 'ai',
+          checklist_items: [],
+          permission_tier: 'suggest',
+        },
+      ],
     });
 
   const updateRole = (idx, p) =>
@@ -846,6 +856,25 @@ function RoleRow({ role, onUpdate, onRemove }) {
   const [custom, setCustom] = useState(
     !!role.role_key && !KNOWN_REVIEWER_ROLES.includes(role.role_key)
   );
+  const [checklistOpen, setChecklistOpen] = useState(false);
+  const checklistMode = role.checklist_mode || 'ai';
+  const checklistItems = Array.isArray(role.checklist_items) ? role.checklist_items : [];
+
+  const setChecklistMode = (mode) => onUpdate({ checklist_mode: mode });
+  const setChecklistItems = (next) => onUpdate({ checklist_items: next });
+  const addChecklistItem = () =>
+    setChecklistItems([...checklistItems, { id: makeChecklistItemId(), text: '' }]);
+  const updateChecklistItem = (idx, text) =>
+    setChecklistItems(checklistItems.map((it, i) => (i === idx ? { ...it, text } : it)));
+  const removeChecklistItem = (idx) =>
+    setChecklistItems(checklistItems.filter((_, i) => i !== idx));
+  const moveChecklistItem = (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= checklistItems.length) return;
+    const next = checklistItems.slice();
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setChecklistItems(next);
+  };
 
   return (
     <div
@@ -985,8 +1014,255 @@ function RoleRow({ role, onUpdate, onRemove }) {
           })}
         </div>
       </div>
+
+      {/* Per-role SoW review permission tier */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          fontSize: 'var(--font-size-xs)',
+          color: 'var(--color-text-secondary)',
+        }}
+      >
+        <span style={{ flexShrink: 0 }}>SoW access:</span>
+        <div
+          role="tablist"
+          style={{
+            display: 'inline-flex',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-full)',
+            overflow: 'hidden',
+            fontSize: '10px',
+          }}
+        >
+          {[
+            { key: 'view', label: 'View only', title: 'Read-only access. No comments, no edits.' },
+            {
+              key: 'comment',
+              label: 'Comment',
+              title: 'Can leave anchored comments. Cannot suggest content edits.',
+            },
+            {
+              key: 'suggest',
+              label: 'Suggest',
+              title: 'Can comment AND propose edits to the SoW content.',
+            },
+          ].map(({ key, label, title }) => {
+            const active = (role.permission_tier || 'suggest') === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                title={title}
+                onClick={() => onUpdate({ permission_tier: key })}
+                style={{
+                  padding: '2px 8px',
+                  border: 'none',
+                  backgroundColor: active ? 'var(--color-accent-blue, #2563eb)' : 'transparent',
+                  color: active ? 'white' : 'var(--color-text-secondary)',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Per-role review checklist (AI-suggested vs Manual) */}
+      <button
+        type="button"
+        onClick={() => setChecklistOpen((v) => !v)}
+        style={{
+          marginTop: '2px',
+          background: 'none',
+          border: '1px dashed var(--color-border-subtle)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '4px 6px',
+          fontSize: 'var(--font-size-xs)',
+          color: 'var(--color-text-secondary)',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '6px',
+        }}
+      >
+        <span>
+          Review checklist ·{' '}
+          <strong style={{ color: 'var(--color-text-primary)' }}>
+            {checklistMode === 'ai' ? 'AI-suggested' : 'Manual'}
+          </strong>
+          {checklistItems.length > 0 && (
+            <span style={{ color: 'var(--color-text-tertiary)' }}>
+              {' '}
+              · {checklistItems.length} {checklistMode === 'ai' ? 'seed' : 'item'}
+              {checklistItems.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: '10px' }}>{checklistOpen ? '▾' : '▸'}</span>
+      </button>
+      {checklistOpen && (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            padding: 'var(--spacing-xs) var(--spacing-sm)',
+            backgroundColor: 'var(--color-bg-secondary)',
+            borderRadius: 'var(--radius-sm)',
+          }}
+        >
+          <div
+            role="tablist"
+            style={{
+              display: 'inline-flex',
+              alignSelf: 'flex-start',
+              border: '1px solid var(--color-border-subtle)',
+              borderRadius: 'var(--radius-full)',
+              overflow: 'hidden',
+              fontSize: 'var(--font-size-xs)',
+            }}
+          >
+            {[
+              { key: 'ai', label: 'AI-suggested' },
+              { key: 'manual', label: 'Manual' },
+            ].map(({ key, label }) => {
+              const active = checklistMode === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setChecklistMode(key)}
+                  style={{
+                    padding: '3px 10px',
+                    border: 'none',
+                    backgroundColor: active ? 'var(--color-accent-blue, #2563eb)' : 'transparent',
+                    color: active ? 'white' : 'var(--color-text-secondary)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '11px',
+              color: 'var(--color-text-tertiary)',
+              lineHeight: 1.4,
+            }}
+          >
+            {checklistMode === 'ai'
+              ? 'Generated per reviewer from the SoW content. Add seeds below to nudge the AI toward what matters for this role.'
+              : 'These items appear verbatim for every reviewer in this role. Empty list falls back to the legacy hardcoded checklist.'}
+          </p>
+          {checklistItems.map((item, idx) => (
+            <div key={item.id || idx} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <input
+                type="text"
+                className="form-input"
+                value={item.text || ''}
+                placeholder={
+                  checklistMode === 'ai'
+                    ? 'Seed prompt (e.g. "Confirm SLAs match capacity")'
+                    : 'Reviewer item (e.g. "Verify all deliverables have acceptance criteria")'
+                }
+                onChange={(e) => updateChecklistItem(idx, e.target.value)}
+                style={{ flex: 1, fontSize: 'var(--font-size-xs)' }}
+              />
+              <button
+                type="button"
+                onClick={() => moveChecklistItem(idx, -1)}
+                disabled={idx === 0}
+                title="Move up"
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0 6px',
+                  cursor: idx === 0 ? 'default' : 'pointer',
+                  color: idx === 0 ? 'var(--color-text-tertiary)' : 'var(--color-text-secondary)',
+                  fontSize: '10px',
+                }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => moveChecklistItem(idx, 1)}
+                disabled={idx === checklistItems.length - 1}
+                title="Move down"
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--color-border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '0 6px',
+                  cursor: idx === checklistItems.length - 1 ? 'default' : 'pointer',
+                  color:
+                    idx === checklistItems.length - 1
+                      ? 'var(--color-text-tertiary)'
+                      : 'var(--color-text-secondary)',
+                  fontSize: '10px',
+                }}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                onClick={() => removeChecklistItem(idx)}
+                title="Remove item"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-text-tertiary)',
+                  cursor: 'pointer',
+                  fontSize: 'var(--font-size-sm)',
+                  padding: '0 4px',
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={addChecklistItem}
+            style={{
+              alignSelf: 'flex-start',
+              background: 'none',
+              border: '1px dashed var(--color-border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '3px 8px',
+              fontSize: '11px',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+            }}
+          >
+            + {checklistMode === 'ai' ? 'Add seed' : 'Add item'}
+          </button>
+        </div>
+      )}
     </div>
   );
+}
+
+function makeChecklistItemId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `cl-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
 }
 
 // ── Edge form (explicit override edges only) ────────────────────────────

@@ -16,7 +16,7 @@ import httpx
 from auth import CurrentUser
 from config import GRAPHRAG_API_URL
 from fastapi import APIRouter, HTTPException, Query, status
-from utils.db_helpers import require_collaborator
+from utils.db_helpers import require_collaborator, require_system_admin
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -49,6 +49,21 @@ async def _require_sow_collaborator(sow_id: str, user_id: int) -> None:
         await require_collaborator(conn, sow_id=sow_id_int, user_id=user_id)
 
 
+def _clean_params(params: dict | None) -> dict | None:
+    """Strip ``None`` and empty-string values from a params dict.
+
+    Several proxy endpoints accept optional query params that are passed
+    through verbatim (e.g. ``status``, ``kind``, ``sort``). Unset values
+    arrive here as ``None``; httpx serialises those as empty strings
+    (``?status=&kind=``) which fail the upstream ML endpoints' regex
+    validators with a 422. Dropping them early keeps the proxy
+    transparent for the "no filter" case.
+    """
+    if not params:
+        return params
+    return {k: v for k, v in params.items() if v is not None and v != ""}
+
+
 async def _proxy_get(
     path: str,
     *,
@@ -63,7 +78,7 @@ async def _proxy_get(
         headers["X-Cocoon-User"] = str(user.id)
     try:
         async with httpx.AsyncClient(base_url=GRAPHRAG_API_URL, timeout=timeout) as client:
-            resp = await client.get(path, params=params, headers=headers)
+            resp = await client.get(path, params=_clean_params(params), headers=headers)
             if resp.status_code in (404, 501):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -317,15 +332,80 @@ async def ai_kg_sows(current_user: CurrentUser):
     return await _proxy_get("/sows", user=current_user)
 
 
+def _reviewer_identity(user) -> str:
+    """Stable display string the ML write endpoints store as ``reviewed_by``.
+
+    Prefers email, falls back to full name, then to ``"admin"``. Server-stamped
+    so a client cannot spoof the identity recorded against a proposal.
+    """
+    return getattr(user, "email", None) or getattr(user, "full_name", None) or "admin"
+
+
 @router.get("/schema/proposals")
 async def ai_schema_proposals(
     sproposal_status: str | None = Query(None, alias="status"),
     kind: str | None = None,
+    sort: str | None = None,
     current_user: CurrentUser = None,
 ):
-    """LLM-extracted schema-evolution proposals (admin only)."""
+    """LLM-extracted schema-evolution proposals. Admin-only."""
+    require_system_admin(current_user)
     return await _proxy_get(
         "/schema/proposals",
-        params={"status": sproposal_status, "kind": kind},
+        params={"status": sproposal_status, "kind": kind, "sort": sort},
+        user=current_user,
+    )
+
+
+@router.post("/schema/proposals/{proposal_id}/approve")
+async def ai_approve_schema_proposal(
+    proposal_id: str,
+    body: dict | None = None,
+    current_user: CurrentUser = None,
+):
+    """Mark a schema proposal as accepted. Admin-only.
+
+    ``reviewed_by`` is server-stamped from the caller's identity so the
+    write trail in Neo4j cannot be spoofed.
+    """
+    require_system_admin(current_user)
+    payload = {**(body or {}), "reviewed_by": _reviewer_identity(current_user)}
+    return await _proxy_post(
+        f"/schema/proposals/{proposal_id}/approve",
+        json_body=payload,
+        user=current_user,
+    )
+
+
+@router.post("/schema/proposals/{proposal_id}/reject")
+async def ai_reject_schema_proposal(
+    proposal_id: str,
+    body: dict | None = None,
+    current_user: CurrentUser = None,
+):
+    """Mark a schema proposal as rejected. Admin-only.
+
+    Same body shape as approve — optional ``tags`` and ``note`` annotations.
+    """
+    require_system_admin(current_user)
+    payload = {**(body or {}), "reviewed_by": _reviewer_identity(current_user)}
+    return await _proxy_post(
+        f"/schema/proposals/{proposal_id}/reject",
+        json_body=payload,
+        user=current_user,
+    )
+
+
+@router.post("/schema/proposals/bulk-review")
+async def ai_bulk_review_schema_proposals(
+    body: dict,
+    current_user: CurrentUser = None,
+):
+    """Approve or reject many proposals in one transaction. Admin-only."""
+    require_system_admin(current_user)
+    payload = {**body, "reviewed_by": _reviewer_identity(current_user)}
+    return await _proxy_post(
+        "/schema/proposals/bulk-review",
+        json_body=payload,
         user=current_user,
     )

@@ -515,6 +515,7 @@ export default function DrmReview() {
   const [modal, setModal] = useState(null); // null | 'approved' | 'approved-with-conditions' | 'send-back'
   const [toast, setToast] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [regeneratingChecklist, setRegeneratingChecklist] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiError, setAiError] = useState(null);
   const [insightsData, setInsightsData] = useState(null);
@@ -563,6 +564,10 @@ export default function DrmReview() {
         sow: sowData,
         checklistItems: checklistData.items || [],
         checklistRole: checklistData.reviewer_role || '',
+        checklistMode: checklistData.mode || 'legacy',
+        checklistGeneratedAt: checklistData.generated_at || null,
+        checklistSowChanged: Boolean(checklistData.sow_changed),
+        checklistAssignmentId: checklistData.assignment_id || null,
         reviewStatus: statusData,
         workflowData: wfData?.workflow_data || null,
       };
@@ -584,6 +589,10 @@ export default function DrmReview() {
   const sow = data?.sow ?? null;
   const checklistItems = data?.checklistItems ?? [];
   const checklistRole = data?.checklistRole ?? '';
+  const checklistMode = data?.checklistMode ?? 'legacy';
+  const checklistGeneratedAt = data?.checklistGeneratedAt ?? null;
+  const checklistSowChanged = Boolean(data?.checklistSowChanged);
+  const checklistAssignmentId = data?.checklistAssignmentId ?? null;
   const reviewStatus = data?.reviewStatus ?? null;
   const workflowData = data?.workflowData ?? null;
 
@@ -810,6 +819,29 @@ export default function DrmReview() {
     } else {
       setAiError(result.error);
       showToast(result.error.message, 'error');
+    }
+  }
+
+  // ── Regenerate AI-suggested checklist ────────────────────────────────────
+  async function handleRegenerateChecklist() {
+    if (!checklistAssignmentId) return;
+    setRegeneratingChecklist(true);
+    try {
+      const res = await authFetch(
+        `/api/review/assignment/${checklistAssignmentId}/checklist/regenerate`,
+        { method: 'POST' }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        const detail = typeof body.detail === 'string' ? body.detail : body.detail?.message;
+        throw new Error(detail || `Regenerate failed (${res.status})`);
+      }
+      await loadAll();
+      showToast('Checklist regenerated');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRegeneratingChecklist(false);
     }
   }
 
@@ -1230,6 +1262,11 @@ export default function DrmReview() {
                       responses={responses}
                       onChange={setResponses}
                       readOnly={isMyDone}
+                      mode={checklistMode}
+                      generatedAt={checklistGeneratedAt}
+                      sowChanged={checklistSowChanged}
+                      regenerating={regeneratingChecklist}
+                      onRegenerate={checklistAssignmentId ? handleRegenerateChecklist : undefined}
                     />
                   ) : (
                     <p
@@ -1250,10 +1287,11 @@ export default function DrmReview() {
               )}
               <AISuggestionsPanel
                 analysisResult={aiResult}
-                collapsed={true}
+                collapsed={false}
                 showRunButton={!aiResult}
                 onRunAnalysis={handleRunAI}
                 loading={aiLoading}
+                autoRun
               />
 
               {/* Action buttons */}

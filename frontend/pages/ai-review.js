@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { STAGE_KEYS } from '../lib/workflowStages';
 import { aiClient } from '../lib/ai';
 import AIUnavailableBanner from '../components/AIUnavailableBanner';
+import ExtractionPreviewModal from '../components/ExtractionPreviewModal';
 import SkipAIReviewModal from '../components/SkipAIReviewModal';
 import {
   ViolationsSection,
@@ -82,6 +83,56 @@ function validateFile(file) {
   return '';
 }
 
+// Replaces the previous 📄 / ✅ / ❌ emoji glyphs in the drop zone. Inline
+// SVG keeps the visual hierarchy but renders in the theme stroke color so
+// the icon never clashes with the dark background, matching how the rest
+// of the app (AttachmentManager, etc.) draws its icons.
+function DropZoneIcon({ state }) {
+  const stroke =
+    state === 'success'
+      ? 'var(--color-success)'
+      : state === 'error'
+        ? 'var(--color-error)'
+        : 'var(--color-text-tertiary)';
+  const props = {
+    width: 40,
+    height: 40,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke,
+    strokeWidth: 1.5,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  };
+  if (state === 'success') {
+    return (
+      <svg {...props}>
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="9 12 11 14 15 10" />
+      </svg>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <svg {...props}>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="13" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+    );
+  }
+  // idle: a clean upload glyph (tray + arrow up) — reads as "drop here"
+  // without the cartoon-y feel of the old emoji.
+  return (
+    <svg {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
 // ── Main Page ───────────────────────────────────────────────────────────────
 
 export default function AIReview() {
@@ -109,6 +160,15 @@ export default function AIReview() {
   // "Proceed" button label matches whatever the workflow actually does.
   const [nextStageLabel, setNextStageLabel] = useState(null);
   const [isReturningToDraft, setIsReturningToDraft] = useState(false);
+  // AI auto-fill state — opt-in by default. When enabled, the upload
+  // path inserts a preview-modal step between /api/sow/upload and
+  // submit-for-review so the author can populate the SoW from the
+  // uploaded document before AI analysis runs against it.
+  const [autoFill, setAutoFill] = useState(true);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractionResult, setExtractionResult] = useState(null);
+  const [extractionApplying, setExtractionApplying] = useState(false);
+  const [extractionError, setExtractionError] = useState(null);
 
   // If arriving from draft submit-for-review (Path A), auto-trigger AI analysis
   useEffect(() => {
@@ -275,6 +335,53 @@ export default function AIReview() {
     }
   };
 
+  // Continue from "SoW exists in draft" → submit for review → AI analysis.
+  // Factored out so the auto-fill path can call this *after* the preview
+  // modal is dismissed without duplicating the analysis pipeline.
+  const proceedToAnalysis = async (sowId) => {
+    try {
+      // submit-for-review transitions the SoW out of draft into ai_review.
+      // It must happen *after* any apply-extraction call because that
+      // endpoint refuses to mutate content once the SoW leaves draft.
+      await authFetch(`/api/sow/${sowId}/submit-for-review`, { method: 'POST' });
+
+      setIsAnalyzing(true);
+
+      const aiResult = await aiClient.runAnalysis(authFetch, sowId);
+      if (!aiResult.ok) {
+        setAiError(aiResult.error);
+        setIsAnalyzing(false);
+        return;
+      }
+
+      // Parse is an optional companion call — adds section detection +
+      // missing-keyword data to the recommendations panel.
+      let parseData = { sections: [], missingKeywords: [] };
+      try {
+        const parseRes = await authFetch(`/api/sow/${sowId}/parse`, { method: 'POST' });
+        if (parseRes.ok) {
+          parseData = await parseRes.json();
+        }
+      } catch {
+        // Parse is optional
+      }
+
+      const merged = mapAnalysisToRecommendations(aiResult.data);
+      merged.sections = parseData.sections || [];
+      merged.missingKeywords = parseData.missingKeywords || [];
+
+      setRecommendations(merged);
+      setIsAnalyzing(false);
+      setShowResults(true);
+
+      const sim = await aiClient.similar(authFetch, sowId);
+      if (sim.ok) setSimilarSows(sim.data || []);
+    } catch (err) {
+      setError(err.message);
+      setIsAnalyzing(false);
+    }
+  };
+
   const handleUpload = async () => {
     const newErrors = { file: '', methodology: '' };
     if (!file) {
@@ -291,6 +398,7 @@ export default function AIReview() {
     setIsUploading(true);
     setError(null);
 
+    let sow;
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -306,49 +414,70 @@ export default function AIReview() {
         throw new Error(detail?.detail || `Upload failed (${res.status})`);
       }
 
-      const sow = await res.json();
+      sow = await res.json();
       setCurrentSowId(sow.id);
-
-      // Upload succeeded — now submit for review (transitions to ai_review)
-      await authFetch(`/api/sow/${sow.id}/submit-for-review`, { method: 'POST' });
-
-      // Run AI analysis
-      setIsUploading(false);
-      setIsAnalyzing(true);
-
-      const aiResult = await aiClient.runAnalysis(authFetch, sow.id);
-      if (!aiResult.ok) {
-        setAiError(aiResult.error);
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // Also parse for section analysis (optional companion call)
-      let parseData = { sections: [], missingKeywords: [] };
-      try {
-        const parseRes = await authFetch(`/api/sow/${sow.id}/parse`, { method: 'POST' });
-        if (parseRes.ok) {
-          parseData = await parseRes.json();
-        }
-      } catch {
-        // Parse is optional
-      }
-
-      const merged = mapAnalysisToRecommendations(aiResult.data);
-      merged.sections = parseData.sections || [];
-      merged.missingKeywords = parseData.missingKeywords || [];
-
-      setRecommendations(merged);
-      setIsAnalyzing(false);
-      setShowResults(true);
-
-      const sim = await aiClient.similar(authFetch, sow.id);
-      if (sim.ok) setSimilarSows(sim.data || []);
     } catch (err) {
       setError(err.message);
       setIsUploading(false);
-      setIsAnalyzing(false);
+      return;
     }
+
+    setIsUploading(false);
+
+    if (!autoFill) {
+      await proceedToAnalysis(sow.id);
+      return;
+    }
+
+    // Auto-fill path: try the extraction endpoint. If it returns useful
+    // results, hand off to the preview modal — analysis only continues
+    // after the modal closes (apply OR cancel). If extraction fails or
+    // returns nothing, continue straight to analysis so a flaky ML
+    // service can't strand the user.
+    setIsExtracting(true);
+    const result = await aiClient.extractFromDocument(authFetch, sow.id);
+    setIsExtracting(false);
+    if (result.ok && result.data && Object.keys(result.data.extracted || {}).length > 0) {
+      setExtractionResult(result.data);
+      // Modal handlers below drive the rest of the flow.
+      return;
+    }
+
+    if (!result.ok) {
+      // Non-blocking notice — the SoW exists, the file is on disk, the
+      // analysis still runs.
+      setError(`Auto-fill unavailable: ${result.error.message}`);
+    }
+    await proceedToAnalysis(sow.id);
+  };
+
+  const handleApplyExtraction = async (selectedSections) => {
+    if (!extractionResult || !currentSowId) return;
+    setExtractionApplying(true);
+    setExtractionError(null);
+    const apply = await aiClient.applyExtraction(authFetch, currentSowId, {
+      sections: selectedSections,
+      expectedContentHash: extractionResult.content_hash,
+    });
+    setExtractionApplying(false);
+    if (!apply.ok) {
+      if (apply.error.status === 409) {
+        setExtractionError('The SoW changed since extraction. Cancel and re-upload to try again.');
+      } else {
+        setExtractionError(apply.error.message || 'Could not apply changes.');
+      }
+      return;
+    }
+    setExtractionResult(null);
+    setExtractionError(null);
+    await proceedToAnalysis(currentSowId);
+  };
+
+  const handleSkipExtraction = async () => {
+    const sowId = currentSowId;
+    setExtractionResult(null);
+    setExtractionError(null);
+    if (sowId) await proceedToAnalysis(sowId);
   };
 
   const methodologies = ['Agile Sprint Delivery', 'Sure Step 365', 'Waterfall', 'Cloud Adoption'];
@@ -388,18 +517,14 @@ export default function AIReview() {
             />
           )}
 
-          {/* Error banner */}
+          {/* Error banner — uses the global ``.alert.alert-error`` so its
+              tint, border-left rail, and color match every other error
+              banner in the app. */}
           {error && !aiError && (
             <div
-              style={{
-                marginBottom: 'var(--spacing-lg)',
-                padding: 'var(--spacing-md) var(--spacing-lg)',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'rgba(220,38,38,0.08)',
-                border: '1px solid rgba(220,38,38,0.3)',
-                color: 'var(--color-error)',
-                fontSize: 'var(--font-size-sm)',
-              }}
+              role="alert"
+              className="alert alert-error"
+              style={{ fontSize: 'var(--font-size-sm)' }}
             >
               <strong>Upload failed:</strong> {error}
             </div>
@@ -419,30 +544,48 @@ export default function AIReview() {
                   Upload SoW Document
                 </h2>
 
-                {/* Drop Zone */}
+                {/* Drop Zone — border + tinted background change with
+                    state. Tints are derived from the theme palette via
+                    the ``--color-*-rgb`` channel tokens so the tint
+                    stays in sync with the canonical hex if it ever
+                    moves. */}
                 <div
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
                   style={{
-                    border: `2px dashed ${isDragging ? 'var(--color-accent-blue)' : file ? 'var(--color-success)' : errors.file ? 'var(--color-error)' : 'var(--color-border-default)'}`,
+                    border: `2px dashed ${
+                      isDragging
+                        ? 'var(--color-accent-blue)'
+                        : file
+                          ? 'var(--color-success)'
+                          : errors.file
+                            ? 'var(--color-error)'
+                            : 'var(--color-border-default)'
+                    }`,
                     borderRadius: 'var(--radius-lg)',
                     padding: 'var(--spacing-3xl) var(--spacing-xl)',
                     textAlign: 'center',
                     marginBottom: 'var(--spacing-xl)',
                     backgroundColor: isDragging
-                      ? 'rgba(0,120,212,0.05)'
+                      ? 'rgba(var(--color-accent-blue-rgb), 0.05)'
                       : file
-                        ? 'rgba(74,222,128,0.05)'
+                        ? 'rgba(var(--color-success-rgb), 0.05)'
                         : errors.file
-                          ? 'rgba(239,68,68,0.05)'
+                          ? 'rgba(var(--color-error-rgb), 0.05)'
                           : 'var(--color-bg-tertiary)',
                     transition: 'all var(--transition-base)',
                     cursor: 'pointer',
                   }}
                 >
-                  <div style={{ fontSize: '2.5rem', marginBottom: 'var(--spacing-md)' }}>
-                    {file ? '✅' : errors.file ? '❌' : '📄'}
+                  <div
+                    style={{
+                      marginBottom: 'var(--spacing-md)',
+                      display: 'flex',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <DropZoneIcon state={file ? 'success' : errors.file ? 'error' : 'idle'} />
                   </div>
 
                   {file ? (
@@ -526,6 +669,44 @@ export default function AIReview() {
                 <p className="form-helper" style={{ marginTop: 'var(--spacing-sm)' }}>
                   Google Docs users: File → Download as PDF or Word (.docx)
                 </p>
+
+                {/* AI auto-fill toggle. The extraction step is decoupled
+                    from analysis: turning this off skips the preview
+                    modal, leaving the SoW empty for the user to draft
+                    manually but otherwise running the same AI Review
+                    pipeline. */}
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    marginTop: 'var(--spacing-md)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoFill}
+                    onChange={(e) => setAutoFill(e.target.checked)}
+                    disabled={isUploading || isExtracting || isAnalyzing}
+                    style={{ marginTop: '2px' }}
+                  />
+                  <span>
+                    Use AI to pre-fill SoW sections from this document
+                    <span
+                      style={{
+                        display: 'block',
+                        color: 'var(--color-text-tertiary)',
+                        fontSize: 'var(--font-size-xs)',
+                        marginTop: '2px',
+                      }}
+                    >
+                      You&apos;ll review the proposed changes before anything is applied. Sections
+                      the AI can&apos;t find stay blank.
+                    </span>
+                  </span>
+                </label>
               </div>
 
               {/* AI Info Banner */}
@@ -545,10 +726,18 @@ export default function AIReview() {
                 <button
                   onClick={handleUpload}
                   className="btn btn-primary btn-lg"
-                  disabled={!isValid || isUploading}
-                  style={{ opacity: isValid && !isUploading ? 1 : 0.6 }}
+                  disabled={!isValid || isUploading || isExtracting}
+                  style={{
+                    opacity: isValid && !isUploading && !isExtracting ? 1 : 0.6,
+                  }}
                 >
-                  {isUploading ? 'Uploading…' : 'Upload & Analyze'}
+                  {isUploading
+                    ? 'Uploading…'
+                    : isExtracting
+                      ? 'Reading document…'
+                      : autoFill
+                        ? 'Upload & Review AI Fill'
+                        : 'Upload & Analyze'}
                 </button>
               </div>
             </>
@@ -589,24 +778,24 @@ export default function AIReview() {
           {/* Recommendations */}
           {showResults && recommendations && (
             <div>
-              {/* Success banner */}
+              {/* Success banner — same global ``.alert.alert-success``
+                  pattern used elsewhere; flex layout is layered on so
+                  the "Analyze Another" button still hugs the right
+                  edge. */}
               <div
+                role="status"
+                className="alert alert-success"
                 style={{
                   marginBottom: 'var(--spacing-xl)',
-                  padding: 'var(--spacing-md) var(--spacing-lg)',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'rgba(74,222,128,0.08)',
-                  border: '1px solid rgba(74,222,128,0.3)',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  gap: 'var(--spacing-md)',
                 }}
               >
                 <div>
-                  <p className="font-semibold" style={{ color: 'var(--color-success)' }}>
-                    Analysis Complete
-                  </p>
-                  <p className="text-sm text-secondary">
+                  <p className="font-semibold">Analysis Complete</p>
+                  <p className="text-sm text-secondary" style={{ margin: 'var(--spacing-xs) 0 0' }}>
                     {file?.name} — {methodology}
                   </p>
                 </div>
@@ -699,6 +888,17 @@ export default function AIReview() {
         onClose={() => setShowSkipModal(false)}
         onConfirm={handleConfirmSkip}
         submitting={skipping}
+      />
+
+      <ExtractionPreviewModal
+        open={!!extractionResult}
+        extracted={extractionResult?.extracted}
+        currentContent={null}
+        notes={extractionResult?.notes}
+        onApply={handleApplyExtraction}
+        onClose={handleSkipExtraction}
+        applying={extractionApplying}
+        error={extractionError}
       />
     </>
   );

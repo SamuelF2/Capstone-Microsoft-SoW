@@ -13,16 +13,35 @@ Usage in a route:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Annotated
 
 import database
 import httpx
 from config import AZURE_AD_CLIENT_ID, AZURE_AD_JWKS_URL
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from models import UserResponse
+
+# Mirror frontend/pages/account.js AVAILABLE_ROLES — keep these in lockstep.
+# This is the testing-only Role Override surface; the JWT-derived role from
+# Entra ID is still the source of truth in the database.
+# system-admin is intentionally excluded: allowing it here would let any
+# authenticated user self-escalate past require_system_admin gates.
+_OVERRIDABLE_ROLES = {
+    "consultant",
+    "solution-architect",
+    "sqa-reviewer",
+    "cpl",
+    "cdp",
+    "delivery-manager",
+}
+
+# Role override is a dev/test affordance only. Disabled in production so a
+# stolen JWT can't be combined with a header to assume any other persona.
+_ROLE_OVERRIDE_ENV_ALLOWED = {"development", "test"}
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +134,24 @@ async def decode_token(token: str) -> dict:
 # ── FastAPI dependency ────────────────────────────────────────────────────────
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserResponse:
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    role_override: str | None = Header(None, alias="X-Role-Override"),
+) -> UserResponse:
     """Resolve the Bearer token to a UserResponse.
 
     1. Validate the Entra JWT
     2. Extract user claims (oid, email, name, roles)
     3. Upsert the user in the local database (create on first login)
-    4. Return UserResponse
+    4. Apply the testing-only ``X-Role-Override`` header if present
+    5. Return UserResponse
+
+    The ``X-Role-Override`` header mirrors the client-side role-override
+    surface in Account → Settings (see ``frontend/lib/auth.js``). When set
+    to a recognised role it swaps the role on the returned user *for this
+    request only* — the database row is never modified, so signing out or
+    omitting the header reverts to the real Entra-derived role. Testing
+    only.
     """
     if token is None:
         raise HTTPException(
@@ -153,8 +183,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserResponse:
                 email      = EXCLUDED.email,
                 full_name  = EXCLUDED.full_name,
                 name       = EXCLUDED.name,
-                role       = EXCLUDED.role,
                 updated_at = NOW()
+                -- role is intentionally NOT updated here so manual role
+                -- assignments (e.g. via PATCH /api/users/me/role) persist
+                -- across logins. The JWT role claim is only used on first insert.
             RETURNING id, email, full_name, username, name, role, is_active, created_at, oid
             """,
             oid,
@@ -176,6 +208,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserResponse:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive",
         )
+
+    # Testing-only role swap. Only honored in development/test; the override
+    # set excludes system-admin so it can never grant elevated privilege. A
+    # typo ("admin", "sysadmin") falls through silently rather than locking
+    # the caller out of every role-gated route.
+    if role_override and os.getenv("ENV", "development") in _ROLE_OVERRIDE_ENV_ALLOWED:
+        normalized = role_override.strip().lower()
+        if normalized in _OVERRIDABLE_ROLES:
+            user = user.model_copy(update={"role": normalized})
 
     return user
 
