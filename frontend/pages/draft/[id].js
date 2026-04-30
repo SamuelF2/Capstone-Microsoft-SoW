@@ -294,6 +294,11 @@ export default function DraftPage() {
     [hydrateContentFromServer, sowData]
   );
 
+  const canWrite =
+    !permissionsLoading && (sowPermissions.includes('*') || sowPermissions.includes('sow.write'));
+
+  const canRead = !permissionsLoading && (canWrite || sowPermissions.includes('sow.read'));
+
   // Debounced auto-save: 750ms after the last edit, PATCH the SoW content
   // to /api/sow/{id}.  Skips when the current state already matches the
   // last value the server is known to hold (covers the load → set echo
@@ -477,11 +482,6 @@ export default function DraftPage() {
     if (Array.isArray(val)) return val.length > 0;
     return Object.keys(val).some((k) => val[k]);
   })();
-
-  const canWrite =
-    !permissionsLoading && (sowPermissions.includes('*') || sowPermissions.includes('sow.write'));
-
-  const canRead = !permissionsLoading && (canWrite || sowPermissions.includes('sow.read'));
 
   const allRequiredMet = hasExecutiveSummary && hasScope && hasDeliverables;
 
