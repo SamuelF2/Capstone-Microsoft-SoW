@@ -21,8 +21,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from neo4j import Driver
 
@@ -60,11 +59,11 @@ Evaluate the proposal across four dimensions. Return ONLY valid JSON:
 
 
 def _build_eval_prompt(
-    label:       str,
-    kind:        str,
+    label: str,
+    kind: str,
     description: str,
     usage_count: int,
-    sections:    list[dict],
+    sections: list[dict],
 ) -> str:
     section_previews = "\n".join(
         f"- [{s.get('heading', '')}] ({s.get('section_type', '')}): "
@@ -72,7 +71,7 @@ def _build_eval_prompt(
         for s in sections[:5]
     )
     return (
-        f"Proposed {kind}: \"{label}\"\n"
+        f'Proposed {kind}: "{label}"\n'
         f"Description: {description}\n"
         f"Triggered by {usage_count} section(s)\n\n"
         f"Source sections:\n{section_previews}"
@@ -104,6 +103,7 @@ def evaluate_proposal(driver: Driver, proposal_id: str) -> dict:
         return {"error": f"Proposal {proposal_id} not found"}
 
     from .llm_client import llm_json
+
     result = llm_json(
         system=EVAL_SYSTEM_PROMPT,
         user=_build_eval_prompt(
@@ -114,30 +114,27 @@ def evaluate_proposal(driver: Driver, proposal_id: str) -> dict:
             sections=sections,
         ),
         fallback={
-            "coherence":      {"score": 0.5, "reasoning": "parse error"},
-            "novelty":        {"score": 0.5, "reasoning": "parse error"},
-            "groundedness":   {"score": 0.5, "reasoning": "parse error"},
-            "utility":        {"score": 0.5, "reasoning": "parse error"},
+            "coherence": {"score": 0.5, "reasoning": "parse error"},
+            "novelty": {"score": 0.5, "reasoning": "parse error"},
+            "groundedness": {"score": 0.5, "reasoning": "parse error"},
+            "utility": {"score": 0.5, "reasoning": "parse error"},
             "recommendation": "review",
-            "reasoning":      "parse error",
+            "reasoning": "parse error",
         },
     )
 
-    coherence    = float(result.get("coherence",    {}).get("score", 0.5))
-    novelty      = float(result.get("novelty",      {}).get("score", 0.5))
+    coherence = float(result.get("coherence", {}).get("score", 0.5))
+    novelty = float(result.get("novelty", {}).get("score", 0.5))
     groundedness = float(result.get("groundedness", {}).get("score", 0.5))
-    utility      = float(result.get("utility",      {}).get("score", 0.5))
+    utility = float(result.get("utility", {}).get("score", 0.5))
     recommendation = result.get("recommendation", "review")
 
     eval_score = round(
-        0.25 * coherence +
-        0.25 * novelty +
-        0.25 * groundedness +
-        0.25 * utility,
+        0.25 * coherence + 0.25 * novelty + 0.25 * groundedness + 0.25 * utility,
         4,
     )
 
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
 
     with driver.session() as session:
         session.run(
@@ -175,37 +172,37 @@ def evaluate_proposal(driver: Driver, proposal_id: str) -> dict:
             )
 
     return {
-        "proposal_id":    proposal_id,
-        "label":          prop["label"],
-        "kind":           prop["kind"],
-        "eval_score":     eval_score,
+        "proposal_id": proposal_id,
+        "label": prop["label"],
+        "kind": prop["kind"],
+        "eval_score": eval_score,
         "recommendation": recommendation,
         "breakdown": {
-            "coherence":    coherence,
-            "novelty":      novelty,
+            "coherence": coherence,
+            "novelty": novelty,
             "groundedness": groundedness,
-            "utility":      utility,
+            "utility": utility,
         },
         "reasoning": result.get("reasoning", ""),
         "dimension_reasoning": {
-            "coherence":    result.get("coherence",    {}).get("reasoning", ""),
-            "novelty":      result.get("novelty",      {}).get("reasoning", ""),
+            "coherence": result.get("coherence", {}).get("reasoning", ""),
+            "novelty": result.get("novelty", {}).get("reasoning", ""),
             "groundedness": result.get("groundedness", {}).get("reasoning", ""),
-            "utility":      result.get("utility",      {}).get("reasoning", ""),
+            "utility": result.get("utility", {}).get("reasoning", ""),
         },
     }
 
 
 def evaluate_batch(
-    driver:         Driver,
+    driver: Driver,
     min_confidence: float = 0.60,
-    status:         str   = "pending",
-    limit:          int   = 50,
+    status: str = "pending",
+    limit: int = 50,
 ) -> list[dict]:
     status_filter = {
-        "pending":  "p.accepted = false AND coalesce(p.rejected, false) = false AND p.eval_score IS NULL",
+        "pending": "p.accepted = false AND coalesce(p.rejected, false) = false AND p.eval_score IS NULL",
         "accepted": "p.accepted = true AND p.eval_score IS NULL",
-        "all":      "p.eval_score IS NULL",
+        "all": "p.eval_score IS NULL",
     }.get(status, "p.eval_score IS NULL")
 
     with driver.session() as session:
@@ -218,7 +215,8 @@ def evaluate_batch(
             ORDER BY p.usage_count DESC, p.confidence DESC
             LIMIT $limit
             """,
-            min_conf=min_confidence, limit=limit,
+            min_conf=min_confidence,
+            limit=limit,
         ).data()
 
     results = []

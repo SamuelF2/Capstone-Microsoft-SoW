@@ -5,20 +5,19 @@ import hashlib
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Optional
 
 from neo4j import Driver
 from rich.console import Console
 
 console = Console()
-logger  = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _stable_id(*parts: str) -> str:
     return hashlib.md5(":".join(parts).encode()).hexdigest()[:8]
 
 
-def _safe_float(val: str) -> Optional[float]:
+def _safe_float(val: str) -> float | None:
     try:
         return float(val) if val.strip() else None
     except (ValueError, AttributeError):
@@ -30,7 +29,7 @@ def _load_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def _derive_outcome(satisfaction: Optional[float], scope: str, financial: str, timeline: str) -> str:
+def _derive_outcome(satisfaction: float | None, scope: str, financial: str, timeline: str) -> str:
     if satisfaction is None:
         return "unknown"
     if satisfaction >= 4.5 and all(s == "Green" for s in [scope, financial, timeline]):
@@ -54,8 +53,7 @@ def _compute_budget_totals(budget_rows: list[dict]) -> dict[str, dict]:
             totals[pid]["expenses"] += usd
     for pid, t in totals.items():
         t["margin_pct"] = (
-            round((t["revenue"] - t["cost"]) / t["revenue"] * 100, 2)
-            if t["revenue"] > 0 else 0.0
+            round((t["revenue"] - t["cost"]) / t["revenue"] * 100, 2) if t["revenue"] > 0 else 0.0
         )
     return dict(totals)
 
@@ -70,11 +68,13 @@ def _latest_status(status_rows: list[dict]) -> dict[str, dict]:
 
 
 def _staffing_summary(staffing_rows: list[dict]) -> dict[str, dict]:
-    summary: dict[str, dict] = defaultdict(lambda: {"roles": set(), "total_hours": 0.0, "total_revenue": 0.0})
+    summary: dict[str, dict] = defaultdict(
+        lambda: {"roles": set(), "total_hours": 0.0, "total_revenue": 0.0}
+    )
     for row in staffing_rows:
         pid = row["project_id"]
         summary[pid]["roles"].add(row["resource"])
-        summary[pid]["total_hours"]   += _safe_float(row["total_hours"]) or 0.0
+        summary[pid]["total_hours"] += _safe_float(row["total_hours"]) or 0.0
         summary[pid]["total_revenue"] += _safe_float(row["labor_revenue"]) or 0.0
     return {pid: {**v, "roles": sorted(v["roles"])} for pid, v in summary.items()}
 
@@ -100,24 +100,24 @@ def ingest_deal_data(driver: Driver, data_dir: Path):
     console.rule("[bold]Deal Data Ingestion")
 
     deal_overview = _load_csv(data_dir / "deal_overview.csv")
-    budget_rows   = _load_csv(data_dir / "budget.csv")
+    budget_rows = _load_csv(data_dir / "budget.csv")
     closeout_rows = _load_csv(data_dir / "project_closeout.csv")
-    status_rows   = _load_csv(data_dir / "status_report.csv")
+    status_rows = _load_csv(data_dir / "status_report.csv")
     staffing_rows = _load_csv(data_dir / "staffing_plan.csv")
 
-    budget_totals   = _compute_budget_totals(budget_rows)
+    budget_totals = _compute_budget_totals(budget_rows)
     latest_statuses = _latest_status(status_rows)
-    staffing        = _staffing_summary(staffing_rows)
-    closeout        = {r["project_id"]: r for r in closeout_rows}
+    staffing = _staffing_summary(staffing_rows)
+    closeout = {r["project_id"]: r for r in closeout_rows}
 
     written = 0
     for deal in deal_overview:
         pid = deal["project_id"]
 
-        budget  = budget_totals.get(pid, {})
-        status  = latest_statuses.get(pid, {})
-        co      = closeout.get(pid, {})
-        staff   = staffing.get(pid, {})
+        budget = budget_totals.get(pid, {})
+        status = latest_statuses.get(pid, {})
+        co = closeout.get(pid, {})
+        staff = staffing.get(pid, {})
 
         satisfaction = _safe_float(co.get("customer_satisfaction", ""))
         outcome = _derive_outcome(
@@ -127,10 +127,10 @@ def ingest_deal_data(driver: Driver, data_dir: Path):
             status.get("timeline_status", ""),
         )
 
-        revenue    = budget.get("revenue", 0.0)
+        revenue = budget.get("revenue", 0.0)
         margin_pct = budget.get("margin_pct", 0.0)
-        industry   = deal["customer_industry"]
-        customer   = deal["customer_name"]
+        industry = deal["customer_industry"]
+        customer = deal["customer_name"]
 
         with driver.session() as session:
             session.run(
@@ -191,8 +191,10 @@ def ingest_deal_data(driver: Driver, data_dir: Path):
                 MATCH (dc:DealContext {project_id: $pid})
                 MERGE (dc)-[:FOR_CUSTOMER]->(c)
                 """,
-                cid=deal["customer_id"], name=customer,
-                location=deal["customer_location"], pid=pid,
+                cid=deal["customer_id"],
+                name=customer,
+                location=deal["customer_location"],
+                pid=pid,
             )
 
             session.run(
@@ -202,7 +204,8 @@ def ingest_deal_data(driver: Driver, data_dir: Path):
                 MATCH (c:Customer {customer_id: $cid})
                 MERGE (c)-[:IN_INDUSTRY]->(i)
                 """,
-                industry=industry, cid=deal["customer_id"],
+                industry=industry,
+                cid=deal["customer_id"],
             )
 
             for role in staff.get("roles", []):
@@ -213,7 +216,8 @@ def ingest_deal_data(driver: Driver, data_dir: Path):
                     MATCH (dc:DealContext {project_id: $pid})
                     MERGE (dc)-[:HAD_ROLE]->(r)
                     """,
-                    role=role, pid=pid,
+                    role=role,
+                    pid=pid,
                 )
 
         written += 1
@@ -231,7 +235,7 @@ def ingest_deal_data(driver: Driver, data_dir: Path):
 
 def _write_status_snapshots(driver: Driver, status_rows: list[dict]):
     for row in status_rows:
-        pid     = row["project_id"]
+        pid = row["project_id"]
         snap_id = _stable_id(pid, row["period_ending_date"])
 
         with driver.session() as session:
@@ -250,7 +254,8 @@ def _write_status_snapshots(driver: Driver, status_rows: list[dict]):
                 MATCH (dc:DealContext {project_id: $pid})
                 MERGE (dc)-[:HAS_STATUS]->(ss)
                 """,
-                snap_id=snap_id, pid=pid,
+                snap_id=snap_id,
+                pid=pid,
                 period=row["period_ending_date"],
                 scope=row["scope_status"],
                 resourcing=row["resourcing_status"],
@@ -277,13 +282,17 @@ def _print_summary(driver: Driver):
         ).single()
 
     from rich.table import Table
+
     t = Table(title="Deal Data Summary")
     t.add_column("Metric")
     t.add_column("Value")
-    t.add_row("Total deals",         str(stats["deals"]))
-    t.add_row("Avg revenue",         f"${stats['avg_revenue']:,.0f}" if stats["avg_revenue"] else "—")
-    t.add_row("Avg margin",          f"{stats['avg_margin']:.1f}%" if stats["avg_margin"] else "—")
-    t.add_row("Avg satisfaction",    f"{stats['avg_satisfaction']:.2f}/5.0" if stats["avg_satisfaction"] else "—")
-    t.add_row("Outcomes",            ", ".join(sorted(filter(None, stats["outcomes"]))))
-    t.add_row("Industries",          ", ".join(sorted(filter(None, stats["industries"]))))
+    t.add_row("Total deals", str(stats["deals"]))
+    t.add_row("Avg revenue", f"${stats['avg_revenue']:,.0f}" if stats["avg_revenue"] else "—")
+    t.add_row("Avg margin", f"{stats['avg_margin']:.1f}%" if stats["avg_margin"] else "—")
+    t.add_row(
+        "Avg satisfaction",
+        f"{stats['avg_satisfaction']:.2f}/5.0" if stats["avg_satisfaction"] else "—",
+    )
+    t.add_row("Outcomes", ", ".join(sorted(filter(None, stats["outcomes"]))))
+    t.add_row("Industries", ", ".join(sorted(filter(None, stats["industries"]))))
     console.print(t)

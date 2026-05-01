@@ -3,6 +3,7 @@
 def ingest_deals(data_dir: str):
     """Ingest synthetic deal CSV data into Neo4j as DealContext nodes."""
     from sow_kg.ingest_deal_data import ingest_deal_data
+
     driver = get_driver()
     ingest_deal_data(driver, Path(data_dir))
     driver.close()
@@ -12,6 +13,7 @@ def ingest_deals(data_dir: str):
 def deals_summary():
     """Print aggregate deal analytics across all DealContext nodes."""
     from sow_kg.deal_queries import get_deals_summary
+
     driver = get_driver()
     result = get_deals_summary(driver)
 
@@ -19,19 +21,19 @@ def deals_summary():
     t.add_column("Metric")
     t.add_column("Value", justify="right")
     totals = result["totals"]
-    t.add_row("Total deals",      str(totals.get("total_deals", 0)))
-    t.add_row("Total revenue",    f"${totals.get('total_revenue', 0):,.0f}")
-    t.add_row("Avg revenue",      f"${totals.get('avg_revenue', 0):,.0f}")
-    t.add_row("Avg margin",       f"{totals.get('avg_margin', 0):.1f}%")
+    t.add_row("Total deals", str(totals.get("total_deals", 0)))
+    t.add_row("Total revenue", f"${totals.get('total_revenue', 0):,.0f}")
+    t.add_row("Avg revenue", f"${totals.get('avg_revenue', 0):,.0f}")
+    t.add_row("Avg margin", f"{totals.get('avg_margin', 0):.1f}%")
     t.add_row("Avg satisfaction", f"{totals.get('avg_satisfaction', 0):.2f}/5.0")
     console.print(t)
 
     t2 = Table(title="By Outcome")
     t2.add_column("Outcome")
-    t2.add_column("Count",   justify="right")
+    t2.add_column("Count", justify="right")
     t2.add_column("Avg Revenue", justify="right")
-    t2.add_column("Avg Margin",  justify="right")
-    t2.add_column("Avg Sat",     justify="right")
+    t2.add_column("Avg Margin", justify="right")
+    t2.add_column("Avg Sat", justify="right")
     for r in result["by_outcome"]:
         t2.add_row(
             r["outcome"] or "unknown",
@@ -44,9 +46,9 @@ def deals_summary():
 
     t3 = Table(title="By Industry")
     t3.add_column("Industry")
-    t3.add_column("Count",   justify="right")
+    t3.add_column("Count", justify="right")
     t3.add_column("Avg Revenue", justify="right")
-    t3.add_column("Avg Margin",  justify="right")
+    t3.add_column("Avg Margin", justify="right")
     for r in result["by_industry"]:
         t3.add_row(
             r["industry"] or "unknown",
@@ -59,7 +61,7 @@ def deals_summary():
     if result["risk_patterns"]:
         t4 = Table(title="Risk Patterns in At-Risk/Amended Deals")
         t4.add_column("Banned Phrase", style="red")
-        t4.add_column("Occurrences",   justify="right")
+        t4.add_column("Occurrences", justify="right")
         for r in result["risk_patterns"]:
             t4.add_row(r["phrase"], str(r["occurrences"]))
         console.print(t4)
@@ -72,14 +74,17 @@ def deals_summary():
 def deal_risk(project_id: str):
     """Show risk profile for a deal — banned phrases, missing sections, status history, risk score."""
     from sow_kg.deal_queries import get_deal_risk_profile
+
     driver = get_driver()
     result = get_deal_risk_profile(driver, project_id)
 
-    console.print(Panel.fit(
-        f"[bold]Risk Profile[/] — {project_id}\n"
-        f"Risk Score: [{'red' if result['risk_score'] > 0.6 else 'yellow' if result['risk_score'] > 0.3 else 'green'}]{result['risk_score']:.3f}[/]",
-        title="Deal Risk",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Risk Profile[/] — {project_id}\n"
+            f"Risk Score: [{'red' if result['risk_score'] > 0.6 else 'yellow' if result['risk_score'] > 0.3 else 'green'}]{result['risk_score']:.3f}[/]",
+            title="Deal Risk",
+        )
+    )
 
     if result["banned_phrases"]:
         t = Table(title="Banned Phrases")
@@ -105,8 +110,12 @@ def deal_risk(project_id: str):
         t3.add_column("Financial")
         t3.add_column("Timeline")
         for r in result["status_history"]:
+
             def color(s):
-                return f"[{'green' if s=='Green' else 'yellow' if s=='Yellow' else 'red'}]{s}[/]"
+                return (
+                    f"[{'green' if s == 'Green' else 'yellow' if s == 'Yellow' else 'red'}]{s}[/]"
+                )
+
             t3.add_row(
                 r.get("period", ""),
                 color(r.get("scope", "")),
@@ -119,11 +128,12 @@ def deal_risk(project_id: str):
 
 
 @cli.command("link-deal")
-@click.option("--sow-id",     required=True)
+@click.option("--sow-id", required=True)
 @click.option("--project-id", required=True)
 def link_deal(sow_id: str, project_id: str):
     """Link a SOW node to a DealContext node."""
     from sow_kg.deal_queries import link_sow_to_deal_context
+
     driver = get_driver()
     link_sow_to_deal_context(driver, sow_id, project_id)
     console.print(f"[green]Linked[/] [cyan]{sow_id}[/] → [cyan]{project_id}[/]")

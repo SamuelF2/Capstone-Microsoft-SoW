@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from neo4j import Driver
 
 
-def get_deal_context(driver: Driver, project_id: str) -> Optional[dict]:
+def get_deal_context(driver: Driver, project_id: str) -> dict | None:
     with driver.session() as session:
         row = session.run(
             """
@@ -25,9 +23,9 @@ def get_deal_context(driver: Driver, project_id: str) -> Optional[dict]:
 
 
 def get_similar_deals(
-    driver:      Driver,
-    project_id:  str,
-    limit:       int = 5,
+    driver: Driver,
+    project_id: str,
+    limit: int = 5,
 ) -> list[dict]:
     with driver.session() as session:
         return session.run(
@@ -50,7 +48,8 @@ def get_similar_deals(
                    dc2.customer_satisfaction AS satisfaction,
                    dc2.staffing_roles  AS roles
             """,
-            pid=project_id, limit=limit,
+            pid=project_id,
+            limit=limit,
         ).data()
 
 
@@ -105,14 +104,14 @@ def get_deals_summary(driver: Driver) -> dict:
         ).data()
 
     return {
-        "totals":        dict(stats),
-        "by_outcome":    by_outcome,
-        "by_industry":   by_industry,
+        "totals": dict(stats),
+        "by_outcome": by_outcome,
+        "by_industry": by_industry,
         "risk_patterns": risk_patterns,
     }
 
 
-def get_compliance_patterns(driver: Driver, industry: Optional[str] = None) -> list[dict]:
+def get_compliance_patterns(driver: Driver, industry: str | None = None) -> list[dict]:
     industry_filter = "AND dc.industry = $industry" if industry else ""
     with driver.session() as session:
         return session.run(
@@ -170,16 +169,16 @@ def get_deal_risk_profile(driver: Driver, project_id: str) -> dict:
         ).data()
 
     return {
-        "banned_phrases":    banned,
-        "missing_sections":  missing,
-        "status_history":    statuses,
-        "risk_score":        _compute_risk_score(banned, missing, statuses),
+        "banned_phrases": banned,
+        "missing_sections": missing,
+        "status_history": statuses,
+        "risk_score": _compute_risk_score(banned, missing, statuses),
     }
 
 
 def _compute_risk_score(
-    banned:   list[dict],
-    missing:  list[dict],
+    banned: list[dict],
+    missing: list[dict],
     statuses: list[dict],
 ) -> float:
     score = 0.0
@@ -212,5 +211,6 @@ def link_sow_to_deal_context(driver: Driver, sow_id: str, project_id: str):
                 s.industry   = dc.industry,
                 s.outcome    = dc.outcome
             """,
-            sow_id=sow_id, pid=project_id,
+            sow_id=sow_id,
+            pid=project_id,
         )
