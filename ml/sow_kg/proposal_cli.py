@@ -1,9 +1,12 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @cli.command("schema-proposals")
-@click.option("--status", default="all",
-              type=click.Choice(["all", "pending", "accepted", "rejected", "promoted", "evaluated"]))
+@click.option(
+    "--status",
+    default="all",
+    type=click.Choice(["all", "pending", "accepted", "rejected", "promoted", "evaluated"]),
+)
 @click.option("--kind", default=None, type=click.Choice(["node", "edge", "section_type"]))
 def schema_proposals(status: str, kind: str):
     """List schema evolution proposals."""
@@ -11,7 +14,9 @@ def schema_proposals(status: str, kind: str):
 
     filters = []
     if status == "pending":
-        filters.append("p.accepted = false AND coalesce(p.rejected, false) = false AND coalesce(p.promoted, false) = false")
+        filters.append(
+            "p.accepted = false AND coalesce(p.rejected, false) = false AND coalesce(p.promoted, false) = false"
+        )
     elif status == "accepted":
         filters.append("p.accepted = true AND coalesce(p.promoted, false) = false")
     elif status == "rejected":
@@ -44,19 +49,19 @@ def schema_proposals(status: str, kind: str):
         ).data()
 
     t = Table(title=f"Schema Proposals [{status}]")
-    t.add_column("ID",     style="dim")
+    t.add_column("ID", style="dim")
     t.add_column("Kind")
-    t.add_column("Label",  style="cyan")
-    t.add_column("Conf",   justify="right")
-    t.add_column("Uses",   justify="right")
+    t.add_column("Label", style="cyan")
+    t.add_column("Conf", justify="right")
+    t.add_column("Uses", justify="right")
     t.add_column("Linked", justify="right")
-    t.add_column("Eval",   justify="right")
+    t.add_column("Eval", justify="right")
     t.add_column("Status")
     t.add_column("Source", style="dim")
 
     for r in rows:
         if r.get("promoted"):
-            status_str = f"[green]promoted[/] ({r.get('pnodes',0)}n {r.get('pedges',0)}e)"
+            status_str = f"[green]promoted[/] ({r.get('pnodes', 0)}n {r.get('pedges', 0)}e)"
         elif r.get("rejected"):
             status_str = "[red]rejected[/]"
         elif r.get("accepted"):
@@ -82,12 +87,12 @@ def schema_proposals(status: str, kind: str):
 
 
 @cli.command("review-proposal")
-@click.option("--id",          "proposal_id", required=True)
-@click.option("--accept",      "action",      flag_value="accept")
-@click.option("--reject",      "action",      flag_value="reject")
-@click.option("--promote",     "action",      flag_value="promote")
-@click.option("--tag",         multiple=True)
-@click.option("--note",        default=None)
+@click.option("--id", "proposal_id", required=True)
+@click.option("--accept", "action", flag_value="accept")
+@click.option("--reject", "action", flag_value="reject")
+@click.option("--promote", "action", flag_value="promote")
+@click.option("--tag", multiple=True)
+@click.option("--note", default=None)
 @click.option("--reviewed-by", default="human", show_default=True)
 def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, reviewed_by: str):
     """Accept, reject, tag, or promote a schema proposal."""
@@ -96,7 +101,7 @@ def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, review
         return
 
     driver = get_driver()
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
 
     with driver.session() as session:
         existing = session.run(
@@ -115,6 +120,7 @@ def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, review
             driver.close()
             return
         from sow_kg.schema_evolution import promote_proposal
+
         result = promote_proposal(driver, proposal_id)
         if result["promoted"]:
             console.print(
@@ -149,21 +155,23 @@ def review_proposal(proposal_id: str, action: str, tag: tuple, note: str, review
         )
 
     action_str = f"[green]{action}ed[/]" if action else "[dim]updated[/]"
-    tag_str    = f" tags={list(tag)}" if tag else ""
+    tag_str = f" tags={list(tag)}" if tag else ""
     console.print(f"  {action_str} [cyan]{existing['label']}[/]{tag_str}")
     driver.close()
 
 
 @cli.command("promote-proposals")
-@click.option("--min-evidence",   default=3,    show_default=True)
+@click.option("--min-evidence", default=3, show_default=True)
 @click.option("--min-confidence", default=0.75, show_default=True)
-@click.option("--dry-run",        is_flag=True)
+@click.option("--dry-run", is_flag=True)
 def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
     """Batch promote accepted proposals meeting evidence and composite score thresholds."""
     from sow_kg.schema_evolution import promote_batch
 
-    driver  = get_driver()
-    results = promote_batch(driver, min_evidence=min_evidence, min_confidence=min_confidence, dry_run=dry_run)
+    driver = get_driver()
+    results = promote_batch(
+        driver, min_evidence=min_evidence, min_confidence=min_confidence, dry_run=dry_run
+    )
 
     if not results:
         console.print("[dim]No candidates meet the promotion threshold[/]")
@@ -171,11 +179,11 @@ def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
         return
 
     t = Table(title=f"{'[DRY RUN] ' if dry_run else ''}Promotion Results")
-    t.add_column("Label",  style="cyan")
+    t.add_column("Label", style="cyan")
     t.add_column("Kind")
-    t.add_column("Score",  justify="right")
-    t.add_column("Nodes",  justify="right")
-    t.add_column("Edges",  justify="right")
+    t.add_column("Score", justify="right")
+    t.add_column("Nodes", justify="right")
+    t.add_column("Edges", justify="right")
     t.add_column("Result")
 
     for r in results:
@@ -199,10 +207,9 @@ def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
 
 
 @cli.command("eval-proposals")
-@click.option("--status", default="pending",
-              type=click.Choice(["pending", "accepted", "all"]))
+@click.option("--status", default="pending", type=click.Choice(["pending", "accepted", "all"]))
 @click.option("--min-confidence", default=0.60, show_default=True)
-@click.option("--limit",          default=50,   show_default=True)
+@click.option("--limit", default=50, show_default=True)
 def eval_proposals(status: str, min_confidence: float, limit: int):
     """
     Run LLM evaluation on schema proposals.
@@ -212,19 +219,21 @@ def eval_proposals(status: str, min_confidence: float, limit: int):
     """
     from sow_kg.proposal_eval import evaluate_batch
 
-    driver  = get_driver()
-    console.print(f"[bold]Evaluating {status} proposals (min_conf={min_confidence}, limit={limit})[/]")
+    driver = get_driver()
+    console.print(
+        f"[bold]Evaluating {status} proposals (min_conf={min_confidence}, limit={limit})[/]"
+    )
 
     results = evaluate_batch(driver, min_confidence=min_confidence, status=status, limit=limit)
 
     t = Table(title="Evaluation Results")
-    t.add_column("Label",  style="cyan")
-    t.add_column("Score",  justify="right")
+    t.add_column("Label", style="cyan")
+    t.add_column("Score", justify="right")
     t.add_column("Rec")
     t.add_column("Coherence", justify="right")
-    t.add_column("Novelty",   justify="right")
-    t.add_column("Grounded",  justify="right")
-    t.add_column("Utility",   justify="right")
+    t.add_column("Novelty", justify="right")
+    t.add_column("Grounded", justify="right")
+    t.add_column("Utility", justify="right")
     t.add_column("Reasoning", style="dim")
 
     for r in results:
@@ -234,9 +243,11 @@ def eval_proposals(status: str, min_confidence: float, limit: int):
 
         rec = r.get("recommendation", "")
         rec_str = (
-            "[green]promote[/]" if rec == "promote" else
-            "[red]reject[/]"   if rec == "reject"  else
-            "[yellow]review[/]"
+            "[green]promote[/]"
+            if rec == "promote"
+            else "[red]reject[/]"
+            if rec == "reject"
+            else "[yellow]review[/]"
         )
         bd = r.get("breakdown", {})
         t.add_row(
@@ -273,30 +284,48 @@ def eval_summary():
     t = Table(title="Proposal Evaluation Summary")
     t.add_column("Metric")
     t.add_column("Value", justify="right")
-    t.add_row("Evaluated",       str(stats.get("evaluated", 0)))
-    t.add_row("Avg score",       f"{stats.get('avg_score', 0):.2f}" if stats.get("avg_score") else "—")
-    t.add_row("Avg coherence",   f"{stats.get('avg_coherence', 0):.2f}" if stats.get("avg_coherence") else "—")
-    t.add_row("Avg novelty",     f"{stats.get('avg_novelty', 0):.2f}" if stats.get("avg_novelty") else "—")
-    t.add_row("Avg groundedness",f"{stats.get('avg_groundedness', 0):.2f}" if stats.get("avg_groundedness") else "—")
-    t.add_row("Avg utility",     f"{stats.get('avg_utility', 0):.2f}" if stats.get("avg_utility") else "—")
-    t.add_row("Promote",         str(stats.get("n_promote", 0)))
-    t.add_row("Review",          str(stats.get("n_review", 0)))
-    t.add_row("Reject",          str(stats.get("n_reject", 0)))
+    t.add_row("Evaluated", str(stats.get("evaluated", 0)))
+    t.add_row("Avg score", f"{stats.get('avg_score', 0):.2f}" if stats.get("avg_score") else "—")
+    t.add_row(
+        "Avg coherence",
+        f"{stats.get('avg_coherence', 0):.2f}" if stats.get("avg_coherence") else "—",
+    )
+    t.add_row(
+        "Avg novelty", f"{stats.get('avg_novelty', 0):.2f}" if stats.get("avg_novelty") else "—"
+    )
+    t.add_row(
+        "Avg groundedness",
+        f"{stats.get('avg_groundedness', 0):.2f}" if stats.get("avg_groundedness") else "—",
+    )
+    t.add_row(
+        "Avg utility", f"{stats.get('avg_utility', 0):.2f}" if stats.get("avg_utility") else "—"
+    )
+    t.add_row("Promote", str(stats.get("n_promote", 0)))
+    t.add_row("Review", str(stats.get("n_review", 0)))
+    t.add_row("Reject", str(stats.get("n_reject", 0)))
     console.print(t)
 
     if result["top_proposals"]:
         t2 = Table(title="Top Proposals by Eval Score")
-        t2.add_column("Label",  style="cyan")
+        t2.add_column("Label", style="cyan")
         t2.add_column("Kind")
-        t2.add_column("Score",  justify="right")
+        t2.add_column("Score", justify="right")
         t2.add_column("Rec")
         t2.add_column("Reasoning", style="dim")
         for r in result["top_proposals"]:
             rec = r.get("recommendation", "")
-            rec_str = "[green]promote[/]" if rec == "promote" else "[red]reject[/]" if rec == "reject" else "[yellow]review[/]"
+            rec_str = (
+                "[green]promote[/]"
+                if rec == "promote"
+                else "[red]reject[/]"
+                if rec == "reject"
+                else "[yellow]review[/]"
+            )
             t2.add_row(
-                r.get("label", ""), r.get("kind", ""),
-                f"{r.get('score', 0):.2f}", rec_str,
+                r.get("label", ""),
+                r.get("kind", ""),
+                f"{r.get('score', 0):.2f}",
+                rec_str,
                 (r.get("reasoning") or "")[:60],
             )
         console.print(t2)
