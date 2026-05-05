@@ -31,7 +31,7 @@ client = OpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
 )
 
-MODEL = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+MODEL = os.getenv("AZURE_OPENAI_DEPLOYMENT", "Kimi-K2.5")
 
 # ---------------------------------------------------------------------------
 # System prompts — one per intent
