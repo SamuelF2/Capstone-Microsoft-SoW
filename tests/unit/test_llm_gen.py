@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "ml"))
 
-from sow_kg.llm_gen import (
+from ml.llm_gen import (
     _INTENTS,
     _fmt_banned,
     _fmt_deliverables,
