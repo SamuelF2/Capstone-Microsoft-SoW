@@ -37,6 +37,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
   tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
 
@@ -107,3 +110,4 @@ output id string = containerApp.id
 output name string = containerApp.name
 output fqdn string = containerApp.properties.configuration.ingress.fqdn
 output uri string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
+output principalId string = containerApp.identity.principalId

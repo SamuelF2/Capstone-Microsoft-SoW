@@ -35,6 +35,9 @@ resource neo4j 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
   tags: union(tags, { 'azd-service-name': 'neo4j' })
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
 
@@ -150,3 +153,4 @@ resource neo4j 'Microsoft.App/containerApps@2024-03-01' = {
 output id string = neo4j.id
 output name string = neo4j.name
 output fqdn string = neo4j.properties.configuration.ingress.fqdn
+output principalId string = neo4j.identity.principalId

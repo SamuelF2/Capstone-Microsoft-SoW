@@ -24,6 +24,10 @@
 #   AZURE_AI_ENDPOINT      - Azure AI Foundry endpoint
 #   AZURE_AI_KEY           - Azure AI Foundry API key
 #   AZURE_AD_CLIENT_ID     - Microsoft Entra ID app registration client ID (required for auth)
+#   AZURE_OPENAI_ENDPOINT     - Azure OpenAI / Foundry endpoint for the ML service
+#   AZURE_OPENAI_DEPLOYMENT   - Azure OpenAI deployment name for the ML service
+#   AZURE_OPENAI_API_VERSION  - Azure OpenAI API version for the ML service
+# (Foundry auth uses the ML Container App's managed identity — no API key needed.)
 # =============================================================================
 
 name: Azure Deploy
@@ -61,6 +65,9 @@ jobs:
       AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
       AZURE_AI_KEY: ${{ secrets.AZURE_AI_KEY }}
       AZURE_AD_CLIENT_ID: ${{ secrets.AZURE_AD_CLIENT_ID }}
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+      AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
 
     steps:
       - name: Checkout code

@@ -7,9 +7,9 @@ Usage:
     # Template mode (no API key needed):
     python run.py
 
-    # With Azure OpenAI for realistic text:
+    # With Azure OpenAI for realistic text (auth via DefaultAzureCredential —
+    # run `az login` first; user must have Azure AI Developer on the Foundry resource):
     export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
-    export AZURE_OPENAI_API_KEY="your_key"
     export AZURE_OPENAI_DEPLOYMENT="gpt-4o-mini"
     python run.py
 

@@ -13,25 +13,13 @@ This module is stateless. All context is passed in per-call.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from sow_kg.llm_client import get_client, get_model
 
 load_dotenv(Path(__file__).parent / ".env")
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Client
-# ---------------------------------------------------------------------------
-
-client = OpenAI(
-    base_url=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-)
-
-MODEL = os.getenv("AZURE_OPENAI_DEPLOYMENT", "Kimi-K2.5")
 
 # ---------------------------------------------------------------------------
 # System prompts — one per intent
@@ -310,8 +298,8 @@ def generate(
 
     messages.append({"role": "user", "content": user_content})
 
-    response = client.chat.completions.create(
-        model=MODEL,
+    response = get_client().chat.completions.create(
+        model=get_model(),
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,

@@ -19,6 +19,14 @@ services:
       path: ./Dockerfile
       context: .
 
+  ml:
+    project: ./ml
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      context: .
+
   neo4j:
     project: ./
     host: containerapp
@@ -33,6 +41,14 @@ services:
     image: postgres:16-alpine
     docker:
       path: ./Dockerfile.postgres
+      context: .
+
+  ingestion:
+    project: ./
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.ingestion
       context: .
 
 hooks:
