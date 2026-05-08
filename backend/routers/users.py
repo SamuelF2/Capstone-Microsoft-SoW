@@ -25,8 +25,9 @@ from __future__ import annotations
 import os
 
 import database
+import httpx
 from auth import CurrentUser
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from models import UserListEntry
 from pydantic import BaseModel
 
@@ -109,23 +110,50 @@ async def list_users(
 
 @router.get(
     "/me/groups",
-    summary="Get the current user's Entra ID groups from their JWT claims",
+    summary="Get the current user's Entra ID groups via Microsoft Graph",
 )
-async def get_my_groups(current_user: CurrentUser) -> dict:
-    """Return Entra ID groups from the user's JWT claims.
+async def get_my_groups(current_user: CurrentUser, request: Request) -> dict:
+    """Proxy to Microsoft Graph /me/memberOf to get the current user's groups.
 
-    Returns an empty list when the App Registration does not have
-    groupMembershipClaims enabled — this is the expected degraded state
-    for most deployments until the App Registration is configured.
+    Uses the Bearer token from the incoming request to call Graph on behalf
+    of the user — the token never leaves the server after this point.
+    Requires the User.Read scope to be granted (no admin consent needed for
+    reading your own group membership).
 
-    When groups ARE in the token, they are stored on the user record
-    during auth.py's get_current_user upsert. Currently returns []
-    until that storage is implemented.
+    Returns a list of groups with id and displayName.
+    Falls back to [] on any error so the frontend degrades gracefully.
     """
-    # TODO: store groups claim during JWT validation in auth.py and
-    # return them here. For now, always returns empty so the frontend
-    # shows the checkbox fallback instead of a broken picker.
-    return {"groups": []}
+    # Extract the Bearer token from the incoming Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return {"groups": []}
+
+    token = auth_header[len("Bearer ") :]
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://graph.microsoft.com/v1.0/me/memberOf",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
+                params={"$select": "id,displayName,groupTypes"},
+            )
+            if not resp.ok:
+                return {"groups": []}
+
+            data = resp.json()
+            # Filter to security groups and M365 groups only
+            # (memberOf also returns directory roles which have no groupTypes)
+            groups = [
+                {"id": g["id"], "displayName": g.get("displayName", "")}
+                for g in data.get("value", [])
+                if g.get("@odata.type") == "#microsoft.graph.group"
+            ]
+            return {"groups": groups}
+    except Exception:
+        return {"groups": []}
 
 
 class RoleUpdatePayload(BaseModel):

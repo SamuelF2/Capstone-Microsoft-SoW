@@ -127,6 +127,30 @@ export function AuthProvider({ children }) {
     return _acquireToken(msal);
   }, []);
 
+  /** Get a Microsoft Graph access token (separate from the ID token). */
+  const getGraphToken = useCallback(async () => {
+    const msal = msalRef.current;
+    if (!msal) return null;
+    const account = msal.getActiveAccount();
+    if (!account) return null;
+    try {
+      const response = await msal.acquireTokenSilent({
+        scopes: ['https://graph.microsoft.com/User.Read'],
+        account,
+      });
+      return response.accessToken;
+    } catch {
+      try {
+        const response = await msal.acquireTokenPopup({
+          scopes: ['https://graph.microsoft.com/User.Read'],
+        });
+        return response.accessToken;
+      } catch {
+        return null;
+      }
+    }
+  }, []);
+
   const login = useCallback(async () => {
     const msal = msalRef.current;
     if (!msal) throw new Error('MSAL not initialized — is NEXT_PUBLIC_AZURE_CLIENT_ID set?');
@@ -286,6 +310,7 @@ export function AuthProvider({ children }) {
         logout,
         authFetch,
         getAccessToken,
+        getGraphToken,
         overrideRole,
         clearRoleOverride,
       }}

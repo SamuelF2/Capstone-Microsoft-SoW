@@ -73,7 +73,7 @@ function FieldError({ message }) {
 
 export default function CreateNew() {
   const router = useRouter();
-  const { user, authFetch } = useAuth();
+  const { user, authFetch, getGraphToken } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [form, setForm] = useState(INITIAL_FORM);
@@ -247,18 +247,18 @@ export default function CreateNew() {
       const id = sow.id; // integer PK from PostgreSQL
 
       // Add group collaborators if selected
-      if (selectedGroupId || addMyGroup) {
+      if (selectedGroupId) {
         try {
-          await authFetch(`/api/sow/${id}/collaborators/sync-group`, {
+          const graphToken = await getGraphToken();
+          await fetch(`/api/sow/${id}/collaborators/sync-group`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              group_id: selectedGroupId || null,
-              use_creator_group: addMyGroup && !selectedGroupId,
-            }),
+            headers: {
+              'Content-Type': 'application/json',
+              ...(graphToken ? { Authorization: `Bearer ${graphToken}` } : {}),
+            },
+            body: JSON.stringify({ group_id: selectedGroupId }),
           });
         } catch {
-          // Non-fatal — SoW was created, group sync failed silently
           console.warn('Group collaborator sync failed — add members manually');
         }
       }
@@ -305,15 +305,37 @@ export default function CreateNew() {
 
   useEffect(() => {
     if (!user) return;
-    // Attempt to read groups from the Entra token via /api/users/me/groups
-    // This will return [] if the App Registration hasn't enabled the groups claim
+    let cancelled = false;
     setGroupsLoading(true);
-    authFetch('/api/users/me/groups')
-      .then((res) => (res.ok ? res.json() : { groups: [] }))
-      .then((data) => setUserGroups(data.groups || []))
-      .catch(() => setUserGroups([]))
-      .finally(() => setGroupsLoading(false));
-  }, [user, authFetch]);
+
+    (async () => {
+      try {
+        // Acquire a Graph-scoped access token separately from the ID token
+        const graphToken = await getGraphToken();
+        if (!graphToken || cancelled) {
+          setUserGroups([]);
+          setGroupsLoading(false);
+          return;
+        }
+
+        // Call our backend proxy which forwards to Graph using this token
+        const res = await fetch('/api/users/me/groups', {
+          headers: { Authorization: `Bearer ${graphToken}` },
+        });
+        if (cancelled) return;
+        const data = res.ok ? await res.json() : { groups: [] };
+        setUserGroups(data.groups || []);
+      } catch {
+        if (!cancelled) setUserGroups([]);
+      } finally {
+        if (!cancelled) setGroupsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, getGraphToken]);
 
   return (
     <>
@@ -797,12 +819,13 @@ export default function CreateNew() {
                 Team Access
               </h2>
               <p className="text-sm text-secondary" style={{ marginBottom: 'var(--spacing-md)' }}>
-                Optionally add collaborators from your organization. Added members will have
-                read-only access to this SoW.
+                Optionally add an Entra ID group as viewers on this SoW. All members of the selected
+                group will have read-only access.
               </p>
 
-              {userGroups.length > 0 ? (
-                // Entra groups are available — show a picker
+              {groupsLoading ? (
+                <p className="text-sm text-secondary">Loading your groups…</p>
+              ) : userGroups.length > 0 ? (
                 <div>
                   <label className="form-label">Select a group to add as viewers</label>
                   <select
@@ -811,7 +834,7 @@ export default function CreateNew() {
                     onChange={(e) => setSelectedGroupId(e.target.value || null)}
                     style={{ maxWidth: '400px' }}
                   >
-                    <option value="">No group — add individually later</option>
+                    <option value="">No group — add collaborators individually later</option>
                     {userGroups.map((g) => (
                       <option key={g.id} value={g.id}>
                         {g.displayName}
@@ -819,46 +842,23 @@ export default function CreateNew() {
                     ))}
                   </select>
                   <p className="text-xs text-tertiary" style={{ marginTop: 4 }}>
-                    All members of the selected group will be added as viewers.
+                    All members of the selected group will be added as viewers. You can manage
+                    collaborators individually from the SoW manage page after creation.
                   </p>
                 </div>
               ) : (
-                // Groups claim not configured — show checkbox fallback
-                <div>
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 'var(--spacing-sm)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={addMyGroup}
-                      onChange={(e) => setAddMyGroup(e.target.checked)}
-                      disabled={true}
-                      style={{
-                        marginTop: 3,
-                        accentColor: 'var(--color-accent-blue)',
-                        opacity: 0.5,
-                      }}
-                    />
-                    <div>
-                      <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                        Add my Entra ID group members as viewers
-                      </span>
-                      <span className="text-sm">Add my Entra ID group members as viewers</span>
-                      <p className="text-xs text-tertiary" style={{ margin: '2px 0 0' }}>
-                        Group sync is not yet available — collaborators can be added manually from
-                        the SoW manage page after creation.
-                        {groupsLoading
-                          ? 'Checking group membership…'
-                          : "Requires your organization's App Registration to have group claims enabled. " +
-                            'If not configured, collaborators can be added manually after creation.'}
-                      </p>
-                    </div>
-                  </label>
+                <div
+                  style={{
+                    padding: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--color-bg-tertiary)',
+                    border: '1px solid var(--color-border-default)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  No Entra ID groups found. You can add collaborators individually from the SoW
+                  manage page after creation.
                 </div>
               )}
             </div>

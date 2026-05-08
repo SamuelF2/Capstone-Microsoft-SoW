@@ -43,7 +43,7 @@ export const msalConfig = {
 
 /** Scopes requested during the login popup (ID token). */
 export const loginRequest = {
-  scopes: ['openid', 'profile', 'email'],
+  scopes: ['openid', 'profile', 'email', 'https://graph.microsoft.com/User.Read'],
 };
 
 /** Singleton MSAL instance — lazy-initialized, null if client ID is not set. */

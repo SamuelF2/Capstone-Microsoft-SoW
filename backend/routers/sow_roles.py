@@ -17,11 +17,13 @@ Endpoints
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import database
+import httpx
 from auth import CurrentUser
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from models import (
     CollaboratorAdd,
     CollaboratorResponse,
@@ -35,7 +37,7 @@ from utils.db_helpers import require_collaborator, require_sow_manager, seed_col
 
 router = APIRouter(prefix="/api/sow", tags=["sow-roles"])
 
-_PROTECTED_ROLES = {"sow-manager", "reviewer", "viewer"}
+_PROTECTED_ROLES = {"sow-manager", "reviewer", "viewer", "group-owner"}
 
 
 # ── SoW Role endpoints ────────────────────────────────────────────────────────
@@ -496,33 +498,130 @@ class GroupSyncPayload(BaseModel):
 
 @router.post(
     "/{sow_id}/collaborators/sync-group",
-    summary="Add Entra group members as viewers on a SoW",
+    summary="Add Entra group members as viewer or group-owner collaborators on a SoW",
 )
 async def sync_group_collaborators(
     sow_id: int,
     payload: GroupSyncPayload,
     current_user: CurrentUser,
+    request: Request,
 ) -> dict:
-    """Add members of an Entra ID group as viewer collaborators on a SoW.
+    if not payload.group_id:
+        return {"synced": False, "added": 0, "detail": "No group_id provided"}
 
-    Reads the group_id from the payload. If group_id is None and
-    use_creator_group is True, attempts to read the creator's groups
-    from their JWT claims stored on the user record.
-
-    Currently a stub — returns a graceful degradation response when
-    the App Registration groups claim is not configured, rather than
-    failing the SoW creation flow.
-    """
     async with database.pg_pool.acquire() as conn:
         await require_sow_manager(conn, sow_id=sow_id, user_id=current_user.id)
 
-    # For now, return a degraded response — full implementation requires
-    # the App Registration to have groupMembershipClaims enabled and
-    # Microsoft Graph integration for member enumeration.
-    return {
-        "synced": False,
-        "detail": (
-            "Group sync requires Entra App Registration group claims to be enabled. "
-            "Add collaborators manually via POST /api/sow/{id}/collaborators."
-        ),
-    }
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return {"synced": False, "added": 0, "detail": "No token available"}
+
+    token = auth_header[len("Bearer ") :]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Fetch members and owners in parallel
+            members_resp, owners_resp = await asyncio.gather(
+                client.get(
+                    f"https://graph.microsoft.com/v1.0/groups/{payload.group_id}/members",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    params={"$select": "id,mail,userPrincipalName,displayName"},
+                ),
+                client.get(
+                    f"https://graph.microsoft.com/v1.0/groups/{payload.group_id}/owners",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                    params={"$select": "id"},
+                ),
+            )
+
+            if not members_resp.is_success:
+                return {
+                    "synced": False,
+                    "added": 0,
+                    "detail": f"Graph returned {members_resp.status_code}",
+                }
+
+            members = members_resp.json().get("value", [])
+            # Build a set of owner OIDs for O(1) lookup
+            owner_oids = set()
+            if owners_resp.is_success:
+                owner_oids = {o["id"] for o in owners_resp.json().get("value", [])}
+
+    except Exception as exc:
+        return {"synced": False, "added": 0, "detail": str(exc)}
+
+    added = 0
+    async with database.pg_pool.acquire() as conn:
+        # Ensure both roles exist for this SoW
+        for role_key, display_name, description, permissions in [
+            ("viewer", "Viewer", "Read-only access to this SoW", '["sow.read"]'),
+            ("group-owner", "Group Owner", "Full access via Entra group ownership", '["*"]'),
+        ]:
+            await conn.execute(
+                """
+                INSERT INTO sow_role_definitions
+                    (sow_id, role_key, display_name, description, permissions, created_by)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                ON CONFLICT (sow_id, role_key) DO NOTHING
+                """,
+                sow_id,
+                role_key,
+                display_name,
+                description,
+                permissions,
+                current_user.id,
+            )
+
+        for member in members:
+            email = member.get("mail") or member.get("userPrincipalName")
+            if not email:
+                continue
+
+            # Determine role based on whether this member is also a group owner
+            entra_oid = member.get("id", "")
+            assigned_role = "group-owner" if entra_oid in owner_oids else "viewer"
+
+            # Look up or create user by email
+            user_row = await conn.fetchrow("SELECT id FROM users WHERE email = $1", email)
+            if not user_row:
+                user_row = await conn.fetchrow(
+                    """
+                    INSERT INTO users (email, full_name, role, is_active)
+                    VALUES ($1, $2, 'consultant', TRUE)
+                    ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name
+                    RETURNING id
+                    """,
+                    email,
+                    member.get("displayName", ""),
+                )
+
+            user_id = user_row["id"]
+
+            # Skip the SoW creator — they already have sow-manager
+            if user_id == current_user.id:
+                continue
+
+            # Add collaborator or upgrade role if already present
+            existing = await conn.fetchrow(
+                "SELECT role FROM collaboration WHERE sow_id = $1 AND user_id = $2",
+                sow_id,
+                user_id,
+            )
+            if not existing:
+                await conn.execute(
+                    "INSERT INTO collaboration (sow_id, user_id, role) VALUES ($1, $2, $3)",
+                    sow_id,
+                    user_id,
+                    assigned_role,
+                )
+                added += 1
+            elif assigned_role == "group-owner" and existing["role"] != "group-owner":
+                # Upgrade viewer → group-owner if they're an owner
+                await conn.execute(
+                    "UPDATE collaboration SET role = $1 WHERE sow_id = $2 AND user_id = $3",
+                    assigned_role,
+                    sow_id,
+                    user_id,
+                )
+
+    return {"synced": True, "added": added, "group_id": payload.group_id}
