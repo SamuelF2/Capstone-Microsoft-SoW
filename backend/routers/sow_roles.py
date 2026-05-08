@@ -17,7 +17,6 @@ Endpoints
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import database
@@ -491,6 +490,43 @@ async def get_my_sow_permissions(
     }
 
 
+async def _fetch_graph_paginated(
+    client: httpx.AsyncClient,
+    url: str,
+    token: str,
+    *,
+    select: str | None = None,
+    page_size: int = 999,
+    max_pages: int = 50,
+) -> list[dict] | None:
+    """Fetch a Microsoft Graph collection across @odata.nextLink pages.
+
+    Returns None on the first non-success response so the caller can distinguish
+    Graph failure from an empty group. Caps at max_pages so a runaway response
+    can't loop forever.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    params = {"$top": str(page_size)}
+    if select:
+        params["$select"] = select
+
+    items: list[dict] = []
+    next_url: str | None = url
+    next_params: dict | None = params
+    for _ in range(max_pages):
+        if next_url is None:
+            break
+        resp = await client.get(next_url, headers=headers, params=next_params)
+        if not resp.is_success:
+            return None
+        body = resp.json()
+        items.extend(body.get("value", []))
+        next_url = body.get("@odata.nextLink")
+        # nextLink already encodes its own query string
+        next_params = None
+    return items
+
+
 class GroupSyncPayload(BaseModel):
     group_id: str | None = None
     use_creator_group: bool = False
@@ -512,40 +548,36 @@ async def sync_group_collaborators(
     async with database.pg_pool.acquire() as conn:
         await require_sow_manager(conn, sow_id=sow_id, user_id=current_user.id)
 
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return {"synced": False, "added": 0, "detail": "No token available"}
-
-    token = auth_header[len("Bearer ") :]
+    # The user authenticates via the backend ID token in `Authorization` (handled
+    # by the CurrentUser dependency above). The Graph access token rides on a
+    # separate header so we don't conflate audiences.
+    token = request.headers.get("X-Graph-Token", "")
+    if not token:
+        return {"synced": False, "added": 0, "detail": "No Graph token available"}
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # Fetch members and owners in parallel
-            members_resp, owners_resp = await asyncio.gather(
-                client.get(
-                    f"https://graph.microsoft.com/v1.0/groups/{payload.group_id}/members",
-                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-                    params={"$select": "id,mail,userPrincipalName,displayName"},
-                ),
-                client.get(
-                    f"https://graph.microsoft.com/v1.0/groups/{payload.group_id}/owners",
-                    headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-                    params={"$select": "id"},
-                ),
+            members = await _fetch_graph_paginated(
+                client,
+                f"https://graph.microsoft.com/v1.0/groups/{payload.group_id}/members",
+                token,
+                select="id,mail,userPrincipalName,displayName",
+            )
+            owners = await _fetch_graph_paginated(
+                client,
+                f"https://graph.microsoft.com/v1.0/groups/{payload.group_id}/owners",
+                token,
+                select="id",
             )
 
-            if not members_resp.is_success:
-                return {
-                    "synced": False,
-                    "added": 0,
-                    "detail": f"Graph returned {members_resp.status_code}",
-                }
+        if members is None:
+            return {
+                "synced": False,
+                "added": 0,
+                "detail": "Graph members request failed",
+            }
 
-            members = members_resp.json().get("value", [])
-            # Build a set of owner OIDs for O(1) lookup
-            owner_oids = set()
-            if owners_resp.is_success:
-                owner_oids = {o["id"] for o in owners_resp.json().get("value", [])}
+        owner_oids = {o["id"] for o in (owners or []) if o.get("id")}
 
     except Exception as exc:
         return {"synced": False, "added": 0, "detail": str(exc)}

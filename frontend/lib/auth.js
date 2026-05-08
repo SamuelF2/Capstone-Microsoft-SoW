@@ -127,27 +127,48 @@ export function AuthProvider({ children }) {
     return _acquireToken(msal);
   }, []);
 
+  // Graph scopes needed by the group-collaborator panel:
+  //   User.Read            — /me/memberOf for the group picker
+  //   GroupMember.Read.All — /groups/{id}/members and /groups/{id}/owners for sync
+  // GroupMember.Read.All requires admin consent on the Entra app registration.
+  const GRAPH_SCOPES = [
+    'https://graph.microsoft.com/User.Read',
+    'https://graph.microsoft.com/GroupMember.Read.All',
+  ];
+
+  const graphTokenPromiseRef = useRef(null);
+
   /** Get a Microsoft Graph access token (separate from the ID token). */
   const getGraphToken = useCallback(async () => {
     const msal = msalRef.current;
     if (!msal) return null;
     const account = msal.getActiveAccount();
     if (!account) return null;
-    try {
-      const response = await msal.acquireTokenSilent({
-        scopes: ['https://graph.microsoft.com/User.Read'],
-        account,
-      });
-      return response.accessToken;
-    } catch {
+    // Dedup concurrent callers — mirrors the pattern on the backend ID-token path.
+    if (graphTokenPromiseRef.current) return graphTokenPromiseRef.current;
+    const promise = (async () => {
       try {
-        const response = await msal.acquireTokenPopup({
-          scopes: ['https://graph.microsoft.com/User.Read'],
+        const response = await msal.acquireTokenSilent({
+          scopes: GRAPH_SCOPES,
+          account,
         });
         return response.accessToken;
       } catch {
-        return null;
+        try {
+          const response = await msal.acquireTokenPopup({
+            scopes: GRAPH_SCOPES,
+          });
+          return response.accessToken;
+        } catch {
+          return null;
+        }
       }
+    })();
+    graphTokenPromiseRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      graphTokenPromiseRef.current = null;
     }
   }, []);
 

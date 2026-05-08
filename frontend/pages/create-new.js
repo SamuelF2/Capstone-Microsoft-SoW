@@ -250,16 +250,28 @@ export default function CreateNew() {
       if (selectedGroupId) {
         try {
           const graphToken = await getGraphToken();
-          await fetch(`/api/sow/${id}/collaborators/sync-group`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(graphToken ? { Authorization: `Bearer ${graphToken}` } : {}),
-            },
-            body: JSON.stringify({ group_id: selectedGroupId }),
-          });
-        } catch {
-          console.warn('Group collaborator sync failed — add members manually');
+          if (!graphToken) {
+            console.warn('Graph token unavailable; add group members manually');
+          } else {
+            // authFetch attaches the backend ID token as Authorization for
+            // CurrentUser auth; the Graph token rides separately on
+            // X-Graph-Token so the two audiences don't collide.
+            const syncRes = await authFetch(`/api/sow/${id}/collaborators/sync-group`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Graph-Token': graphToken,
+              },
+              body: JSON.stringify({ group_id: selectedGroupId }),
+            });
+            if (!syncRes.ok) {
+              console.warn(
+                `Group collaborator sync returned ${syncRes.status}; add group members manually`
+              );
+            }
+          }
+        } catch (err) {
+          console.warn('Group collaborator sync failed; add group members manually', err);
         }
       }
 
@@ -318,9 +330,10 @@ export default function CreateNew() {
           return;
         }
 
-        // Call our backend proxy which forwards to Graph using this token
-        const res = await fetch('/api/users/me/groups', {
-          headers: { Authorization: `Bearer ${graphToken}` },
+        // authFetch attaches the backend ID token as Authorization for
+        // CurrentUser auth; the Graph token rides separately on X-Graph-Token.
+        const res = await authFetch('/api/users/me/groups', {
+          headers: { 'X-Graph-Token': graphToken },
         });
         if (cancelled) return;
         const data = res.ok ? await res.json() : { groups: [] };
