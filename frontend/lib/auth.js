@@ -127,14 +127,21 @@ export function AuthProvider({ children }) {
     return _acquireToken(msal);
   }, []);
 
-  // Graph scopes needed by the group-collaborator panel:
-  //   User.Read            — /me/memberOf for the group picker
-  //   GroupMember.Read.All — /groups/{id}/members and /groups/{id}/owners for sync
-  // GroupMember.Read.All requires admin consent on the Entra app registration.
-  const GRAPH_SCOPES = [
-    'https://graph.microsoft.com/User.Read',
-    'https://graph.microsoft.com/GroupMember.Read.All',
-  ];
+  // Graph scopes needed by the group-collaborator panel today:
+  //   User.Read — backs /me/memberOf via the backend's /me/groups proxy
+  //               for the group picker.
+  //
+  // GroupMember.Read.All was previously listed here to support the group
+  // collaborator auto-sync feature (sync_group_collaborators in
+  // backend/routers/sow_roles.py and the matching call in
+  // frontend/pages/create-new.js). It has been removed because that scope
+  // requires tenant-wide admin consent that is not available in the
+  // Azure-for-Students demo tenant. See the header banner above
+  // sync_group_collaborators for the full context and the steps to
+  // re-enable. When sync is reactivated, add
+  //   'https://graph.microsoft.com/GroupMember.Read.All'
+  // back into this list.
+  const GRAPH_SCOPES = ['https://graph.microsoft.com/User.Read'];
 
   const graphTokenPromiseRef = useRef(null);
 

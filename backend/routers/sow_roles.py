@@ -532,10 +532,46 @@ class GroupSyncPayload(BaseModel):
     use_creator_group: bool = False
 
 
-@router.post(
-    "/{sow_id}/collaborators/sync-group",
-    summary="Add Entra group members as viewer or group-owner collaborators on a SoW",
-)
+# ---------------------------------------------------------------------------
+# DISABLED: Group collaborator auto-sync.
+#
+# The `sync_group_collaborators` endpoint below would automatically enroll
+# every member of a chosen Entra group as a SoW collaborator. Group owners
+# get the `group-owner` role (full perms); non-owners get the `viewer` role
+# (read-only). It is currently disabled because reading
+# /groups/{id}/members and /groups/{id}/owners through Microsoft Graph
+# requires the `GroupMember.Read.All` delegated permission, which requires
+# tenant-wide admin consent on the Entra app registration. The
+# Azure-for-Students tenant hosting the demo does not have that consent
+# available, so the endpoint would silently fail with a Graph 403 even
+# with the auth, pagination, and scope plumbing fixed below.
+#
+# While disabled, the group picker on /create-new is informational only:
+# the user sees their own groups (powered by /api/users/me/groups, which
+# only needs User.Read) and can pick one, but no collaborators are
+# automatically added. They add collaborators individually through the
+# existing add-collaborator UI.
+#
+# To re-enable when admin consent is obtainable (e.g. a Microsoft-owned
+# subscription per §9.5.2 of the project paper):
+#   1. Have a Cloud Application Administrator grant tenant-wide admin
+#      consent for `GroupMember.Read.All` on the Cocoon app registration.
+#   2. Add 'https://graph.microsoft.com/GroupMember.Read.All' back to the
+#      GRAPH_SCOPES list in frontend/lib/auth.js.
+#   3. Uncomment the @router.post decorator block immediately below.
+#   4. Uncomment the sync call in frontend/pages/create-new.js (search
+#      for "GROUP SYNC DISABLED").
+#
+# The function body, the `_fetch_graph_paginated` helper above, and the
+# `GroupSyncPayload` model are preserved verbatim so reactivation is the
+# four steps above and nothing more. The X-Graph-Token plumbing in this
+# function and in `users.get_my_groups` is also preserved because the
+# /me/groups proxy continues to use it for the picker.
+# ---------------------------------------------------------------------------
+# @router.post(
+#     "/{sow_id}/collaborators/sync-group",
+#     summary="Add Entra group members as viewer or group-owner collaborators on a SoW",
+# )
 async def sync_group_collaborators(
     sow_id: int,
     payload: GroupSyncPayload,
