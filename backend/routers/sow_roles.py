@@ -17,11 +17,11 @@ Endpoints
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import database
 import httpx
-import asyncio
 from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Request, status
 from models import (
@@ -516,7 +516,7 @@ async def sync_group_collaborators(
     if not auth_header.startswith("Bearer "):
         return {"synced": False, "added": 0, "detail": "No token available"}
 
-    token = auth_header[len("Bearer "):]
+    token = auth_header[len("Bearer ") :]
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -582,9 +582,7 @@ async def sync_group_collaborators(
             assigned_role = "group-owner" if entra_oid in owner_oids else "viewer"
 
             # Look up or create user by email
-            user_row = await conn.fetchrow(
-                "SELECT id FROM users WHERE email = $1", email
-            )
+            user_row = await conn.fetchrow("SELECT id FROM users WHERE email = $1", email)
             if not user_row:
                 user_row = await conn.fetchrow(
                     """

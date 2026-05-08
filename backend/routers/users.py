@@ -23,9 +23,9 @@ of a role).
 from __future__ import annotations
 
 import os
-import httpx
 
 import database
+import httpx
 from auth import CurrentUser
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from models import UserListEntry
@@ -128,7 +128,7 @@ async def get_my_groups(current_user: CurrentUser, request: Request) -> dict:
     if not auth_header.startswith("Bearer "):
         return {"groups": []}
 
-    token = auth_header[len("Bearer "):]
+    token = auth_header[len("Bearer ") :]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:

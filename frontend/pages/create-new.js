@@ -332,7 +332,9 @@ export default function CreateNew() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [user, getGraphToken]);
 
   return (
@@ -817,8 +819,8 @@ export default function CreateNew() {
                 Team Access
               </h2>
               <p className="text-sm text-secondary" style={{ marginBottom: 'var(--spacing-md)' }}>
-                Optionally add an Entra ID group as viewers on this SoW. All members
-                of the selected group will have read-only access.
+                Optionally add an Entra ID group as viewers on this SoW. All members of the selected
+                group will have read-only access.
               </p>
 
               {groupsLoading ? (
@@ -840,8 +842,8 @@ export default function CreateNew() {
                     ))}
                   </select>
                   <p className="text-xs text-tertiary" style={{ marginTop: 4 }}>
-                    All members of the selected group will be added as viewers.
-                    You can manage collaborators individually from the SoW manage page after creation.
+                    All members of the selected group will be added as viewers. You can manage
+                    collaborators individually from the SoW manage page after creation.
                   </p>
                 </div>
               ) : (
@@ -855,8 +857,8 @@ export default function CreateNew() {
                     color: 'var(--color-text-secondary)',
                   }}
                 >
-                  No Entra ID groups found. You can add collaborators individually
-                  from the SoW manage page after creation.
+                  No Entra ID groups found. You can add collaborators individually from the SoW
+                  manage page after creation.
                 </div>
               )}
             </div>
