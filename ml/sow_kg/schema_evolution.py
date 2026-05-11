@@ -70,10 +70,14 @@ def compute_promotion_score(driver: Driver, proposal_id: str) -> dict:
 
         total_sows = session.run("MATCH (s:SOW) RETURN count(s) AS c").single()["c"]
 
+        # Count both :Section and :ClauseType anchors so guide-derived
+        # proposals score correctly. Pre-fix, only Section anchors existed
+        # and this metric undercounted (often to zero) for guide proposals.
         linked = session.run(
             """
-            MATCH (p:SchemaProposal {proposal_id: $pid})-[:PROPOSED_FROM]->(sec:Section)
-            RETURN count(sec) AS c
+            MATCH (p:SchemaProposal {proposal_id: $pid})-[:PROPOSED_FROM]->(anchor)
+            WHERE anchor:Section OR anchor:ClauseType
+            RETURN count(anchor) AS c
             """,
             pid=proposal_id,
         ).single()["c"]
@@ -159,11 +163,19 @@ def record_proposal(
         )
 
         if source_section_id:
+            # ingest._write_section() passes a :Section id; ingest._write_guide()
+            # passes a :ClauseType id (via type_id, not id). The previous
+            # hardcoded MATCH (sec:Section) silently dropped every guide-derived
+            # proposal on the floor, which then made _promote_node return zero.
+            # Anchor on either node type by trying both and coalescing.
             session.run(
                 """
                 MATCH (p:SchemaProposal {proposal_id: $prop_id})
-                MATCH (sec:Section {id: $sec_id})
-                MERGE (p)-[:PROPOSED_FROM]->(sec)
+                OPTIONAL MATCH (sec:Section {id: $sec_id})
+                OPTIONAL MATCH (ct:ClauseType {type_id: $sec_id})
+                WITH p, coalesce(sec, ct) AS anchor
+                WHERE anchor IS NOT NULL
+                MERGE (p)-[:PROPOSED_FROM]->(anchor)
                 """,
                 prop_id=prop_id,
                 sec_id=source_section_id,
@@ -271,12 +283,17 @@ def promote_proposal(driver: Driver, proposal_id: str) -> dict:
 
 
 def _promote_node(driver: Driver, proposal_id: str, label: str, description: str, ts: str) -> dict:
+    # PROPOSED_FROM edges may anchor on either :Section (from _write_section)
+    # or :ClauseType (from _write_guide). Both are valid promotion anchors;
+    # the previous Section-only traversal silently skipped guide proposals.
     with driver.session() as session:
         sections = session.run(
             """
-            MATCH (p:SchemaProposal {proposal_id: $pid})-[:PROPOSED_FROM]->(sec:Section)
-            RETURN sec.id AS sec_id, sec.heading AS heading,
-                   sec.section_type AS section_type
+            MATCH (p:SchemaProposal {proposal_id: $pid})-[:PROPOSED_FROM]->(anchor)
+            WHERE anchor:Section OR anchor:ClauseType
+            RETURN coalesce(anchor.id, anchor.type_id)        AS sec_id,
+                   coalesce(anchor.heading, anchor.display_name) AS heading,
+                   coalesce(anchor.section_type, 'guide_clause_type') AS section_type
             """,
             pid=proposal_id,
         ).data()
@@ -285,7 +302,7 @@ def _promote_node(driver: Driver, proposal_id: str, label: str, description: str
         return {
             "nodes_written": 0,
             "edges_written": 0,
-            "note": "no PROPOSED_FROM edges — re-ingest with updated ingest.py to build back-edges",
+            "note": "no PROPOSED_FROM edges — re-ingest to build back-edges",
         }
 
     nodes_written = 0
@@ -305,8 +322,11 @@ def _promote_node(driver: Driver, proposal_id: str, label: str, description: str
                     n.promoted_from  = $proposal_id,
                     n.promoted_at    = $ts
                 WITH n
-                MATCH (sec:Section {{id: $sec_id}})
-                MERGE (sec)-[:`HAS_{label.upper()}`]->(n)
+                OPTIONAL MATCH (sec:Section {{id: $sec_id}})
+                OPTIONAL MATCH (ct:ClauseType {{type_id: $sec_id}})
+                WITH n, coalesce(sec, ct) AS anchor
+                WHERE anchor IS NOT NULL
+                MERGE (anchor)-[:`HAS_{label.upper()}`]->(n)
                 WITH n
                 MATCH (p:SchemaProposal {{proposal_id: $proposal_id}})
                 MERGE (n)-[:PROMOTED_FROM]->(p)
@@ -340,23 +360,30 @@ def _promote_edge(driver: Driver, proposal_id: str, rel_type: str, ts: str) -> d
     if not sections:
         return {"nodes_written": 0, "edges_written": 0, "note": "no linked sections"}
 
+    # The Cypher MERGE runs over a Cartesian product of all entities in the
+    # section, so one iteration can create many edges. Previously this loop
+    # incremented edges_written by 1 per section regardless of how many edges
+    # the MERGE actually produced, which silently undercounted the real
+    # promotion (and the value gets persisted onto p.promoted_edges by the
+    # caller). RETURN count(r) gives the real per-section count.
     edges_written = 0
     for sec in sections:
         try:
             with driver.session() as session:
-                session.run(
+                result = session.run(
                     f"""
                     MATCH (sec:Section {{id: $sec_id}})-[:CONTAINS_ENTITY]->(a)
                     MATCH (sec)-[:CONTAINS_ENTITY]->(b)
                     WHERE id(a) < id(b)
                     MERGE (a)-[r:{rel_clean}]->(b)
                     SET r.promoted_from = $proposal_id, r.promoted_at = $ts
+                    RETURN count(r) AS n
                     """,
                     sec_id=sec["sec_id"],
                     proposal_id=proposal_id,
                     ts=ts,
-                )
-            edges_written += 1
+                ).single()
+            edges_written += result["n"] if result else 0
         except Exception as e:
             logger.debug(f"Edge promotion failed for section {sec['sec_id']}: {e}")
 
