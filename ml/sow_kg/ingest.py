@@ -288,7 +288,7 @@ def _write_section(
         extracted = extract_entities(sec["heading"], sec["content"])
         _write_entities(driver, extracted, filename, sec_id, "Section")
         if extracted.get("proposed_schema"):
-            process_proposals(driver, extracted["proposed_schema"], filename, sec["heading"])
+            process_proposals(driver, extracted["proposed_schema"], filename, sec_id)
     except Exception as e:
         logger.debug(f"Entity extraction error '{sec['heading']}': {e}")
 
@@ -392,7 +392,6 @@ def _write_sow(driver: Driver, doc: dict, banned_phrases: list[dict]):
 def _write_guide(driver: Driver, doc: dict):
     filename = doc["filename"]
     console.print(f"  [dim]→ Guide:[/] [blue]{filename}[/] | sections={len(doc['sections'])}")
-
     for sec in doc["sections"]:
         if sec["char_count"] < 80:
             continue
@@ -414,7 +413,7 @@ def _write_guide(driver: Driver, doc: dict):
             extracted = extract_entities(sec["heading"], sec["content"])
             _write_entities(driver, extracted, filename, ct_id, "ClauseType")
             if extracted.get("proposed_schema"):
-                process_proposals(driver, extracted["proposed_schema"], filename, sec["heading"])
+                process_proposals(driver, extracted["proposed_schema"], filename, ct_id)
         except Exception as e:
             logger.debug(f"Guide entity extraction error: {e}")
 
