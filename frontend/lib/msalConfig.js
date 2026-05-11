@@ -41,9 +41,16 @@ export const msalConfig = {
   },
 };
 
-/** Scopes requested during the login popup (ID token). */
+/** Scopes requested during the login popup (ID token).
+ *
+ * Graph scopes are intentionally not in this list. Mixing a Graph resource
+ * scope into login forces every silent refresh to negotiate a Graph token
+ * alongside the ID token, which destabilizes silent refresh if Graph consent
+ * isn't yet granted in the user's tenant. Graph scopes are requested on
+ * demand inside getGraphToken in auth.js.
+ */
 export const loginRequest = {
-  scopes: ['openid', 'profile', 'email', 'https://graph.microsoft.com/User.Read'],
+  scopes: ['openid', 'profile', 'email'],
 };
 
 /** Singleton MSAL instance — lazy-initialized, null if client ID is not set. */

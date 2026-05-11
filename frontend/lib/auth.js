@@ -127,27 +127,55 @@ export function AuthProvider({ children }) {
     return _acquireToken(msal);
   }, []);
 
+  // Graph scopes needed by the group-collaborator panel today:
+  //   User.Read — backs /me/memberOf via the backend's /me/groups proxy
+  //               for the group picker.
+  //
+  // GroupMember.Read.All was previously listed here to support the group
+  // collaborator auto-sync feature (sync_group_collaborators in
+  // backend/routers/sow_roles.py and the matching call in
+  // frontend/pages/create-new.js). It has been removed because that scope
+  // requires tenant-wide admin consent that is not available in the
+  // Azure-for-Students demo tenant. See the header banner above
+  // sync_group_collaborators for the full context and the steps to
+  // re-enable. When sync is reactivated, add
+  //   'https://graph.microsoft.com/GroupMember.Read.All'
+  // back into this list.
+  const GRAPH_SCOPES = ['https://graph.microsoft.com/User.Read'];
+
+  const graphTokenPromiseRef = useRef(null);
+
   /** Get a Microsoft Graph access token (separate from the ID token). */
   const getGraphToken = useCallback(async () => {
     const msal = msalRef.current;
     if (!msal) return null;
     const account = msal.getActiveAccount();
     if (!account) return null;
-    try {
-      const response = await msal.acquireTokenSilent({
-        scopes: ['https://graph.microsoft.com/User.Read'],
-        account,
-      });
-      return response.accessToken;
-    } catch {
+    // Dedup concurrent callers — mirrors the pattern on the backend ID-token path.
+    if (graphTokenPromiseRef.current) return graphTokenPromiseRef.current;
+    const promise = (async () => {
       try {
-        const response = await msal.acquireTokenPopup({
-          scopes: ['https://graph.microsoft.com/User.Read'],
+        const response = await msal.acquireTokenSilent({
+          scopes: GRAPH_SCOPES,
+          account,
         });
         return response.accessToken;
       } catch {
-        return null;
+        try {
+          const response = await msal.acquireTokenPopup({
+            scopes: GRAPH_SCOPES,
+          });
+          return response.accessToken;
+        } catch {
+          return null;
+        }
       }
+    })();
+    graphTokenPromiseRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      graphTokenPromiseRef.current = null;
     }
   }, []);
 

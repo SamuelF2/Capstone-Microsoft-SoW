@@ -115,20 +115,15 @@ async def list_users(
 async def get_my_groups(current_user: CurrentUser, request: Request) -> dict:
     """Proxy to Microsoft Graph /me/memberOf to get the current user's groups.
 
-    Uses the Bearer token from the incoming request to call Graph on behalf
-    of the user — the token never leaves the server after this point.
-    Requires the User.Read scope to be granted (no admin consent needed for
-    reading your own group membership).
-
-    Returns a list of groups with id and displayName.
-    Falls back to [] on any error so the frontend degrades gracefully.
+    The user is authenticated via the backend ID token in the standard
+    Authorization header (handled by the CurrentUser dependency). The Graph
+    access token rides on a separate X-Graph-Token header so the two audiences
+    don't collide. Falls back to [] on any error so the frontend degrades
+    gracefully.
     """
-    # Extract the Bearer token from the incoming Authorization header
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = request.headers.get("X-Graph-Token", "")
+    if not token:
         return {"groups": []}
-
-    token = auth_header[len("Bearer ") :]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
