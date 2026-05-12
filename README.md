@@ -31,7 +31,7 @@ This README is the handoff document. It assumes the reader is taking over a live
 - **Application Insights, alerting, and SLO tracking are not wired.** Container Apps logs flow to Log Analytics (30-day retention); operator action is manual.
 - **The KG generation evaluation loop is manual.** No automated retrieval relevance harness.
 
-**Demo readiness.** All seven recent PRs landed on `main` (#33, #34, #35, #36, #37, #38, #39). 301 backend unit tests pass (2 skipped) plus 131 ML unit tests pass; six pre-existing failures predate this work and are unrelated to feature code (`pypdf` missing in env, etc.).
+**Demo readiness.** All seven recent PRs landed on `main` (#33, #34, #35, #36, #37, #38, #39). CI is green: **307 backend unit tests pass (2 skipped, 0 failed)** plus **131 ML unit tests pass**. The five pre-existing test-side bugs that had haunted earlier handoff drafts (workflow_data KeyError, async-mock context, `Header()` default reaching `.strip()`, and the system-admin override assertion that contradicted the security exclusion in `auth._OVERRIDABLE_ROLES`) were patched in the post-merge stabilisation sweep on 2026-05-12.
 
 ## 2. Team and handoff context
 
@@ -587,14 +587,14 @@ uv run pytest -m "not integration" -v
 uv run pytest tests/unit/ -v
 ```
 
-Current baseline (re-run 2026-05-12 after PR #39): **301 backend unit tests pass, 2 skipped, 6 failed** + **131 ML unit tests pass**. PR #39 added ~50 risk-scorer tests (`tests/unit/test_risk_scorer.py`) and ~59 DOCX-renderer tests (`tests/unit/test_docx_renderer.py`) to the backend baseline. The six backend failures are pre-existing and unrelated to feature code:
+Current baseline on CI (verified 2026-05-12): **307 backend unit tests pass, 2 skipped, 0 failed** + **131 ML unit tests pass**.
 
-- `tests/unit/test_document_text.py::TestExtractTextPdf::test_joins_page_text` — `pypdf` missing in the dev venv
-- `tests/test_api.py::TestUpdateSowStatus::test_valid_status` and `::test_invalid_status_returns_400` — async-mock incompatibility with the asyncpg connection-acquire flow
-- `tests/unit/test_auth.py::TestUserUpsert::test_first_login_creates_user` and `::test_second_login_returns_existing_user` — `Header.strip` AttributeError against the current `Header` API
-- `tests/test_schema_proposals.py::TestRoleOverrideHeader::test_admin_override_swaps_role_to_system_admin` — same header-handling root cause
+History of the recent baseline shifts:
 
-The new team can address them at their discretion.
+- PR #39 added ~50 risk-scorer tests (`tests/unit/test_risk_scorer.py`) and ~59 DOCX-renderer tests (`tests/unit/test_docx_renderer.py`), taking the backend total from 198 to 309 tests.
+- A 2026-05-12 stabilisation sweep fixed the five remaining test-side bugs (async-mock context manager and 4-call fetchrow sequence in `TestUpdateSowStatus`, `Header()` default reaching `.strip()` in `TestUserUpsert`, and the security-incorrect `system-admin` override assertion in `TestRoleOverrideHeader`). All fixes were test-only — production code was unchanged.
+
+**Local-only caveat:** on developer venvs that don't have `pypdf` installed, `tests/unit/test_document_text.py::TestExtractTextPdf::test_joins_page_text` fails with `ModuleNotFoundError: No module named 'pypdf'`. CI's image installs `pypdf` so this is not a CI blocker. To match CI locally: `uv pip install pypdf`.
 
 CI runs lint, pre-commit hooks, backend pytest, and ML pytest on every push and PR to `main` (`.github/workflows/CICD_Workflow.yml`). The integration marker is reserved for future DB-backed tests; no integration suite exists today.
 
