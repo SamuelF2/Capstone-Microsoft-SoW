@@ -15,11 +15,12 @@ This README is the handoff document. It assumes the reader is taking over a live
 **What is complete and demonstrable.**
 - End-to-end SoW lifecycle across four supported methodologies (Agile Sprint Delivery, Sure Step 365, Waterfall, Cloud Adoption).
 - AI Recommendation Pipeline live (no mocking) against the deployed ML service.
+- Operational risk-assessment framework: six categories (Financial, Delivery, Technical, Commercial, Compliance, Resource), 5×5 priority matrix with five severity bands, and mitigation playbooks, surfaced both per-SoW (AI Review tab) and portfolio-wide (Business Logic → Risk Assessment).
 - Role-based review routing with JSON-driven checklists for the five reviewer roles.
 - Configurable workflow templates with per-SoW JSONB snapshotting so template edits do not disturb in-flight SoWs.
 - Conditions of Approval lifecycle with assignment and resolution.
 - Audit timeline unified across history, review assignments, COA, and attachments.
-- DOCX handoff package generated on finalization.
+- DOCX handoff package generated on finalization (renderer extracted to `backend/services/docx_renderer.py` in PR #39 and unit-tested at the byte level).
 - Entra group picker on `/create-new` (populates from `/me/memberOf`).
 - Deal-context analytics API and CLI (`/api/deals/*`, `python main.py deal-risk`, etc.).
 - Cross-subscription managed identity from the ML service and the Ingestion Job to Foundry.
@@ -30,7 +31,7 @@ This README is the handoff document. It assumes the reader is taking over a live
 - **Application Insights, alerting, and SLO tracking are not wired.** Container Apps logs flow to Log Analytics (30-day retention); operator action is manual.
 - **The KG generation evaluation loop is manual.** No automated retrieval relevance harness.
 
-**Demo readiness.** All six recent PRs landed on `main` (#33, #34, #35, #36, #37, #38). 192 backend unit tests pass plus 131 ML unit tests pass; six pre-existing failures predate this work and are unrelated to feature code (`pypdf` missing in env, etc.).
+**Demo readiness.** All seven recent PRs landed on `main` (#33, #34, #35, #36, #37, #38, #39). 301 backend unit tests pass (2 skipped) plus 131 ML unit tests pass; six pre-existing failures predate this work and are unrelated to feature code (`pypdf` missing in env, etc.).
 
 ## 2. Team and handoff context
 
@@ -84,7 +85,7 @@ Operational secrets, Azure subscription credentials, and admin contacts are not 
 
 **Two pipelines.** Cocoon runs two distinct AI pipelines that share Neo4j.
 
-1. **AI Recommendation Pipeline (runtime).** Triggered when an author submits a SoW. The back end fans out parallel calls from `backend/services/ai.py` to the ML service for validation, risk extraction, similar-SoW retrieval, and approval routing. Retrieval is vector ANN over the five Neo4j indexes plus Cypher traversal across typed edges.
+1. **AI Recommendation Pipeline (runtime).** Triggered when an author submits a SoW. The back end fans out parallel calls from `backend/services/ai.py` to the ML service for validation, risk extraction, similar-SoW retrieval, and approval routing, then scores the extracted risks via `backend/services/risk_framework.py` (keyword-driven category classifier → impact + probability → priority band → mitigation playbook). Retrieval is vector ANN over the five Neo4j indexes plus Cypher traversal across typed edges.
 2. **KG Generation Pipeline (offline, manual).** A Container Apps Job runs `uv run python main_new.py ingest && uv run python main_new.py enrich` against the seven Contoso reference SoWs (`Data/sow-md/`), the operational guides (`Data/SOW Guides MD/`), and the JSON rule files (`Data/rules/`). LLM extraction uses Kimi-K2.5 via Foundry. End-to-end runtime is ~42 minutes wall-clock. Triggered manually via `az containerapp job start` after corpus or rule changes.
 
 **Two data stores.** PostgreSQL is the system of record for SoW state, history, workflow data, and attachments metadata. Neo4j is the corpus knowledge graph for retrieval. They are not synced; they answer different questions.
@@ -115,15 +116,25 @@ Capstone-Microsoft-SoW/
 │   ├── routers/              auth, sow, sow_comments, sow_extraction, sow_roles, review,
 │   │                         finalize, rules, workflow, coa, attachments, ai, audit,
 │   │                         users, roles, status
-│   ├── services/             ai.py (parallel ML fan-out), workflow_engine.py
+│   ├── services/             ai.py (parallel ML fan-out + risk scorer), workflow_engine.py,
+│   │                         risk_framework.py (6 categories, 5×5 priority matrix, mitigation
+│   │                         playbooks; source-of-truth for /api/rules/risk-framework),
+│   │                         docx_renderer.py (handoff DOCX generation; mirrors
+│   │                         SoWDocumentReader.js section ordering)
 │   ├── seeds/                microsoft_workflow.py (11-stage default template seed)
-│   ├── utils/                esap.py (deterministic risk-tier rule), db_helpers.py
+│   ├── utils/                esap.py (deterministic ESAP approval-tier rule), db_helpers.py,
+│   │                         document_text.py (PDF/DOCX text extraction), role_labels.py,
+│   │                         section_schemas.py, sow_text.py
 │   ├── validators.py         Pure functions for input validation (Cypher label/rel-type guards)
 │   └── tests/                Backend pytest (unit + smoke; integration marker reserved)
 ├── frontend/                 Next.js 15 UI
 │   ├── pages/                draft/[id], my-reviews, drm-review/[id], internal-review/[id],
-│   │                         ai-review, create-new, workflows/[id]/edit, schema-proposals, ...
-│   ├── components/           workflow/, ai-review/, comments/, sow/, ...
+│   │                         ai-review, business-logic (Risk Assessment + Workflow Templates
+│   │                         tabs), create-new, workflows/[id]/edit, schema-proposals, ...
+│   ├── components/           workflow/, ai-review/ (incl. RiskAssessmentSection.js — interactive
+│   │                         5×5 heatmap, sortable register, mitigation disclosure),
+│   │                         proposals/graph/ (Neo4j-palette force-directed view: CircleNode,
+│   │                         LabeledCurvedEdge, useForceLayout, etc.), comments/, sow/, ...
 │   ├── lib/                  auth.js (authFetch + getGraphToken), msalConfig.js,
 │   │                         draftTabs/{agile,sureStep,waterfall,cloudAdoption}.js,
 │   │                         hooks/, workflowStages.js
@@ -160,9 +171,12 @@ Capstone-Microsoft-SoW/
 │   │   └── assist.py         Cross-section assist entry
 │   └── kg_data_gen/          Synthetic deal CSV generator (NOT synthetic SoWs)
 ├── tests/                    ML module unit tests (pytest from repo root)
-├── Data/                     Rules JSON + reference SoWs
+├── Data/                     Rules JSON, reference SoWs, risk-framework spec
 │   ├── sow-md/               Seven Contoso reference SoWs (contoso-*.md)
 │   ├── SOW Guides MD/        Operational guides for KG ingestion
+│   ├── RISK_ASSESSMENT_AND_MITIGATION_FRAMEWORK.md  Source-of-truth spec mirrored in
+│   │                         backend/services/risk_framework.py (§2 categories, §4 matrix,
+│   │                         §5 playbooks)
 │   └── rules/
 │       ├── compliance/       banned-phrases.json, required-elements.json
 │       ├── methodology/      methodology-alignment.json
@@ -495,7 +509,7 @@ The following are intentional or known-limitation states at handoff. Each has ra
 
 ## 14. API surface
 
-The backend's 16 routers and the ML service's 6 deal-context routes plus its native `/context`, `/assist`, `/sows/*`, `/approval`, `/schema/proposals*` endpoints together expose ~139 declared HTTP routes (116 backend, 23 ML, counted at 2026-05-12). The OpenAPI specs are the source of truth.
+The backend's 16 routers and the ML service's 6 deal-context routes plus its native `/context`, `/assist`, `/sows/*`, `/approval`, `/schema/proposals*` endpoints together expose ~144 declared HTTP routes (118 backend, 26 ML, recounted 2026-05-12 after PR #39 added risk-framework and SoW-ingest endpoints). The OpenAPI specs are the source of truth.
 
 ### Live API docs
 
@@ -515,7 +529,7 @@ The backend's 16 routers and the ML service's 6 deal-context routes plus its nat
 | `sow_roles` | `/api/sow` | Per-SoW role assignments and collaborator management |
 | `review` | `/api/review` | Review submission, role-scoped checklists, stage advancement |
 | `finalize` | `/api/finalize` | DOCX handoff package, post-approval state |
-| `rules` | `/api/rules` | Read-only rule metadata |
+| `rules` | `/api/rules` | Read-only rule metadata; plus `GET /risk-framework` (6 categories + 5×5 matrix + mitigation playbooks) and `GET /risk-summary` (portfolio aggregation across the caller's SoWs, capped at 200 most-recent rows) |
 | `workflow` | `/api/workflow` | Workflow template CRUD, per-SoW workflow snapshotting, transitions |
 | `coa` | `/api/coa` | Conditions of Approval lifecycle |
 | `attachments` | `/api/attachments` | Attachment upload, listing, retrieval, stage-typed binding |
@@ -533,7 +547,8 @@ The backend's 16 routers and the ML service's 6 deal-context routes plus its nat
 | `POST /assist` | Retrieval + Foundry LLM generation |
 | `POST /assist/checklist` | Per-checklist-item assist |
 | `POST /extract/sow-fields` | LLM-driven SoW field extraction |
-| `GET /sows`, `GET /sows/{id}/{validate,risks,similar}` | SoW-level queries against the KG |
+| `GET /sows`, `GET /sows/{id}/{validate,risks,similar}` | SoW-level queries against the KG; `/risks` now returns `category_breakdown` and `overall_risk_score` for client-side aggregation (PR #39) |
+| `POST /sows/ingest`, `POST /sows/{id}/reingest`, `DELETE /sows/{id}` | SoW ingest, reingest, and delete via the runtime API (added in PR #39 for the graph-view refresh) |
 | `GET /approval` | Engagement-tier routing from `EsapLevel`/`ApprovalStage` nodes |
 | `GET /schema/proposals`, `POST /schema/proposals/{id}/{approve,reject}`, `POST /schema/proposals/bulk-review` | Schema-proposal lifecycle |
 | `GET /api/deals/{summary,{id},{id}/similar,{id}/risk-profile,compliance/patterns}`, `POST /api/deals/link` | Deal-context analytics |
@@ -552,7 +567,7 @@ uv run pytest -m "not integration" -v
 uv run pytest tests/unit/ -v
 ```
 
-Current baseline (re-run 2026-05-12): **192 backend unit tests pass, 2 skipped, 6 failed** + **131 ML unit tests pass**. The six backend failures are pre-existing and unrelated to feature code:
+Current baseline (re-run 2026-05-12 after PR #39): **301 backend unit tests pass, 2 skipped, 6 failed** + **131 ML unit tests pass**. PR #39 added ~50 risk-scorer tests (`tests/unit/test_risk_scorer.py`) and ~59 DOCX-renderer tests (`tests/unit/test_docx_renderer.py`) to the backend baseline. The six backend failures are pre-existing and unrelated to feature code:
 
 - `tests/unit/test_document_text.py::TestExtractTextPdf::test_joins_page_text` — `pypdf` missing in the dev venv
 - `tests/test_api.py::TestUpdateSowStatus::test_valid_status` and `::test_invalid_status_returns_400` — async-mock incompatibility with the asyncpg connection-acquire flow
@@ -584,7 +599,7 @@ End-to-end functional coverage is demonstrated through internal walkthroughs in 
 - PRs trigger CI (`CICD_Workflow.yml`). Merge only after green.
 - Pre-commit hooks (`ruff`, `ruff-format`, `prettier`, trailing whitespace, JSON/YAML checks) run on every commit. Re-stage auto-fixed files and commit again. **Do not use `--no-verify`.**
 - Commit messages: imperative subject + a body explaining why. No `Co-Authored-By: Claude` trailers.
-- Recent merged PRs at handoff: #33 (eval system), #34 (Deal context data layer), #35 (Entra ID picker), #36 (group picker hotfix + sync disable), #37 (schema-evolution promotion bug fixes), #38 (deal-context wiring).
+- Recent merged PRs at handoff: #33 (eval system), #34 (Deal context data layer), #35 (Entra ID picker), #36 (group picker hotfix + sync disable), #37 (schema-evolution promotion bug fixes), #38 (deal-context wiring), #39 (Risk-assessment framework + DOCX renderer extraction + proposals graph view refresh).
 
 ## 18. Troubleshooting
 
@@ -613,7 +628,7 @@ End-to-end functional coverage is demonstrated through internal walkthroughs in 
 - **Sprint 4 (Mar 31 – Apr 14):** Workflow flexibility, KG-LLM integration, RAG API
 - **Sprint 5 (Apr 14 – Apr 21):** Async ingestion productionization, AI service prep
 - **Sprint 6 (Apr 21 – Apr 30):** Frontend AI integration, schema-proposal dashboard, comment threads, suggestion edits, roles + permissions, Microsoft default workflow template, COC-118 managed identity migration to Azure Container Apps
-- **Demo prep (May 1 – May 13):** Soak, schema-evolution and deal-context PR landings (#33-#38), Entra group picker hotfix, documentation pass
+- **Demo prep (May 1 – May 13):** Soak, schema-evolution and deal-context PR landings (#33-#38), risk-assessment framework + DOCX renderer extraction + proposals graph refresh (#39), Entra group picker hotfix, documentation pass
 - **Final Demo:** May 14, 2026, 4:30 PM – 6:30 PM
 - **Handoff:** After demo, to Microsoft Consulting
 
