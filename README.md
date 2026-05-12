@@ -1,6 +1,6 @@
 # Cocoon — AI-Enabled SoW Authoring Platform for Microsoft Consulting Services
 
-Statement of Work authoring and review platform with graph-augmented retrieval, role-based review routing, and audit-grade workflow templating. Built as a Baylor capstone project for Microsoft Consulting Services, handed off to Microsoft Consulting after the May 14 2026 demo.
+Statement of Work authoring and review platform with graph-augmented retrieval, role-based review routing, and audit-grade workflow templating. Built as a Baylor capstone project for Microsoft Consulting Services, handed off to Microsoft Consulting on May 12 2026 (3–4 PM), the day before the May 13 2026 final demo.
 
 This README is the handoff document. It assumes the reader is taking over a live deployment they did not write. Sections are ordered so the receiver can clone the repo, get it running, understand what is complete vs incomplete, deploy to Azure, and operate it.
 
@@ -649,8 +649,8 @@ End-to-end functional coverage is demonstrated through internal walkthroughs in 
 - **Sprint 5 (Apr 14 – Apr 21):** Async ingestion productionization, AI service prep
 - **Sprint 6 (Apr 21 – Apr 30):** Frontend AI integration, schema-proposal dashboard, comment threads, suggestion edits, roles + permissions, Microsoft default workflow template, COC-118 managed identity migration to Azure Container Apps
 - **Demo prep (May 1 – May 13):** Soak, schema-evolution and deal-context PR landings (#33-#38), risk-assessment framework + DOCX renderer extraction + proposals graph refresh (#39), Entra group picker hotfix, documentation pass
-- **Final Demo:** May 14, 2026, 4:30 PM – 6:30 PM
-- **Handoff:** After demo, to Microsoft Consulting
+- **Handoff:** May 12, 2026, 3–4 PM, to Microsoft Consulting
+- **Final Demo:** May 13, 2026, 4:30 PM – 6:30 PM
 
 ## 20. Contact and handoff
 
