@@ -1786,15 +1786,30 @@ async def return_to_draft(sow_id: int, current_user: CurrentUser) -> SoWResponse
 
         esap = row["esap_level"] or "type-3"
 
-        from services.workflow_engine import execute_transition, resolve_transition
+        from services.workflow_engine import (
+            execute_transition,
+            get_valid_send_back_targets,
+            resolve_transition,
+        )
 
+        # Preferred path: an explicit on_send_back transition from ai_review.
+        # Older SoWs (and any workflow template the user customised) may not
+        # have that edge baked into their workflow_data snapshot, so fall back
+        # to ``get_valid_send_back_targets`` which always yields ``draft`` as
+        # a safety target. Without this fallback the endpoint returned 409
+        # silently from the user's perspective and the SoW stayed stuck in
+        # ai_review.
         target = await resolve_transition(conn, sow_id, "ai_review", "on_send_back")
+        if not target:
+            candidates = await get_valid_send_back_targets(conn, sow_id, "ai_review")
+            target = next((t for t in candidates if t["stage_key"] == "draft"), None)
+            target = target or (candidates[0] if candidates else None)
         if not target:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "Workflow has no send-back transition from 'ai_review'. "
-                    "Edit the workflow to add an on_send_back edge before returning."
+                    "Workflow has no send-back target reachable from 'ai_review'. "
+                    "Edit the workflow to add an on_send_back edge or a draft stage."
                 ),
             )
 

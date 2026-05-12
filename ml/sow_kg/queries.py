@@ -186,7 +186,7 @@ def get_risk_summary(driver: Driver, sow_id: str) -> list[dict]:
                    r.probability    AS probability,
                    r.impact         AS impact,
                    r.category       AS category,
-                   r.risk_id        AS risk_id
+                   r.id             AS risk_id
             ORDER BY
               CASE r.severity
                 WHEN 'critical' THEN 1 WHEN 'high'   THEN 2

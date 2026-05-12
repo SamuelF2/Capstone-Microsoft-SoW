@@ -28,6 +28,7 @@ from models import (
     TriggeredRisk,
     ViolationResult,
 )
+from utils.sow_text import flatten_sow_content_markdown
 
 from services.risk_framework import PRIORITY_BANDS, RISK_CATEGORIES
 
@@ -171,6 +172,7 @@ async def sync_sow_to_kg(conn, sow_row: dict) -> str | None:
         "customer_name": sow_row.get("customer_name", ""),
         "deal_value": float(sow_row.get("deal_value") or 0),
         "content": content,
+        "content_markdown": flatten_sow_content_markdown(content),
     }
 
     if existing_kg_id:
