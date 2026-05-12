@@ -1,4 +1,33 @@
-@cli.command("ingest-deals")
+"""
+Deal-context CLI commands.
+
+Each command is a standalone `click.Command` so main.py can register them on
+the top-level `cli` group without circular imports. The original file used
+bare `@cli.command(...)` decorators with no module-level imports — that
+required the file to be exec'd inside a scope that already had `cli`,
+`click`, `console`, `DATA_DIR`, `get_driver`, `Path`, `Table`, `Panel`
+bound, which never happened. Switched to `@click.command(...)` plus
+explicit imports here so the commands are importable and registrable.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import click
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from sow_kg.db import get_driver
+
+console = Console()
+
+# Repo root is two levels above this file (ml/sow_kg/deal_cli.py).
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "Data"
+
+
+@click.command("ingest-deals")
 @click.option("--data-dir", default=str(DATA_DIR), show_default=True)
 def ingest_deals(data_dir: str):
     """Ingest synthetic deal CSV data into Neo4j as DealContext nodes."""
@@ -9,7 +38,7 @@ def ingest_deals(data_dir: str):
     driver.close()
 
 
-@cli.command("deals-summary")
+@click.command("deals-summary")
 def deals_summary():
     """Print aggregate deal analytics across all DealContext nodes."""
     from sow_kg.deal_queries import get_deals_summary
@@ -69,7 +98,7 @@ def deals_summary():
     driver.close()
 
 
-@cli.command("deal-risk")
+@click.command("deal-risk")
 @click.option("--project-id", required=True)
 def deal_risk(project_id: str):
     """Show risk profile for a deal — banned phrases, missing sections, status history, risk score."""
@@ -127,7 +156,7 @@ def deal_risk(project_id: str):
     driver.close()
 
 
-@cli.command("link-deal")
+@click.command("link-deal")
 @click.option("--sow-id", required=True)
 @click.option("--project-id", required=True)
 def link_deal(sow_id: str, project_id: str):
@@ -138,3 +167,7 @@ def link_deal(sow_id: str, project_id: str):
     link_sow_to_deal_context(driver, sow_id, project_id)
     console.print(f"[green]Linked[/] [cyan]{sow_id}[/] → [cyan]{project_id}[/]")
     driver.close()
+
+
+# Commands the host CLI in ml/main.py adds to its top-level group.
+DEAL_COMMANDS = [ingest_deals, deals_summary, deal_risk, link_deal]

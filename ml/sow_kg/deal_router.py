@@ -33,9 +33,11 @@ def deals_summary():
         from sow_kg.deal_queries import get_deals_summary
 
         return get_deals_summary(_driver())
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("deals summary error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{project_id}")
@@ -52,7 +54,7 @@ def get_deal(project_id: str):
         raise
     except Exception as e:
         logger.exception("get deal error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{project_id}/similar")
@@ -65,9 +67,11 @@ def get_similar(
         from sow_kg.deal_queries import get_similar_deals
 
         return get_similar_deals(_driver(), project_id, limit=limit)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("similar deals error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/{project_id}/risk-profile")
@@ -80,9 +84,11 @@ def get_risk_profile(project_id: str):
         from sow_kg.deal_queries import get_deal_risk_profile
 
         return get_deal_risk_profile(_driver(), project_id)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("risk profile error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/compliance/patterns")
@@ -98,9 +104,11 @@ def compliance_patterns(
         from sow_kg.deal_queries import get_compliance_patterns
 
         return get_compliance_patterns(_driver(), industry=industry)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("compliance patterns error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/link")
@@ -115,6 +123,8 @@ def link_sow_to_deal(req: LinkRequest):
 
         link_sow_to_deal_context(_driver(), req.sow_id, req.project_id)
         return {"linked": True, "sow_id": req.sow_id, "project_id": req.project_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("link sow error")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

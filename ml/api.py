@@ -62,6 +62,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount the deal-context router. Defined in sow_kg/deal_router.py with
+# prefix /api/deals; until this include landed the six deal endpoints
+# were unreachable.
+from sow_kg.deal_router import router as deal_router  # noqa: E402
+
+app.include_router(deal_router)
+
 
 class AssistRequest(BaseModel):
     query: str
