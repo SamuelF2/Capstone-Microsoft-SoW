@@ -367,6 +367,26 @@ The ML Container App and the Container Apps Job each carry a system-assigned man
 
 To grant a user access to call Foundry from their local machine: assign them the `Azure AI Developer` role on the `Foundry-SOW` resource, then `az login`. The ML service's `DefaultAzureCredential` picks up the Azure CLI token chain automatically.
 
+### Secure Future Initiative (SFI) readiness
+
+Microsoft's Secure Future Initiative requires internal services to eliminate shared secrets in favour of workload identity, enforce phishing-resistant auth, and pin token issuers. Cocoon was partway through that migration when the demo deadline forced a triage: the Foundry path is compliant, the rest is not. The next owner inherits this as the highest-priority security debt for the platform.
+
+**Compliant today**
+
+- **ML service → Azure AI Foundry** and **Ingestion Job → Foundry**: system-assigned managed identity with the cross-subscription `Azure AI Developer` role grant via `infra/modules/foundry-rbac.bicep`. No API key in transit or at rest.
+
+**Not yet compliant**
+
+| Surface | Current state (verified 2026-05-12) | Why it blocks SFI | Migration path |
+|---------|--------------------------------------|-------------------|----------------|
+| Backend ↔ PostgreSQL | Shared password from `POSTGRES_PASSWORD` env var; container Postgres in the demo, and the alternate `infra/modules/postgresql-flexible.bicep` module still uses `administratorLoginPassword` | Static secret with no rotation, no audit trail, no per-user identity | Re-deploy via `postgresql-flexible.bicep` on a non-student subscription, then extend that module to enable Entra ID auth (`authConfig.activeDirectoryAuth = Enabled`); update `backend/database.py` to acquire access tokens via `DefaultAzureCredential` (asyncpg supports a token-as-password handshake against Flexible Server). Backend already reads `DATABASE_URL` so the connection-string format is the only public contract change. |
+| Backend / ML ↔ Neo4j | Shared password from `NEO4J_PASSWORD` env var on Neo4j 5 **Community** | Community edition does not support OIDC bolt auth; only basic and Kerberos | Largest open work item. Two viable paths: (a) migrate to Neo4j **AuraDB**, which supports OIDC bolt against Entra; (b) front the self-hosted instance with an auth-aware proxy that exchanges Entra tokens for short-lived bolt creds. Both require code changes in `ml/sow_kg/db.py` and `backend/main.py` Neo4j-driver init. |
+| Container Apps → ACR | `adminUserEnabled: true` in `infra/modules/container-registry.bicep:22`; the password is injected as a `registry-password` secret reference into every Container App and the Ingestion Job (see `infra/modules/ingestion-job.bicep:97-100`) | The admin user is a long-lived super-credential and a username/password pull is not workload-identity auth | Disable ACR admin user; assign each Container App's and the Ingestion Job's system MI the `AcrPull` role on the registry; remove the `registry-password` secret refs and the `registries[*].username/passwordSecretRef` blocks from `infra/modules/*.bicep`. Container Apps will then pull with the MI automatically. |
+| Backend JWT validation | `verify_iss: False` at `backend/auth.py:122`, commented `"/common tokens have varying issuers"` | Backend accepts tokens from any Entra tenant; an attacker-controlled tenant could mint a token that the backend trusts | Commit to single-tenant or allow-listed multi-tenant operation, then flip `verify_iss` to `True` and pass `issuer=` (string or list) so the JWT library pins the allowed tenant issuer(s). Same audit-pinning pattern as the `verify_aud` line directly above it. |
+| Secrets at rest in env | `POSTGRES_PASSWORD` and `NEO4J_PASSWORD` flow as plain `azd env set --secret` values that land in the Container App's environment block | Plain-text secret material in env, no rotation hook, no Key Vault audit trail | After the Postgres and Neo4j migrations above both env vars disappear. Until then, route them through Key Vault references — `Microsoft.App/containerApps` supports `secrets[*].keyVaultUrl` natively — instead of inlining the value in the deployment parameters. |
+
+A full SFI gap audit was attempted as part of COC-118 (Sprint 6) but the audit document was never committed to the repo. The table above is reconstructed from `infra/modules/*`, `backend/auth.py`, and `backend/config.py`; treat it as the working source of truth until a fresh audit replaces it.
+
 ## 11. Production deployment
 
 ### One-shot deployment (clean slate)
