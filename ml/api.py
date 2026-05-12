@@ -434,6 +434,115 @@ def list_sows():
     return rows
 
 
+class SowIngestRequest(BaseModel):
+    """Payload posted by the backend's ``sync_sow_to_kg`` for a user-authored SoW.
+
+    ``content_markdown`` is the section-headed flattening the backend produces
+    via :func:`backend.utils.sow_text.flatten_sow_content_markdown`. The raw
+    ``content`` dict is accepted for forward compatibility (e.g. structured
+    extractors that prefer the JSONB shape) but is not used today.
+    """
+
+    sow_id: str
+    title: str = ""
+    methodology: str = ""
+    customer_name: str | None = None
+    deal_value: float | None = None
+    content: dict | None = None
+    content_markdown: str = ""
+
+
+def _load_banned_phrases() -> list[dict]:
+    """Pull banned phrases off the KG; return empty list when Neo4j is empty.
+
+    Live ingest still produces a populated risks list without banned phrases
+    — only the *triggered risks* panel depends on phrase-section links.
+    """
+    try:
+        from sow_kg.ingest import get_banned_phrases
+
+        return get_banned_phrases(_driver) or []
+    except Exception:
+        return []
+
+
+def _ingest_sow_request(req: SowIngestRequest, *, replace_children: bool) -> dict:
+    from sow_kg.ingest_markdown import ingest_sow_payload
+
+    if not req.content_markdown.strip():
+        raise HTTPException(status_code=400, detail="content_markdown must not be empty")
+    return ingest_sow_payload(
+        _driver,
+        sow_id=req.sow_id,
+        content_markdown=req.content_markdown,
+        title=req.title,
+        methodology=req.methodology,
+        customer_name=req.customer_name,
+        deal_value=req.deal_value,
+        banned_phrases=_load_banned_phrases(),
+        source="live-app",
+        replace_children=replace_children,
+    )
+
+
+@app.post("/sows/ingest")
+def post_sow_ingest(req: SowIngestRequest):
+    """Ingest a user-authored SoW into the KG so /risks /validate /similar work.
+
+    Idempotent: re-posting with the same ``sow_id`` replaces the per-SoW
+    sections, risks, and deliverables. Called by the backend's
+    ``sync_sow_to_kg`` whenever a SoW is analysed and has no ``kg_node_id``
+    yet (or its content hash changed).
+    """
+    try:
+        return _ingest_sow_request(req, replace_children=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("sow ingest error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/sows/{sow_id}/reingest")
+def post_sow_reingest(sow_id: str, req: SowIngestRequest):
+    """Replace an already-ingested SoW's contents. ``sow_id`` in path and body must match."""
+    if req.sow_id != sow_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"sow_id mismatch: path={sow_id} body={req.sow_id}",
+        )
+    try:
+        return _ingest_sow_request(req, replace_children=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("sow reingest error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.delete("/sows/{sow_id}")
+def delete_sow(sow_id: str):
+    """Remove a SOW and its per-SoW children from the KG. Best-effort.
+
+    Used by the backend's ``delete_sow_from_kg`` when a SoW is deleted in the
+    app. Shared nodes (BannedPhrase, ClauseType, Methodology) are untouched.
+    """
+    try:
+        with _driver.session() as session:
+            session.run(
+                """
+                MATCH (s:SOW {id: $sow_id})
+                OPTIONAL MATCH (s)-[:HAS_SECTION|HAS_RISK|HAS_DELIVERABLE]->(n)
+                DETACH DELETE s, n
+            """,
+                sow_id=sow_id,
+            )
+        return {"deleted": True, "sow_id": sow_id}
+    except Exception as e:
+        logger.exception("sow delete error")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/sows/{sow_id}/validate")
 def validate_sow(sow_id: str):
     """Run rule-based validation against a SOW. Returns structured findings."""
@@ -447,13 +556,32 @@ def validate_sow(sow_id: str):
 
 @app.get("/sows/{sow_id}/risks")
 def get_risks(sow_id: str):
-    """Return risk register and rule-triggered risks for a SOW."""
+    """Return risk register, rule-triggered risks, and lightweight aggregates.
+
+    The category breakdown and overall_risk_score are convenience fields for
+    third-party consumers; the backend re-computes authoritative scores from
+    the per-risk fields.
+    """
     from sow_kg.queries import get_risk_summary, get_rule_triggered_risks
 
     try:
+        risks = get_risk_summary(_driver, sow_id)
+        triggered = get_rule_triggered_risks(_driver, sow_id)
+
+        category_breakdown: dict[str, int] = {}
+        max_score = 0
+        for r in risks:
+            cat = r.get("category") or "Uncategorised"
+            category_breakdown[cat] = category_breakdown.get(cat, 0) + 1
+            p, i = r.get("probability"), r.get("impact")
+            if p and i:
+                max_score = max(max_score, p * i)
+
         return {
-            "risks": get_risk_summary(_driver, sow_id),
-            "triggered": get_rule_triggered_risks(_driver, sow_id),
+            "risks": risks,
+            "triggered": triggered,
+            "category_breakdown": category_breakdown,
+            "overall_risk_score": max_score,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

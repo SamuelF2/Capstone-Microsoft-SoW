@@ -10,7 +10,7 @@ import ExtractionPreviewModal from '../components/ExtractionPreviewModal';
 import SkipAIReviewModal from '../components/SkipAIReviewModal';
 import {
   ViolationsSection,
-  RisksSection,
+  RiskAssessmentSection,
   ApprovalSection,
   ChecklistSection,
   SuggestionsSection,
@@ -24,6 +24,15 @@ function mapAnalysisToRecommendations(data) {
   return {
     violations: data.violations || [],
     risks: data.risks || [],
+    risk_assessment: data.risk_assessment || {
+      risks: data.risks || [],
+      triggered: [],
+      overall_risk_score: 0,
+      risk_band: 'Very Low',
+      category_breakdown: {},
+      band_breakdown: {},
+      has_mitigation_coverage: 0,
+    },
     approval: {
       level: data.approval?.level || 'Yellow',
       esapType: data.approval?.esap_type || 'Type-2',
@@ -821,7 +830,7 @@ export default function AIReview() {
               <ApprovalSection approval={recommendations.approval} />
               <ViolationsSection violations={recommendations.violations} />
               <SuggestionsSection suggestions={recommendations.suggestions} />
-              <RisksSection risks={recommendations.risks} />
+              <RiskAssessmentSection assessment={recommendations.risk_assessment} />
               <ChecklistSection checklist={recommendations.checklist} />
               {similarSows.length > 0 && <SimilarSowsSection similarSows={similarSows} />}
 

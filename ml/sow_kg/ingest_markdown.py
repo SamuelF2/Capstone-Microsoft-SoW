@@ -94,9 +94,17 @@ def _extract_sections(content: str) -> list[dict]:
         ("project assumption", "assumptions"),
         ("scope assumption", "assumptions"),
         ("technical assumption", "assumptions"),
-        # Risks
+        # Risks — bare "risks" matches the live-ingest case where the SoW
+        # section key is `risks` (humanised to "Risks"). The two longer
+        # entries are listed first to handle register-style headings whose
+        # word stem is singular ("Risk Register", "Risk and Issue Log").
+        # We deliberately do NOT match bare "risk" — substring-matching
+        # that single short token over-promotes unrelated headings like
+        # "Risk-Sharing Approach" or "Risk Tolerance Statement" to the
+        # risks section.
         ("risk and issue", "risks"),
         ("risk register", "risks"),
+        ("risks", "risks"),
         # Support / transition
         ("engagement completion", "supportTransitionPlan"),
         ("support transition", "supportTransitionPlan"),
@@ -188,8 +196,11 @@ def _extract_risks(content: str) -> list[dict]:
             return ""
 
         desc = col(["risk", "description", "issue", "concern"])
-        sev = col(["severity", "priority", "impact", "level"])
+        sev = col(["severity", "priority", "level"])
         mit = col(["mitigation", "response", "action", "owner"])
+        prob_cell = col(["probability", "likelihood", "prob"])
+        impact_cell = col(["impact", "consequence"])
+        cat_cell = col(["category", "domain", "type"])
 
         if not desc or desc.lower() in ("risk", "description", "issue", ""):
             continue
@@ -205,14 +216,25 @@ def _extract_risks(content: str) -> list[dict]:
                 sev_norm = level
                 break
 
-        risks.append(
-            {
-                "description": desc,
-                "severity": sev_norm,
-                "mitigation": mit,
-                "has_mitigation": len(mit) > 5,
-            }
-        )
+        def _parse_15(cell: str) -> int | None:
+            m = re.search(r"\b([1-5])\b", cell or "")
+            return int(m.group(1)) if m else None
+
+        risk: dict = {
+            "description": desc,
+            "severity": sev_norm,
+            "mitigation": mit,
+            "has_mitigation": len(mit) > 5,
+        }
+        prob_val = _parse_15(prob_cell)
+        if prob_val is not None:
+            risk["probability"] = prob_val
+        impact_val = _parse_15(impact_cell)
+        if impact_val is not None:
+            risk["impact"] = impact_val
+        if cat_cell:
+            risk["category"] = cat_cell.strip()
+        risks.append(risk)
 
     # Bullet: - **High** - description  or  - Identify – ...
     bullet_sev = re.compile(
@@ -334,12 +356,21 @@ def _extract_deliverables(content: str) -> list[dict]:
 
 
 def _check_banned_phrases(content: str, banned: list[dict]) -> list[str]:
-    """Return list of banned phrases found in content."""
+    """Return list of banned phrases found in content.
+
+    Tolerates malformed rows (missing/null/non-string `phrase`, empty strings)
+    so a single bad BannedPhrase node in Neo4j can't 500 the entire reingest
+    path. The UNIQUE constraint on `:BannedPhrase(phrase)` doesn't enforce
+    NOT NULL, so this can legitimately happen with hand-edited data.
+    """
     found = []
     content_lower = content.lower()
     for bp in banned:
-        if bp["phrase"].lower() in content_lower:
-            found.append(bp["phrase"])
+        phrase = bp.get("phrase") if isinstance(bp, dict) else None
+        if not isinstance(phrase, str) or not phrase:
+            continue
+        if phrase.lower() in content_lower:
+            found.append(phrase)
     return found
 
 
@@ -365,42 +396,78 @@ _KNOWN_GUIDE_FILES = {
 }
 
 
-def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
-    """Parse a SOW markdown file and write all nodes/edges to Neo4j."""
-    content = path.read_text(encoding="utf-8", errors="replace")
-    filename = path.name
-    sow_id = _stable_id(filename, "sow")
+def ingest_sow_payload(
+    driver: Driver,
+    *,
+    sow_id: str,
+    content_markdown: str,
+    title: str = "",
+    methodology: str = "",
+    filename: str = "",
+    customer_name: str | None = None,
+    deal_value: float | None = None,
+    banned_phrases: list[dict] | None = None,
+    source: str = "live-app",
+    replace_children: bool = False,
+) -> dict:
+    """Write a SOW (sections, risks, deliverables) into Neo4j from parsed inputs.
 
-    methodology = _detect_methodology(content)
-    sections = _extract_sections(content)
-    title = filename.replace(".md", "").replace("_", " ")
+    Shared by both the file-based batch path (``ingest_sow_document``) and the
+    live HTTP path (``POST /sows/ingest``). Caller supplies parsed inputs so
+    this function never touches the filesystem.
 
-    # Try to get title from first H1
-    h1 = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-    if h1:
-        title = h1.group(1).strip()
+    ``replace_children=True`` wipes per-SOW Section/Risk/Deliverable nodes
+    before re-creating them — used by the live re-ingest path so a SoW that
+    has had its risks section edited doesn't accumulate stale Risk nodes.
+    Shared nodes (BannedPhrase, ClauseType, Methodology) are never touched.
 
-    console.print(
-        f"  [dim]→ SOW:[/] [yellow]{filename}[/] | methodology=[cyan]{methodology}[/] | sections={len(sections)}"
-    )
+    Returns ``{kg_node_id, sections, risks_count, deliverables_count}``.
+    """
+    banned_phrases = banned_phrases or []
+    methodology = methodology or _detect_methodology(content_markdown) or "unknown"
+    sections = _extract_sections(content_markdown)
+    if not title:
+        h1 = re.search(r"^#\s+(.+)$", content_markdown, re.MULTILINE)
+        title = h1.group(1).strip() if h1 else "Untitled"
+
+    risks_count = 0
+    deliverables_count = 0
 
     with driver.session() as session:
+        if replace_children:
+            # Wipe per-SOW children so re-ingest replaces rather than accumulates.
+            # Section/Risk/Deliverable nodes are scoped to a single SOW via
+            # stable ids; ClauseType/Methodology/BannedPhrase are global and
+            # stay intact.
+            session.run(
+                """
+                MATCH (s:SOW {id: $sow_id})-[:HAS_SECTION|HAS_RISK|HAS_DELIVERABLE]->(n)
+                DETACH DELETE n
+            """,
+                sow_id=sow_id,
+            )
+
         # SOW node
         session.run(
             """
             MERGE (s:SOW {id: $sow_id})
-            SET s.title        = $title,
-                s.filename     = $filename,
-                s.methodology  = $methodology,
-                s.char_count   = $char_count,
-                s.outcome      = null,
-                s.source       = 'markdown-sow'
+            SET s.title         = $title,
+                s.filename      = $filename,
+                s.methodology   = $methodology,
+                s.char_count    = $char_count,
+                s.outcome       = null,
+                s.source        = $source,
+                s.customer_name = $customer_name,
+                s.deal_value    = $deal_value
         """,
             sow_id=sow_id,
             title=title,
             filename=filename,
             methodology=methodology,
-            char_count=len(content),
+            char_count=len(content_markdown),
+            source=source,
+            customer_name=customer_name,
+            deal_value=deal_value,
         )
 
         # Link to Methodology node
@@ -475,6 +542,9 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                             r.severity       = $severity,
                             r.mitigation     = $mitigation,
                             r.has_mitigation = $has_mitigation,
+                            r.probability    = $probability,
+                            r.impact         = $impact,
+                            r.category       = $category,
                             r.confidence     = 1.0
                         WITH r
                         MATCH (s:SOW {id: $sow_id})
@@ -484,9 +554,13 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                         sow_id=sow_id,
                         description=risk["description"][:500],
                         severity=risk["severity"],
-                        mitigation=risk["mitigation"][:500],
+                        mitigation=risk.get("mitigation", "")[:500],
                         has_mitigation=risk["has_mitigation"],
+                        probability=risk.get("probability"),
+                        impact=risk.get("impact"),
+                        category=risk.get("category"),
                     )
+                    risks_count += 1
 
             # Extract deliverables
             if sec["section_type"] == "deliverables":
@@ -511,6 +585,7 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                         ac=deliv["acceptance_criteria"][:500],
                         has_ac=deliv["has_ac"],
                     )
+                    deliverables_count += 1
 
                     # Check acceptance criteria for banned phrases
                     if deliv["has_ac"]:
@@ -525,6 +600,45 @@ def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
                                 d_id=d_id,
                                 phrase=phrase,
                             )
+
+    return {
+        "kg_node_id": sow_id,
+        "sections": len(sections),
+        "risks_count": risks_count,
+        "deliverables_count": deliverables_count,
+    }
+
+
+def ingest_sow_document(driver: Driver, path: Path, banned_phrases: list[dict]):
+    """Parse a SOW markdown file and write all nodes/edges to Neo4j.
+
+    Thin wrapper around :func:`ingest_sow_payload` that reads the file off
+    disk and detects metadata, then delegates the Neo4j writes.
+    """
+    content = path.read_text(encoding="utf-8", errors="replace")
+    filename = path.name
+    sow_id = _stable_id(filename, "sow")
+
+    methodology = _detect_methodology(content)
+    title = filename.replace(".md", "").replace("_", " ")
+    h1 = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+    if h1:
+        title = h1.group(1).strip()
+
+    summary = ingest_sow_payload(
+        driver,
+        sow_id=sow_id,
+        content_markdown=content,
+        title=title,
+        methodology=methodology,
+        filename=filename,
+        banned_phrases=banned_phrases,
+        source="markdown-sow",
+    )
+    console.print(
+        f"  [dim]→ SOW:[/] [yellow]{filename}[/] | "
+        f"methodology=[cyan]{methodology}[/] | sections={summary['sections']}"
+    )
 
 
 def ingest_guide_document(driver: Driver, path: Path):
