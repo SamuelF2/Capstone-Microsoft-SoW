@@ -313,5 +313,15 @@ def search(query: str, index: str, top_k: int):
     driver.close()
 
 
+# Register deal-context CLI commands defined in sow_kg/deal_cli.py. Done at
+# module load so `python main.py --help` lists them alongside the native
+# commands. The file used to bind `@cli.command(...)` against a never-bound
+# `cli` symbol, so the commands were unreachable until this wiring landed.
+from sow_kg.deal_cli import DEAL_COMMANDS  # noqa: E402
+
+for _cmd in DEAL_COMMANDS:
+    cli.add_command(_cmd)
+
+
 if __name__ == "__main__":
     cli()
