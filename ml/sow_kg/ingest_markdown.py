@@ -188,8 +188,11 @@ def _extract_risks(content: str) -> list[dict]:
             return ""
 
         desc = col(["risk", "description", "issue", "concern"])
-        sev = col(["severity", "priority", "impact", "level"])
+        sev = col(["severity", "priority", "level"])
         mit = col(["mitigation", "response", "action", "owner"])
+        prob_cell = col(["probability", "likelihood", "prob"])
+        impact_cell = col(["impact", "consequence"])
+        cat_cell = col(["category", "domain", "type"])
 
         if not desc or desc.lower() in ("risk", "description", "issue", ""):
             continue
@@ -205,14 +208,25 @@ def _extract_risks(content: str) -> list[dict]:
                 sev_norm = level
                 break
 
-        risks.append(
-            {
-                "description": desc,
-                "severity": sev_norm,
-                "mitigation": mit,
-                "has_mitigation": len(mit) > 5,
-            }
-        )
+        def _parse_15(cell: str) -> int | None:
+            m = re.search(r"\b([1-5])\b", cell or "")
+            return int(m.group(1)) if m else None
+
+        risk: dict = {
+            "description": desc,
+            "severity": sev_norm,
+            "mitigation": mit,
+            "has_mitigation": len(mit) > 5,
+        }
+        prob_val = _parse_15(prob_cell)
+        if prob_val is not None:
+            risk["probability"] = prob_val
+        impact_val = _parse_15(impact_cell)
+        if impact_val is not None:
+            risk["impact"] = impact_val
+        if cat_cell:
+            risk["category"] = cat_cell.strip()
+        risks.append(risk)
 
     # Bullet: - **High** - description  or  - Identify – ...
     bullet_sev = re.compile(

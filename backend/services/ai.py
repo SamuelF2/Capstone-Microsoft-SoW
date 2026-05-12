@@ -22,10 +22,14 @@ from models import (
     AIAnalysisResult,
     ApprovalRouting,
     ChecklistSuggestion,
+    RiskAssessmentResult,
     RiskResult,
     SectionSuggestion,
+    TriggeredRisk,
     ViolationResult,
 )
+
+from services.risk_framework import PRIORITY_BANDS, RISK_CATEGORIES
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
 
@@ -293,29 +297,108 @@ def _map_validate_to_suggestions(data: dict) -> list[SectionSuggestion]:
     return suggestions
 
 
+def _classify_category(description: str) -> str:
+    """Keyword-based classifier. First matching category wins; falls back to 'Delivery'
+    (the most common framework domain per §2.2)."""
+    text = (description or "").lower()
+    for cat in RISK_CATEGORIES:
+        if any(kw in text for kw in cat.get("keywords", [])):
+            return cat["id"]
+    return "Delivery"
+
+
+def _severity_to_impact(severity: str) -> int:
+    """Normalize legacy severity to a 1..5 impact level."""
+    return {"critical": 5, "high": 4, "medium": 3, "low": 2}.get((severity or "medium").lower(), 3)
+
+
+def _infer_probability(severity: str, has_mitigation: bool) -> int:
+    """Heuristic mapping used only when ML doesn't supply probability."""
+    sev = (severity or "medium").lower()
+    if sev in ("critical", "high"):
+        return 4 if not has_mitigation else 3
+    if sev == "medium":
+        return 3
+    return 2
+
+
+def _score_to_band(score: int) -> str:
+    """Look up the priority band for a score."""
+    for b in PRIORITY_BANDS:
+        if b["min"] <= score <= b["max"]:
+            return b["id"]
+    return "Very Low"
+
+
 def _map_risks(data: dict) -> list[RiskResult]:
-    """Map ML /risks response to RiskResult list."""
+    """Map ML /risks 'risks' array into scored RiskResult list."""
     risks: list[RiskResult] = []
-
     for r in data.get("risks", []):
+        desc = r.get("description", "")
+        severity = r.get("severity", "medium")
+        has_mit = bool(r.get("has_mitigation") or (r.get("mitigation") or "").strip())
+        probability = int(r.get("probability") or _infer_probability(severity, has_mit))
+        impact = int(r.get("impact") or _severity_to_impact(severity))
+        probability = max(1, min(5, probability))
+        impact = max(1, min(5, impact))
+        priority_score = probability * impact
         risks.append(
             RiskResult(
-                category=r.get("category", "General"),
-                level=SEVERITY_MAP.get(r.get("severity", "medium"), "medium"),
-                description=r.get("description", ""),
+                category=r.get("category") or _classify_category(desc),
+                level=SEVERITY_MAP.get(severity, "medium"),
+                description=desc,
+                probability=probability,
+                impact=impact,
+                priority_score=priority_score,
+                priority_band=_score_to_band(priority_score),
+                mitigation=(r.get("mitigation") or None),
+                has_mitigation=has_mit,
+                risk_id=r.get("risk_id"),
             )
         )
-
-    for t in data.get("triggered", []):
-        risks.append(
-            RiskResult(
-                category="Triggered",
-                level=SEVERITY_MAP.get(t.get("severity", "medium"), "medium"),
-                description=f"{t.get('trigger', '')} — {t.get('reason', '')}",
-            )
-        )
-
     return risks
+
+
+def _map_triggered(data: dict) -> list[TriggeredRisk]:
+    """Map ML /risks 'triggered' array (banned phrase hits) into TriggeredRisk list."""
+    return [
+        TriggeredRisk(
+            section=t.get("section", ""),
+            trigger=t.get("trigger", ""),
+            reason=t.get("reason", ""),
+            severity=SEVERITY_MAP.get(t.get("severity", "medium"), "medium"),
+            suggestion=t.get("suggestion"),
+        )
+        for t in data.get("triggered", [])
+    ]
+
+
+def _assess_risks(data: dict) -> RiskAssessmentResult:
+    """Build the full RiskAssessmentResult from a ML /risks payload."""
+    risks = _map_risks(data)
+    triggered = _map_triggered(data)
+
+    # Framework §6 dashboard treats the top per-risk score as the SoW headline.
+    overall = float(max((r.priority_score for r in risks), default=0))
+    risk_band = _score_to_band(int(overall)) if overall else "Very Low"
+
+    category_breakdown: dict[str, int] = {}
+    band_breakdown: dict[str, int] = {}
+    for r in risks:
+        category_breakdown[r.category] = category_breakdown.get(r.category, 0) + 1
+        band_breakdown[r.priority_band] = band_breakdown.get(r.priority_band, 0) + 1
+
+    coverage = sum(1 for r in risks if r.has_mitigation) / len(risks) if risks else 0.0
+
+    return RiskAssessmentResult(
+        risks=risks,
+        triggered=triggered,
+        overall_risk_score=overall,
+        risk_band=risk_band,
+        category_breakdown=category_breakdown,
+        band_breakdown=band_breakdown,
+        has_mitigation_coverage=coverage,
+    )
 
 
 def _map_approval(data: dict) -> ApprovalRouting:
@@ -431,14 +514,14 @@ async def analyze_sow(conn, sow_row: dict) -> AIAnalysisResult:
     # 3. Map responses
     violations: list[ViolationResult] = []
     suggestions: list[SectionSuggestion] = []
-    risks: list[RiskResult] = []
+    risk_assessment = RiskAssessmentResult()
 
     if results.get("validate"):
         violations = _map_validate_to_violations(results["validate"])
         suggestions = _map_validate_to_suggestions(results["validate"])
 
     if results.get("risks"):
-        risks = _map_risks(results["risks"])
+        risk_assessment = _assess_risks(results["risks"])
 
     # Approval
     if results.get("approval"):
@@ -481,7 +564,8 @@ async def analyze_sow(conn, sow_row: dict) -> AIAnalysisResult:
 
     return AIAnalysisResult(
         violations=violations,
-        risks=risks,
+        risk_assessment=risk_assessment,
+        risks=risk_assessment.risks,
         approval=approval,
         checklist=checklist,
         suggestions=suggestions,
@@ -551,6 +635,37 @@ def _load_static_checklist(methodology: str | None) -> list[ChecklistSuggestion]
 # ── Cached analysis ──────────────────────────────────────────────────────────
 
 
+def _deserialize_risks(raw) -> RiskAssessmentResult:
+    """Decode the ai_suggestion.risks JSONB blob.
+
+    Tolerates two shapes:
+      • legacy: bare list of RiskResult dicts (pre-framework rows)
+      • current: full RiskAssessmentResult dict
+
+    Legacy rows are upgraded on-the-fly by rescoring through _assess_risks so the
+    rest of the app sees a uniform shape.
+    """
+    if raw is None:
+        return RiskAssessmentResult()
+    if isinstance(raw, list):
+        # Legacy: list of {category, level, description} dicts. Re-score from scratch.
+        legacy_payload = {
+            "risks": [
+                {
+                    "category": r.get("category"),
+                    "description": r.get("description", ""),
+                    "severity": r.get("level", "medium"),
+                }
+                for r in raw
+            ],
+            "triggered": [],
+        }
+        return _assess_risks(legacy_payload)
+    if isinstance(raw, dict):
+        return RiskAssessmentResult(**raw)
+    return RiskAssessmentResult()
+
+
 async def get_cached_analysis(conn, sow_id: int) -> AIAnalysisResult | None:
     """Read the latest ai_suggestion row for this SoW without re-running."""
     row = await conn.fetchrow(
@@ -566,20 +681,23 @@ async def get_cached_analysis(conn, sow_id: int) -> AIAnalysisResult | None:
         return None
 
     rec = row["validation_recommendation"]
-    risks = row["risks"]
+    risks_raw = row["risks"]
     if isinstance(rec, str):
         rec = json.loads(rec)
-    if isinstance(risks, str):
-        risks = json.loads(risks)
+    if isinstance(risks_raw, str):
+        risks_raw = json.loads(risks_raw)
     rec = rec or {}
 
     gen_meta = row.get("generation_meta")
     if isinstance(gen_meta, str):
         gen_meta = json.loads(gen_meta)
 
+    risk_assessment = _deserialize_risks(risks_raw)
+
     return AIAnalysisResult(
         violations=rec.get("violations", []),
-        risks=risks or [],
+        risk_assessment=risk_assessment,
+        risks=risk_assessment.risks,
         approval=rec.get("approval")
         or {"level": "Yellow", "esap_type": "Type-2", "reason": "", "chain": []},
         checklist=rec.get("checklist", []),

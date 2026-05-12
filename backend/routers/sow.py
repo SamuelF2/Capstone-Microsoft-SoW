@@ -1937,7 +1937,7 @@ async def ai_analyze(sow_id: int, current_user: CurrentUser) -> AIAnalysisResult
             """,
             result.approval.level,
             json.dumps(rec_dump),
-            json.dumps([r.model_dump() for r in result.risks]),
+            json.dumps(result.risk_assessment.model_dump()),
             result.generated_at,
             json.dumps(result.generation_meta) if result.generation_meta else None,
         )

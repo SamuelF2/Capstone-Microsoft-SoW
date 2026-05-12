@@ -447,13 +447,32 @@ def validate_sow(sow_id: str):
 
 @app.get("/sows/{sow_id}/risks")
 def get_risks(sow_id: str):
-    """Return risk register and rule-triggered risks for a SOW."""
+    """Return risk register, rule-triggered risks, and lightweight aggregates.
+
+    The category breakdown and overall_risk_score are convenience fields for
+    third-party consumers; the backend re-computes authoritative scores from
+    the per-risk fields.
+    """
     from sow_kg.queries import get_risk_summary, get_rule_triggered_risks
 
     try:
+        risks = get_risk_summary(_driver, sow_id)
+        triggered = get_rule_triggered_risks(_driver, sow_id)
+
+        category_breakdown: dict[str, int] = {}
+        max_score = 0
+        for r in risks:
+            cat = r.get("category") or "Uncategorised"
+            category_breakdown[cat] = category_breakdown.get(cat, 0) + 1
+            p, i = r.get("probability"), r.get("impact")
+            if p and i:
+                max_score = max(max_score, p * i)
+
         return {
-            "risks": get_risk_summary(_driver, sow_id),
-            "triggered": get_rule_triggered_risks(_driver, sow_id),
+            "risks": risks,
+            "triggered": triggered,
+            "category_breakdown": category_breakdown,
+            "overall_risk_score": max_score,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
