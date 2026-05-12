@@ -30,7 +30,7 @@ This README is the handoff document. It assumes the reader is taking over a live
 - **Application Insights, alerting, and SLO tracking are not wired.** Container Apps logs flow to Log Analytics (30-day retention); operator action is manual.
 - **The KG generation evaluation loop is manual.** No automated retrieval relevance harness.
 
-**Demo readiness.** All five recent PRs landed on `main` (#33, #34, #35, #36, #37, #38). 192 backend unit tests pass plus 131 ML unit tests pass; six pre-existing failures predate this work and are unrelated to feature code (`pypdf` missing in env, etc.).
+**Demo readiness.** All six recent PRs landed on `main` (#33, #34, #35, #36, #37, #38). 192 backend unit tests pass plus 131 ML unit tests pass; six pre-existing failures predate this work and are unrelated to feature code (`pypdf` missing in env, etc.).
 
 ## 2. Team and handoff context
 
@@ -48,7 +48,7 @@ Industry mentor: Shyam, Microsoft AI Architect.
 
 Backlog: [Jira](https://samueltfries.atlassian.net/jira/software/projects/SCRUM/summary).
 
-Operational secrets, Azure subscription credentials, and admin contacts are not stored in the repo. Request from Zhan (infrastructure) or Samuel (product owner). The Microsoft Consulting handoff packet is delivered separately under `docs/handoff/` on the demo day.
+Operational secrets, Azure subscription credentials, and admin contacts are not stored in the repo. Request from Zhan (infrastructure) or Samuel (product owner). The Microsoft Consulting handoff packet is delivered separately on demo day (not checked into the repo).
 
 ## 3. Architecture overview
 
@@ -137,8 +137,11 @@ Capstone-Microsoft-SoW/
 │   ├── llm_gen.py            LLM generation entry; intents, prompts, context serialization
 │   ├── sow_kg/               KG modules:
 │   │   ├── db.py             Neo4j schema bootstrap (constraints + vector indexes)
-│   │   ├── ingest.py         SoW ingestion path (markdown + JSON rule files)
-│   │   ├── ingest_async.py   Async parallel ingestion
+│   │   ├── ingest_markdown.py  Markdown SoW + guide ingestion (SOW/Section/Deliverable/Risk + ClauseType/Rule/Term nodes); used by main.py
+│   │   ├── ingest_json.py    Rule-file ingestion (banned-phrases, ESAP workflow, review-checklists, methodology-alignment, required-elements); used by main.py
+│   │   ├── ingest_csv.py     Synthetic-deal CSV ingestion (deal_overview, closeout, budget, staffing, status_report)
+│   │   ├── ingest_async.py   Async parallel ingestion path used by main_new.py for the Container Apps Job
+│   │   ├── ingest.py         Legacy synchronous helpers (production paths are ingest_async.py and the markdown/JSON modules above)
 │   │   ├── ingest_deal_data.py  CSV → DealContext nodes (deal_overview, status_report, etc.)
 │   │   ├── extract.py        Markdown extraction (H1-H4 + pipe tables)
 │   │   ├── enrich.py         Sentence-transformer embedding + vector index population
@@ -152,6 +155,8 @@ Capstone-Microsoft-SoW/
 │   │   ├── deal_router.py    /api/deals/* FastAPI router (mounted by api.py)
 │   │   ├── deal_queries.py   Deal analytics queries (summary, similar, risk profile)
 │   │   ├── deal_cli.py       Click commands: ingest-deals, deals-summary, deal-risk, link-deal
+│   │   ├── assist_router.py  FastAPI /api/assist router — defined but not currently mounted in api.py
+│   │   ├── assist_cli.py     Click commands for cross-section assist queries
 │   │   └── assist.py         Cross-section assist entry
 │   └── kg_data_gen/          Synthetic deal CSV generator (NOT synthetic SoWs)
 ├── tests/                    ML module unit tests (pytest from repo root)
@@ -170,8 +175,8 @@ Capstone-Microsoft-SoW/
 │                             ingestion-job, foundry-rbac, neo4j-container,
 │                             postgres-container, postgresql-flexible
 ├── infrastructure/postgres/init/   Two-table SQL init (backstop; real schema in lifespan)
-├── docs/                     audits/ (auth audit, COC-118 deploy verification, Foundry
-│                             call-site traces), architecture notes
+├── docs/                     README.md (index for handed-off design docs);
+│                             superpowers/plans/ (in-flight design + plan notes)
 ├── .github/workflows/        CICD_Workflow.yml, azure-deploy.yml, azure-teardown.yml
 ├── docker-compose.yml        Local stack: backend, frontend, neo4j, postgres
 ├── azure.yaml                azd service map
@@ -478,17 +483,19 @@ The following are intentional or known-limitation states at handoff. Each has ra
 |------------|-----------|----------------|
 | Group auto-enrollment disabled (PR #36) | `GroupMember.Read.All` Graph scope requires admin consent that Azure-for-Students cannot grant | Four-step checklist in `backend/routers/sow_roles.py` after the platform moves to a tenant where consent is obtainable |
 | PostgreSQL ephemeral storage | Azure-for-Students restricts Flexible Server | Switch `infra/main.bicep` to `postgresql-flexible.bicep` (already authored) on a non-student subscription. Small code lift; backend already reads `DATABASE_URL` |
-| Shared-secret auth for Postgres, Neo4j, ACR pulls | SFI migration is staged; only ML→Foundry was prioritized for the demo | Workload-identity federated credentials for Postgres + Neo4j + ACR. Permission audit doc in `docs/audits/auth-audit-2026-04-21.md` (if preserved) |
+| Shared-secret auth for Postgres, Neo4j, ACR pulls | SFI migration is staged; only ML→Foundry was prioritized for the demo | Workload-identity federated credentials for Postgres + Neo4j + ACR |
 | `verify_iss` disabled in backend JWT path | `/common` issues per-tenant issuers; demo accepts any tenant | Production must commit to single-tenant or allow-listed multi-tenant and enable issuer validation |
 | Application Insights / alerting / SLO not wired | Out of scope for demo timeline | Wire `applicationinsights-async` SDK in both FastAPI apps; set up Log Analytics alert rules |
 | KG generation evaluation is manual | No labeled ground truth; corpus is small | Build a probe-query harness once a real deal-book corpus is available (project paper §9.3.7) |
 | Engagement-risk tier is a deterministic rule, not learned | No labeled review outcomes to train on | Replace `backend/utils/esap.py` thresholds with a learned classifier once a deal-book corpus exists. Keep the rule as an auditable baseline |
 | Synthetic data generator emits tabular CSV, not synthetic SoWs | Out of scope for capstone; needs Microsoft project history | `ml/kg_data_gen/run.py` produces deal_overview, status_report, etc. for `NUM_PROJECTS` engagements. Real Microsoft project history ingestion is the highest-leverage future-work item (project paper §9.3.6) |
 | `KNOWN_LABELS` allowlist | Cypher injection guard for dynamic labels | Module-level set in `ml/sow_kg/schema_evolution.py:15-42`. Extending the schema means adding a label to the set. Includes the five PR #34 deal-context labels (`DealContext`, `Customer`, `Industry`, `StaffingRole`, `StatusSnapshot`) |
+| `backend/routers/permissions.py` is unmounted | Access-control helper module (`require_review_access`, `require_sow_status`) that lives under `routers/` but is not registered in `main.py` and has no callers. Vestigial from an earlier refactor — the "16 routers" count is unaffected because this file is not a router | Move to `backend/utils/` or delete during the next cleanup pass. Not load-bearing today |
+| `ml/sow_kg/assist_router.py` is unmounted | Defines a `/api/assist` FastAPI router but `ml/api.py` does not include it. Routes are reachable today through `app.post("/assist")` in `ml/api.py` instead | Either mount the router in `api.py` and remove the duplicate handler, or delete `assist_router.py`. Not load-bearing today |
 
 ## 14. API surface
 
-The backend's 16 routers and the ML service's 6 deal-context routes plus its native `/context`, `/assist`, `/sows/*`, `/approval`, `/schema/proposals*` endpoints together expose ~115 declared HTTP routes. The OpenAPI specs are the source of truth.
+The backend's 16 routers and the ML service's 6 deal-context routes plus its native `/context`, `/assist`, `/sows/*`, `/approval`, `/schema/proposals*` endpoints together expose ~139 declared HTTP routes (116 backend, 23 ML, counted at 2026-05-12). The OpenAPI specs are the source of truth.
 
 ### Live API docs
 
@@ -545,7 +552,14 @@ uv run pytest -m "not integration" -v
 uv run pytest tests/unit/ -v
 ```
 
-Current baseline: **192 backend unit tests pass + 131 ML unit tests pass**. Six backend tests fail and are pre-existing (`pypdf` not installed in the venv, async-mock incompat in `TestUpdateSowStatus`, `Header.strip` AttributeError in `TestUserUpsert`). They are unrelated to feature code; the new team can address them at their discretion.
+Current baseline (re-run 2026-05-12): **192 backend unit tests pass, 2 skipped, 6 failed** + **131 ML unit tests pass**. The six backend failures are pre-existing and unrelated to feature code:
+
+- `tests/unit/test_document_text.py::TestExtractTextPdf::test_joins_page_text` — `pypdf` missing in the dev venv
+- `tests/test_api.py::TestUpdateSowStatus::test_valid_status` and `::test_invalid_status_returns_400` — async-mock incompatibility with the asyncpg connection-acquire flow
+- `tests/unit/test_auth.py::TestUserUpsert::test_first_login_creates_user` and `::test_second_login_returns_existing_user` — `Header.strip` AttributeError against the current `Header` API
+- `tests/test_schema_proposals.py::TestRoleOverrideHeader::test_admin_override_swaps_role_to_system_admin` — same header-handling root cause
+
+The new team can address them at their discretion.
 
 CI runs lint, pre-commit hooks, backend pytest, and ML pytest on every push and PR to `main` (`.github/workflows/CICD_Workflow.yml`). The integration marker is reserved for future DB-backed tests; no integration suite exists today.
 
