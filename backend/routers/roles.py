@@ -134,7 +134,7 @@ async def update_role(
         updates["updated_at"] = "NOW()"
         set_parts = []
         params = []
-        for i, (col, val) in enumerate(updates.items()):
+        for col, val in updates.items():
             if val == "NOW()":
                 set_parts.append(f"{col} = NOW()")
             else:

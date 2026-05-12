@@ -1,5 +1,14 @@
 from datetime import UTC, datetime
 
+import click
+from rich.console import Console
+from rich.table import Table
+
+from sow_kg.db import get_driver
+
+console = Console()
+cli = click.Group()
+
 
 @cli.command("schema-proposals")
 @click.option(

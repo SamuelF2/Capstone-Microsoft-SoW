@@ -51,7 +51,7 @@ def _compute_budget_totals(budget_rows: list[dict]) -> dict[str, dict]:
             totals[pid]["cost"] += usd
         elif comp == "Expenses Revenue":
             totals[pid]["expenses"] += usd
-    for pid, t in totals.items():
+    for t in totals.values():
         t["margin_pct"] = (
             round((t["revenue"] - t["cost"]) / t["revenue"] * 100, 2) if t["revenue"] > 0 else 0.0
         )
