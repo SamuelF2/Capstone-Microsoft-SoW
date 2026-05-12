@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '../lib/auth';
 import Spinner from '../components/Spinner';
+import { PRIORITY_BAND_STYLES, PriorityBandBadge } from '../components/ai-review';
 
 // ── Workflow Templates Tab ──────────────────────────────────────────────────
 // This tab is now a lightweight list + detail view. All authoring happens on
@@ -467,7 +469,7 @@ function WorkflowTab({ authFetch, user }) {
   );
 }
 
-// Small pill used in the list and detail header.
+// Small pill used in the workflow list and detail header.
 function OwnershipBadge({ category }) {
   const palette = {
     system: {
@@ -507,221 +509,234 @@ function OwnershipBadge({ category }) {
   );
 }
 
-const TABS = [
-  { key: 'quality', label: 'Quality Rules' },
-  { key: 'esap', label: 'ESAP Workflow' },
-  { key: 'risk', label: 'Risk Classification' },
-  { key: 'workflow', label: 'Workflow Templates' },
-];
+// ── Risk Assessment Tab ─────────────────────────────────────────────────────
 
-const SEVERITY_STYLES = {
-  error: { bg: 'rgba(239,68,68,0.12)', color: '#ef4444', border: 'rgba(239,68,68,0.3)' },
-  warning: { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: 'rgba(251,191,36,0.3)' },
-};
-
-const TIER_COLORS = {
-  'type-1': { accent: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.3)' },
-  'type-2': { accent: '#fbbf24', bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.3)' },
-  'type-3': { accent: '#4ade80', bg: 'rgba(74,222,128,0.08)', border: 'rgba(74,222,128,0.3)' },
-};
-
-// ── Quality Rules Tab ───────────────────────────────────────────────────────
-
-function BannedPhrasesTable({ phrases }) {
-  if (!phrases || phrases.length === 0) return null;
+function SectionHeader({ title, subtitle }) {
   return (
-    <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-      <h3 className="text-lg font-semibold mb-md">Banned Phrases</h3>
-      <p className="text-sm text-secondary mb-lg">
-        These phrases must not appear in any SoW document as they create inappropriate commitments
-        or ambiguity.
-      </p>
-      <div style={{ overflowX: 'auto' }}>
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            fontSize: 'var(--font-size-sm)',
-          }}
-        >
-          <thead>
-            <tr
-              style={{
-                borderBottom: '1px solid var(--color-border-default)',
-                textAlign: 'left',
-              }}
-            >
-              <th
-                style={{
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  color: 'var(--color-text-secondary)',
-                  fontWeight: 600,
-                }}
-              >
-                Phrase
-              </th>
-              <th
-                style={{
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  color: 'var(--color-text-secondary)',
-                  fontWeight: 600,
-                }}
-              >
-                Severity
-              </th>
-              <th
-                style={{
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  color: 'var(--color-text-secondary)',
-                  fontWeight: 600,
-                }}
-              >
-                Category
-              </th>
-              <th
-                style={{
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  color: 'var(--color-text-secondary)',
-                  fontWeight: 600,
-                }}
-              >
-                Suggested Fix
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {phrases.map((p, i) => {
-              const s = SEVERITY_STYLES[p.severity] || SEVERITY_STYLES.warning;
-              return (
-                <tr
-                  key={i}
-                  style={{
-                    borderBottom: '1px solid var(--color-border-subtle)',
-                    backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--color-bg-tertiary)',
-                  }}
-                >
-                  <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)', fontWeight: 500 }}>
-                    &ldquo;{p.phrase}&rdquo;
-                  </td>
-                  <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)' }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 10px',
-                        borderRadius: 'var(--radius-full)',
-                        fontSize: 'var(--font-size-xs)',
-                        fontWeight: 600,
-                        backgroundColor: s.bg,
-                        color: s.color,
-                        border: `1px solid ${s.border}`,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      {p.severity}
-                    </span>
-                  </td>
-                  <td
-                    style={{
-                      padding: 'var(--spacing-sm) var(--spacing-md)',
-                      color: 'var(--color-text-secondary)',
-                    }}
-                  >
-                    {(p.category || '').replace(/-/g, ' ')}
-                  </td>
-                  <td
-                    style={{
-                      padding: 'var(--spacing-sm) var(--spacing-md)',
-                      color: 'var(--color-text-secondary)',
-                      maxWidth: '300px',
-                    }}
-                  >
-                    {p.suggestion}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div style={{ marginTop: 'var(--spacing-xl)', marginBottom: 'var(--spacing-md)' }}>
+      <h3 className="text-lg font-semibold mb-xs">{title}</h3>
+      {subtitle && (
+        <p className="text-sm text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
+          {subtitle}
+        </p>
+      )}
     </div>
   );
 }
 
-function RequiredElementsList({ elements }) {
-  if (!elements || elements.length === 0) return null;
+function CategoryGrid({ categories }) {
   return (
-    <div>
-      <h3 className="text-lg font-semibold mb-md">Required SoW Sections</h3>
-      <p className="text-sm text-secondary mb-lg">
-        Every SoW document must include these sections with the specified minimum content.
-      </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
-        {elements.map((el, i) => (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: 'var(--spacing-md)',
+      }}
+    >
+      {categories.map((cat) => {
+        const ids = cat.risk_ids || [];
+        const idsLabel = ids.length > 1 ? `${ids[0]} – ${ids[ids.length - 1]}` : ids[0] || '';
+        return (
           <div
-            key={i}
+            key={cat.id}
             style={{
-              padding: 'var(--spacing-md) var(--spacing-lg)',
-              borderRadius: 'var(--radius-md)',
+              padding: 'var(--spacing-lg)',
+              borderRadius: 'var(--radius-lg)',
               backgroundColor: 'var(--color-bg-tertiary)',
-              borderLeft: '3px solid var(--color-accent-blue)',
+              border: `1px solid var(${cat.color_token || '--color-border-default'})`,
+              borderLeftWidth: '4px',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
-                {el.displayName}
-              </span>
-              <div style={{ display: 'flex', gap: 'var(--spacing-xs)' }}>
-                {el.minLength && (
-                  <span
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-full)',
-                      fontSize: 'var(--font-size-xs)',
-                      backgroundColor: 'rgba(0,120,212,0.12)',
-                      color: 'var(--color-accent-blue)',
-                    }}
-                  >
-                    Min {el.minLength} chars
-                  </span>
-                )}
-                {el.minItems && (
-                  <span
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-full)',
-                      fontSize: 'var(--font-size-xs)',
-                      backgroundColor: 'rgba(0,120,212,0.12)',
-                      color: 'var(--color-accent-blue)',
-                    }}
-                  >
-                    Min {el.minItems} items
-                  </span>
-                )}
-                {el.allowNA && (
-                  <span
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 'var(--radius-full)',
-                      fontSize: 'var(--font-size-xs)',
-                      backgroundColor: 'rgba(74,222,128,0.12)',
-                      color: '#4ade80',
-                    }}
-                  >
-                    N/A allowed
-                  </span>
-                )}
-              </div>
-            </div>
-            <p
-              className="text-secondary"
+            <div
               style={{
-                fontSize: 'var(--font-size-xs)',
-                lineHeight: 'var(--line-height-relaxed)',
-                marginTop: 'var(--spacing-xs)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 'var(--spacing-sm)',
               }}
             >
-              {el.description}
+              <h4
+                className="font-semibold"
+                style={{
+                  fontSize: 'var(--font-size-base)',
+                  color: `var(${cat.color_token || '--color-text-primary'})`,
+                }}
+              >
+                {cat.name}
+              </h4>
+              {idsLabel && (
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontFamily: 'monospace',
+                    color: 'var(--color-text-tertiary)',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  {idsLabel}
+                </span>
+              )}
+            </div>
+            <p
+              className="text-sm text-secondary"
+              style={{ lineHeight: 'var(--line-height-relaxed)', margin: 0 }}
+            >
+              {cat.description}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PriorityMatrixLegend({ matrix }) {
+  const bands = matrix?.bands || [];
+  const probRows = [5, 4, 3, 2, 1];
+  const impactCols = [1, 2, 3, 4, 5];
+
+  const bandForScore = (score) => {
+    for (const b of bands) {
+      if (score >= b.min && score <= b.max) return b;
+    }
+    return null;
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            writingMode: 'vertical-rl',
+            transform: 'rotate(180deg)',
+            fontSize: 'var(--font-size-xs)',
+            fontWeight: 600,
+            color: 'var(--color-text-secondary)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px',
+          }}
+        >
+          Probability →
+        </div>
+        <div style={{ flex: 1, maxWidth: 400 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '24px repeat(5, 1fr)', gap: 4 }}>
+            {probRows.map((p) => (
+              <div key={`row-${p}`} style={{ display: 'contents' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-secondary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {p}
+                </div>
+                {impactCols.map((i) => {
+                  const score = p * i;
+                  const band = bandForScore(score);
+                  return (
+                    <div
+                      key={`${p}:${i}`}
+                      style={{
+                        aspectRatio: '1 / 1',
+                        backgroundColor: band ? `${band.color}1f` : 'var(--color-bg-tertiary)',
+                        border: `1px solid ${band ? `${band.color}55` : 'var(--color-border-default)'}`,
+                        borderRadius: 'var(--radius-sm)',
+                        color: band ? band.color : 'var(--color-text-secondary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 600,
+                        fontSize: 'var(--font-size-sm)',
+                      }}
+                    >
+                      {score}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            <div />
+            {impactCols.map((i) => (
+              <div
+                key={`impact-${i}`}
+                style={{
+                  textAlign: 'center',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-secondary)',
+                  fontWeight: 600,
+                  paddingTop: 4,
+                }}
+              >
+                {i}
+              </div>
+            ))}
+          </div>
+          <div
+            style={{
+              textAlign: 'center',
+              marginTop: 'var(--spacing-xs)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: 'var(--color-text-secondary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+            }}
+          >
+            Impact →
+          </div>
+        </div>
+      </div>
+
+      {/* Band legend */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--spacing-md)',
+          flexWrap: 'wrap',
+          marginTop: 'var(--spacing-lg)',
+        }}
+      >
+        {bands.map((b) => (
+          <div
+            key={b.id}
+            style={{
+              flex: '1 1 200px',
+              padding: 'var(--spacing-sm) var(--spacing-md)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: `${b.color}14`,
+              border: `1px solid ${b.color}55`,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 4,
+              }}
+            >
+              <span style={{ color: b.color, fontWeight: 600, fontSize: 'var(--font-size-sm)' }}>
+                {b.id}
+              </span>
+              <span
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                {b.min}–{b.max}
+              </span>
+            </div>
+            <p className="text-xs text-secondary" style={{ margin: 0 }}>
+              {b.action}
             </p>
           </div>
         ))}
@@ -730,390 +745,373 @@ function RequiredElementsList({ elements }) {
   );
 }
 
-function QualityTab({ rules }) {
-  const banned = rules?.bannedPhrases?.bannedPhrases || [];
-  const required = rules?.requiredElements?.requiredSections || [];
+function PlaybookAccordion({ playbooks }) {
+  const [open, setOpen] = useState({});
   return (
-    <div>
-      <BannedPhrasesTable phrases={banned} />
-      <RequiredElementsList elements={required} />
-    </div>
-  );
-}
-
-// ── ESAP Workflow Tab ────────────────────────────────────────────────────────
-
-function EsapTab({ rules }) {
-  const esap = rules?.esapWorkflow || {};
-  const levels = esap.esapLevels || {};
-  const stages = esap.workflowStages || {};
-  const stageOrder = ['draft', 'internal-review', 'drm-approval', 'approved', 'finalized'];
-
-  return (
-    <div>
-      {/* Deal Tiers */}
-      <h3 className="text-lg font-semibold mb-md">Deal Tiers</h3>
-      <p className="text-sm text-secondary mb-lg">
-        ESAP level is determined by deal value and estimated margin. Each tier requires different
-        approvers and checks.
-      </p>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-          gap: 'var(--spacing-lg)',
-          marginBottom: 'var(--spacing-2xl)',
-        }}
-      >
-        {Object.entries(levels).map(([key, level]) => {
-          const tc = TIER_COLORS[key] || TIER_COLORS['type-3'];
-          return (
-            <div
-              key={key}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+      {playbooks.map((pb) => {
+        const isOpen = !!open[pb.category];
+        const hasPatterns = pb.patterns && pb.patterns.length > 0;
+        return (
+          <div
+            key={pb.category}
+            style={{
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--color-border-default)',
+              backgroundColor: 'var(--color-bg-tertiary)',
+              overflow: 'hidden',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setOpen({ ...open, [pb.category]: !isOpen })}
               style={{
-                padding: 'var(--spacing-lg)',
-                borderRadius: 'var(--radius-lg)',
-                backgroundColor: tc.bg,
-                border: `1px solid ${tc.border}`,
+                width: '100%',
+                padding: 'var(--spacing-sm) var(--spacing-md)',
+                background: 'transparent',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                color: 'var(--color-text-primary)',
               }}
             >
-              <h4
-                className="font-semibold mb-md"
-                style={{ color: tc.accent, fontSize: 'var(--font-size-base)' }}
-              >
-                {level.name}
-              </h4>
-
-              {/* Triggers */}
-              <div style={{ marginBottom: 'var(--spacing-md)' }}>
-                <p
-                  className="text-xs font-semibold mb-xs"
-                  style={{
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  Triggers
-                </p>
-                {(level.triggers || []).map((t, i) => (
-                  <p
-                    key={i}
-                    className="text-sm"
-                    style={{ color: 'var(--color-text-primary)', marginBottom: 2 }}
-                  >
-                    {t.description}
-                  </p>
-                ))}
-              </div>
-
-              {/* Approvers */}
-              <div style={{ marginBottom: 'var(--spacing-md)' }}>
-                <p
-                  className="text-xs font-semibold mb-xs"
-                  style={{
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  Required Approvers
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-xs)' }}>
-                  {(level.requiredApprovers || []).map((a, i) => (
-                    <span
-                      key={i}
-                      title={a.reason}
-                      style={{
-                        padding: '2px 10px',
-                        borderRadius: 'var(--radius-full)',
-                        fontSize: 'var(--font-size-xs)',
-                        backgroundColor: 'var(--color-bg-tertiary)',
-                        border: '1px solid var(--color-border-default)',
-                        color: 'var(--color-text-primary)',
-                      }}
-                    >
-                      {a.role.replace(/-/g, ' ').toUpperCase()} ({a.stage.replace(/-/g, ' ')})
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Additional Checks */}
-              {level.additionalChecks && level.additionalChecks.length > 0 && (
-                <div>
-                  <p
-                    className="text-xs font-semibold mb-xs"
-                    style={{
-                      color: 'var(--color-text-secondary)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.5px',
-                    }}
-                  >
-                    Additional Checks
-                  </p>
-                  <ul style={{ margin: 0, paddingLeft: 'var(--spacing-lg)' }}>
-                    {level.additionalChecks.map((c, i) => (
-                      <li
-                        key={i}
-                        className="text-sm text-secondary"
-                        style={{ lineHeight: 'var(--line-height-relaxed)' }}
-                      >
-                        {c}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Workflow Stages */}
-      <h3 className="text-lg font-semibold mb-md">Approval Workflow Stages</h3>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 'var(--spacing-sm)',
-          alignItems: 'center',
-          marginBottom: 'var(--spacing-lg)',
-        }}
-      >
-        {stageOrder
-          .filter((k) => stages[k])
-          .map((key, i) => {
-            const stage = stages[key];
-            return (
-              <span
-                key={key}
-                style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}
-              >
+              <span className="font-semibold" style={{ fontSize: 'var(--font-size-sm)' }}>
+                {pb.category}
                 <span
                   style={{
-                    padding: '6px 16px',
-                    borderRadius: 'var(--radius-full)',
-                    fontSize: 'var(--font-size-sm)',
-                    fontWeight: 500,
-                    backgroundColor: 'var(--color-bg-tertiary)',
-                    border: '1px solid var(--color-border-default)',
-                    color: 'var(--color-text-primary)',
+                    marginLeft: 'var(--spacing-sm)',
+                    color: 'var(--color-text-tertiary)',
+                    fontWeight: 400,
                   }}
                 >
-                  {stage.name}
+                  {hasPatterns ? `${pb.patterns.length} patterns` : 'No patterns'}
                 </span>
-                {i < stageOrder.filter((k) => stages[k]).length - 1 && (
-                  <span
-                    style={{ color: 'var(--color-text-tertiary)', fontSize: 'var(--font-size-lg)' }}
-                  >
-                    &#8594;
-                  </span>
-                )}
               </span>
-            );
-          })}
-      </div>
-
-      {/* Stage Details */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
-        {stageOrder
-          .filter((k) => stages[k])
-          .map((key) => {
-            const stage = stages[key];
-            return (
+              <span style={{ color: 'var(--color-text-secondary)' }}>{isOpen ? '▾' : '▸'}</span>
+            </button>
+            {isOpen && (
               <div
-                key={key}
                 style={{
-                  padding: 'var(--spacing-md) var(--spacing-lg)',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--color-bg-tertiary)',
-                  borderLeft: '3px solid var(--color-accent-blue)',
+                  padding: 'var(--spacing-md)',
+                  borderTop: '1px solid var(--color-border-subtle)',
                 }}
               >
-                <p className="font-semibold text-sm">{stage.name}</p>
-                <p
-                  className="text-secondary text-xs"
-                  style={{
-                    lineHeight: 'var(--line-height-relaxed)',
-                    marginBottom: 'var(--spacing-xs)',
-                  }}
-                >
-                  {stage.description}
-                </p>
-                {stage.exitCriteria && stage.exitCriteria.length > 0 && (
-                  <div>
-                    <p
-                      className="text-xs"
-                      style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic' }}
-                    >
-                      Exit criteria: {stage.exitCriteria.join(' | ')}
-                    </p>
+                {!hasPatterns && (
+                  <p className="text-sm text-secondary" style={{ margin: 0 }}>
+                    {pb.note ||
+                      'No mitigation patterns enumerated in the framework for this category.'}
+                  </p>
+                )}
+                {hasPatterns && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--spacing-md)',
+                    }}
+                  >
+                    {pb.patterns.map((p, i) => (
+                      <div key={i}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 'var(--spacing-sm)',
+                            marginBottom: 4,
+                          }}
+                        >
+                          <span
+                            className="font-semibold"
+                            style={{ fontSize: 'var(--font-size-sm)' }}
+                          >
+                            {p.risk}
+                          </span>
+                          <span
+                            style={{
+                              padding: '1px 8px',
+                              borderRadius: 'var(--radius-full)',
+                              fontSize: '10px',
+                              fontFamily: 'monospace',
+                              backgroundColor: 'var(--color-bg-secondary)',
+                              color: 'var(--color-text-tertiary)',
+                              border: '1px solid var(--color-border-subtle)',
+                            }}
+                          >
+                            {p.risk_id}
+                          </span>
+                        </div>
+                        <ul
+                          style={{
+                            margin: 0,
+                            paddingLeft: 'var(--spacing-lg)',
+                            color: 'var(--color-text-secondary)',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                        >
+                          {p.mitigations.map((m, j) => (
+                            <li key={j} style={{ marginBottom: 2 }}>
+                              {m}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            );
-          })}
-      </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ── Risk Classification Tab (Stubbed) ───────────────────────────────────────
-
-const RISK_LEVELS = [
-  {
-    level: 'Green',
-    color: '#4ade80',
-    bg: 'rgba(74,222,128,0.08)',
-    border: 'rgba(74,222,128,0.3)',
-    criteria: [
-      'All 8 required sections present and meet minimum length/item requirements',
-      'No banned phrases detected in document text',
-      'All methodology-specific keywords present',
-      'Estimated margin >= 15%',
-      'Deal value <= $1M (Type 3 ESAP)',
-      'All deliverables have measurable acceptance criteria',
-      'Risk register complete with mitigation plans for every risk',
-    ],
-  },
-  {
-    level: 'Yellow',
-    color: '#fbbf24',
-    bg: 'rgba(251,191,36,0.08)',
-    border: 'rgba(251,191,36,0.3)',
-    criteria: [
-      'One or two required sections missing or below minimum thresholds',
-      'Warning-level banned phrases detected (e.g., "will ensure")',
-      'Some methodology keywords missing from approach section',
-      'Estimated margin between 10% and 15%',
-      'Deal value between $1M and $5M (Type 2 ESAP)',
-      'Some deliverables lack specific acceptance criteria',
-      'One or more risks missing mitigation plans',
-    ],
-  },
-  {
-    level: 'Red',
-    color: '#ef4444',
-    bg: 'rgba(239,68,68,0.08)',
-    border: 'rgba(239,68,68,0.3)',
-    criteria: [
-      'Three or more required sections missing',
-      'Error-level banned phrases detected (e.g., "best effort", "guarantee", "unlimited")',
-      'Methodology approach section fundamentally misaligned',
-      'Estimated margin below 10%',
-      'Deal value exceeds $5M (Type 1 ESAP)',
-      'Customer responsibilities not documented',
-      'No support transition plan defined',
-    ],
-  },
-];
-
-function RiskTab() {
+function PortfolioKpis({ summary }) {
+  const highVeryHigh =
+    (summary.band_breakdown?.High || 0) + (summary.band_breakdown?.['Very High'] || 0);
+  const coveragePct = Math.round((summary.avg_mitigation_coverage || 0) * 100);
+  const tiles = [
+    { label: 'SoWs analysed', value: summary.total_sows_analysed },
+    { label: 'Total risks', value: summary.total_risks },
+    { label: 'Mitigation coverage', value: `${coveragePct}%` },
+    {
+      label: 'High + Very High SoWs',
+      value: highVeryHigh,
+      accent: highVeryHigh > 0 ? PRIORITY_BAND_STYLES.High.color : null,
+    },
+  ];
   return (
-    <div>
-      <h3 className="text-lg font-semibold mb-md">Risk Classification Criteria (G / Y / R)</h3>
-      <p className="text-sm text-secondary mb-lg">
-        Each SoW is classified into Green, Yellow, or Red based on the following criteria. The Risk
-        Engine evaluates these factors automatically during AI Review.
-      </p>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-          gap: 'var(--spacing-lg)',
-          marginBottom: 'var(--spacing-2xl)',
-        }}
-      >
-        {RISK_LEVELS.map((r) => (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: 'var(--spacing-md)',
+      }}
+    >
+      {tiles.map((t) => (
+        <div
+          key={t.label}
+          style={{
+            padding: 'var(--spacing-lg)',
+            borderRadius: 'var(--radius-lg)',
+            backgroundColor: 'var(--color-bg-tertiary)',
+            border: '1px solid var(--color-border-default)',
+          }}
+        >
           <div
-            key={r.level}
             style={{
-              padding: 'var(--spacing-lg)',
-              borderRadius: 'var(--radius-lg)',
-              backgroundColor: r.bg,
-              border: `1px solid ${r.border}`,
+              fontSize: '1.75rem',
+              fontWeight: 700,
+              lineHeight: 1,
+              color: t.accent || 'var(--color-text-primary)',
             }}
           >
-            <div
+            {t.value}
+          </div>
+          <div
+            style={{
+              marginTop: 'var(--spacing-xs)',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--color-text-secondary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+            }}
+          >
+            {t.label}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HighRiskSowsList({ sows }) {
+  if (!sows || sows.length === 0) {
+    return (
+      <p className="text-sm text-secondary" style={{ marginTop: 'var(--spacing-md)' }}>
+        No SoWs currently in the High or Very High risk band.
+      </p>
+    );
+  }
+  return (
+    <div
+      style={{
+        marginTop: 'var(--spacing-md)',
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--color-border-default)',
+        overflow: 'hidden',
+      }}
+    >
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--font-size-sm)' }}>
+        <thead>
+          <tr style={{ backgroundColor: 'var(--color-bg-tertiary)', textAlign: 'left' }}>
+            {['Title', 'Customer', 'Band', 'Score', 'ESAP', 'Updated'].map((h) => (
+              <th
+                key={h}
+                style={{
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                  color: 'var(--color-text-secondary)',
+                  fontWeight: 600,
+                  fontSize: 'var(--font-size-xs)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sows.map((s, i) => (
+            <tr
+              key={s.sow_id}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--spacing-sm)',
-                marginBottom: 'var(--spacing-md)',
+                borderTop: '1px solid var(--color-border-subtle)',
+                backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--color-bg-tertiary)',
               }}
             >
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: 14,
-                  height: 14,
-                  borderRadius: '50%',
-                  backgroundColor: r.color,
-                  boxShadow: `0 0 8px ${r.color}`,
-                }}
-              />
-              <span
-                className="font-semibold"
-                style={{ color: r.color, fontSize: 'var(--font-size-lg)' }}
-              >
-                {r.level}
-              </span>
-            </div>
-            <ul style={{ margin: 0, paddingLeft: 'var(--spacing-lg)' }}>
-              {r.criteria.map((c, i) => (
-                <li
-                  key={i}
-                  className="text-sm"
+              <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)', fontWeight: 500 }}>
+                <Link
+                  href={`/sow/${s.sow_id}`}
                   style={{
-                    color: 'var(--color-text-secondary)',
-                    lineHeight: 'var(--line-height-relaxed)',
-                    marginBottom: 'var(--spacing-xs)',
+                    color: 'var(--color-accent-blue)',
+                    textDecoration: 'none',
                   }}
                 >
-                  {c}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+                  {s.title}
+                </Link>
+              </td>
+              <td
+                style={{
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                {s.customer_name || '—'}
+              </td>
+              <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)' }}>
+                <PriorityBandBadge band={s.risk_band} />
+              </td>
+              <td style={{ padding: 'var(--spacing-sm) var(--spacing-md)', fontWeight: 600 }}>
+                {Number(s.overall_risk_score || 0).toFixed(0)} / 25
+              </td>
+              <td
+                style={{
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                {s.esap_flag || '—'}
+              </td>
+              <td
+                style={{
+                  padding: 'var(--spacing-sm) var(--spacing-md)',
+                  color: 'var(--color-text-tertiary)',
+                  fontSize: 'var(--font-size-xs)',
+                }}
+              >
+                {s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-      <div
-        className="card"
-        style={{
-          padding: 'var(--spacing-lg)',
-          backgroundColor: 'rgba(0,120,212,0.06)',
-          border: '1px solid rgba(0,120,212,0.2)',
-        }}
-      >
-        <p className="text-sm" style={{ color: 'var(--color-accent-blue)', fontWeight: 500 }}>
-          Note: The Risk Engine classifier is under active development. These criteria represent the
-          target classification logic. Full automated classification will integrate with Azure AI
-          Foundry for LLM-based evaluation and Azure ML Workspace for model training.
+function RiskAssessmentTab({ framework, authFetch, user }) {
+  const [summary, setSummary] = useState(null);
+  const [summaryError, setSummaryError] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    authFetch('/api/rules/risk-summary')
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load summary (${r.status})`);
+        return r.json();
+      })
+      .then(setSummary)
+      .catch((e) => setSummaryError(e.message))
+      .finally(() => setSummaryLoading(false));
+  }, [user, authFetch]);
+
+  const categories = framework?.categories || [];
+  const priorityMatrix = framework?.priorityMatrix || {};
+  const playbooks = useMemo(() => framework?.playbooks || [], [framework]);
+
+  return (
+    <div>
+      <SectionHeader
+        title="Risk Categories"
+        subtitle="Six primary risk domains per the Professional Services Risk Framework. The keyword classifier in the backend uses these category definitions to bucket newly identified risks."
+      />
+      <CategoryGrid categories={categories} />
+
+      <SectionHeader
+        title="Priority Matrix"
+        subtitle="Probability × Impact yields the priority score (1–25), which maps to a band that drives escalation and mitigation requirements."
+      />
+      <PriorityMatrixLegend matrix={priorityMatrix} />
+
+      <SectionHeader
+        title="Mitigation Playbooks"
+        subtitle="Standard mitigation patterns by risk category, sourced from framework §5.2. Reputational and Strategic categories don't yet have enumerated playbooks."
+      />
+      <PlaybookAccordion playbooks={playbooks} />
+
+      <SectionHeader
+        title="Portfolio Risk Summary"
+        subtitle="Aggregated risk profile across SoWs you can access (limited to the 200 most recently analysed)."
+      />
+      {summaryLoading && (
+        <div style={{ padding: 'var(--spacing-lg) 0' }}>
+          <Spinner />
+        </div>
+      )}
+      {summaryError && !summaryLoading && (
+        <p className="text-sm" style={{ color: 'var(--color-error)' }}>
+          {summaryError}
         </p>
-      </div>
+      )}
+      {summary && !summaryLoading && (
+        <>
+          <PortfolioKpis summary={summary} />
+          <SectionHeader title="High-risk SoWs" />
+          <HighRiskSowsList sows={summary.high_risk_sows} />
+        </>
+      )}
     </div>
   );
 }
 
 // ── Main Page ───────────────────────────────────────────────────────────────
 
+const TABS = [
+  { key: 'risk', label: 'Risk Assessment' },
+  { key: 'workflow', label: 'Workflow Templates' },
+];
+
 export default function BusinessLogic() {
   const { user, authFetch } = useAuth();
-  const [rules, setRules] = useState(null);
+  const [framework, setFramework] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('quality');
+  const [activeTab, setActiveTab] = useState('risk');
 
   useEffect(() => {
     if (!user) return;
-    authFetch('/api/rules')
+    authFetch('/api/rules/risk-framework')
       .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load rules (${res.status})`);
+        if (!res.ok) throw new Error(`Failed to load risk framework (${res.status})`);
         return res.json();
       })
-      .then(setRules)
+      .then(setFramework)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [user, authFetch]);
@@ -1136,8 +1134,7 @@ export default function BusinessLogic() {
           <div style={{ marginBottom: 'var(--spacing-2xl)' }}>
             <h1 className="text-4xl font-bold mb-sm">Business Logic</h1>
             <p className="text-secondary" style={{ lineHeight: 'var(--line-height-relaxed)' }}>
-              Quality rules, ESAP approval workflow, and risk classification criteria that drive SoW
-              validation and review.
+              Risk assessment framework and workflow templates that drive SoW validation and review.
             </p>
           </div>
 
@@ -1180,13 +1177,13 @@ export default function BusinessLogic() {
           </div>
 
           {/* Content */}
-          {loading && (
+          {activeTab === 'risk' && loading && (
             <div style={{ textAlign: 'center', padding: 'var(--spacing-3xl) 0' }}>
               <Spinner />
             </div>
           )}
 
-          {error && (
+          {activeTab === 'risk' && error && (
             <div
               style={{
                 padding: 'var(--spacing-md) var(--spacing-lg)',
@@ -1201,11 +1198,9 @@ export default function BusinessLogic() {
             </div>
           )}
 
-          {!loading && !error && rules && activeTab !== 'workflow' && (
+          {activeTab === 'risk' && !loading && !error && framework && (
             <div className="card">
-              {activeTab === 'quality' && <QualityTab rules={rules} />}
-              {activeTab === 'esap' && <EsapTab rules={rules} />}
-              {activeTab === 'risk' && <RiskTab />}
+              <RiskAssessmentTab framework={framework} authFetch={authFetch} user={user} />
             </div>
           )}
 

@@ -12,7 +12,7 @@
  *   Bottom: DRM reviewer status footer
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -26,7 +26,9 @@ import COATracker from '../../components/COATracker';
 import AttachmentManager from '../../components/AttachmentManager';
 import ActivityLog from '../../components/ActivityLog';
 import DecisionModal from '../../components/review/DecisionModal';
+import SendBackModal from '../../components/review/SendBackModal';
 import UnsavedChangesModal from '../../components/UnsavedChangesModal';
+import SoWDocumentReader from '../../components/sow/SoWDocumentReader';
 import useAutoRefreshFetch from '../../lib/hooks/useAutoRefreshFetch';
 import useUnsavedChangesWarning from '../../lib/hooks/useUnsavedChangesWarning';
 import { formatDeal, esapBadgeStyle } from '../../lib/format';
@@ -56,6 +58,15 @@ const DECISION_ICONS = {
   'approved-with-conditions': '~',
   rejected: '✗',
 };
+
+// Resizable split-pane defaults. The reviewer can drag the divider between
+// the SoW reader and the review controls; the ratio is persisted to
+// localStorage so the next visit picks up where they left off.
+const SPLIT_DEFAULT_LEFT_PCT = 66.67;
+const SPLIT_MIN_LEFT_PCT = 30;
+const SPLIT_MAX_LEFT_PCT = 80;
+const SPLIT_DIVIDER_PX = 12;
+const SPLIT_STORAGE_KEY = 'drmReview.splitLeftPct';
 
 // ── Internal Review Results Banner ────────────────────────────────────────────
 
@@ -177,233 +188,6 @@ function InternalReviewBanner({ reviewStatus }) {
   );
 }
 
-// ── Send-Back Modal ───────────────────────────────────────────────────────────
-
-function SendBackModal({ onClose, onSubmit, submitting, availableStages }) {
-  const targets =
-    availableStages && availableStages.length > 0
-      ? availableStages
-      : [
-          { stage_key: STAGE_KEYS.INTERNAL_REVIEW, display_name: 'Internal Review' },
-          { stage_key: STAGE_KEYS.DRAFT, display_name: 'Draft' },
-        ];
-  const [targetStage, setTargetStage] = useState(
-    targets[0]?.stage_key || STAGE_KEYS.INTERNAL_REVIEW
-  );
-  const [comments, setComments] = useState('');
-  const [actionItems, setActionItems] = useState(['']);
-
-  function addItem() {
-    setActionItems((a) => [...a, '']);
-  }
-  function updateItem(i, val) {
-    setActionItems((a) => a.map((x, j) => (j === i ? val : x)));
-  }
-  function removeItem(i) {
-    setActionItems((a) => a.filter((_, j) => j !== i));
-  }
-
-  function handleSubmit() {
-    if (!comments.trim()) return;
-    onSubmit({
-      target_stage: targetStage,
-      comments: comments.trim(),
-      action_items: actionItems.filter((x) => x.trim()),
-    });
-  }
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'var(--spacing-xl)',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: 'var(--color-bg-primary)',
-          borderRadius: 'var(--radius-xl)',
-          border: '1px solid var(--color-border-default)',
-          padding: 'var(--spacing-xl)',
-          width: '100%',
-          maxWidth: '520px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--spacing-md)',
-        }}
-      >
-        <h3 className="text-lg font-semibold" style={{ margin: 0 }}>
-          Send Back SoW
-        </h3>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 'var(--font-size-sm)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          Return this SoW to an earlier stage for revision.
-        </p>
-
-        <div>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 'var(--font-size-sm)',
-              marginBottom: '6px',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            Return to
-          </label>
-          <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-            {targets.map(({ stage_key: value, display_name: label }) => (
-              <button
-                key={value}
-                onClick={() => setTargetStage(value)}
-                style={{
-                  flex: 1,
-                  padding: 'var(--spacing-sm)',
-                  borderRadius: 'var(--radius-md)',
-                  border: '2px solid',
-                  borderColor:
-                    targetStage === value
-                      ? 'var(--color-accent-purple, #7c3aed)'
-                      : 'var(--color-border-default)',
-                  backgroundColor:
-                    targetStage === value ? 'rgba(124,58,237,0.08)' : 'var(--color-bg-secondary)',
-                  color:
-                    targetStage === value
-                      ? 'var(--color-accent-purple, #7c3aed)'
-                      : 'var(--color-text-secondary)',
-                  cursor: 'pointer',
-                  fontSize: 'var(--font-size-sm)',
-                  fontWeight: targetStage === value ? 'var(--font-weight-semibold)' : 'normal',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 'var(--font-size-sm)',
-              marginBottom: '6px',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            Reason <span style={{ color: 'var(--color-error)' }}>*</span>
-          </label>
-          <textarea
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            placeholder="Explain why this SoW is being sent back…"
-            rows={3}
-            style={{
-              width: '100%',
-              resize: 'vertical',
-              padding: 'var(--spacing-sm)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border-default)',
-              backgroundColor: 'var(--color-bg-secondary)',
-              color: 'var(--color-text-primary)',
-              fontSize: 'var(--font-size-sm)',
-              fontFamily: 'inherit',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        <div>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 'var(--font-size-sm)',
-              marginBottom: '6px',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            Action Items (optional)
-          </label>
-          {actionItems.map((item, i) => (
-            <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-              <input
-                value={item}
-                onChange={(e) => updateItem(i, e.target.value)}
-                placeholder={`Action item ${i + 1}`}
-                style={{
-                  flex: 1,
-                  padding: 'var(--spacing-xs) var(--spacing-sm)',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--color-border-default)',
-                  backgroundColor: 'var(--color-bg-secondary)',
-                  color: 'var(--color-text-primary)',
-                  fontSize: 'var(--font-size-sm)',
-                }}
-              />
-              {actionItems.length > 1 && (
-                <button
-                  onClick={() => removeItem(i)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--color-error)',
-                    fontSize: '16px',
-                    padding: '0 4px',
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
-          <button
-            onClick={addItem}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--color-accent-purple, #7c3aed)',
-              fontSize: 'var(--font-size-xs)',
-            }}
-          >
-            + Add action item
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 'var(--spacing-sm)', justifyContent: 'flex-end' }}>
-          <button className="btn btn-secondary" onClick={onClose} disabled={submitting}>
-            Cancel
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleSubmit}
-            disabled={submitting || !comments.trim()}
-            style={{ backgroundColor: 'var(--color-warning)', borderColor: 'var(--color-warning)' }}
-          >
-            {submitting ? 'Sending back…' : 'Send Back'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── DRM Review Status Footer ──────────────────────────────────────────────────
 
 function DrmReviewerStatus({ reviewStatus, currentUserId }) {
@@ -521,6 +305,108 @@ export default function DrmReview() {
   const [insightsData, setInsightsData] = useState(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
 
+  // Tab + COA-badge state for the canonical reviewer tab bar.
+  const [activeReviewTab, setActiveReviewTab] = useState('review');
+  const [progressRefreshKey, setProgressRefreshKey] = useState(0);
+  const [coaSummary, setCoaSummary] = useState(null);
+
+  // ── Resizable split (SoW reader | review panel) ────────────────────────
+  // `leftPct` is the percentage of the split row given to the SoW reader.
+  // Initialize with the default and overwrite from localStorage in an effect
+  // so SSR and the first client render agree. The grid template uses
+  // `${leftPct}fr ${dividerPx}px ${100-leftPct}fr` so the divider's pixel
+  // width never overflows the container — that overflow is what was causing
+  // the right column to twitch during drag.
+  const [leftPct, setLeftPct] = useState(SPLIT_DEFAULT_LEFT_PCT);
+  const leftPctRef = useRef(SPLIT_DEFAULT_LEFT_PCT);
+  const splitContainerRef = useRef(null);
+  const dragStateRef = useRef(null);
+
+  useEffect(() => {
+    leftPctRef.current = leftPct;
+  }, [leftPct]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SPLIT_STORAGE_KEY);
+      if (stored != null) {
+        const n = Number(stored);
+        if (!Number.isNaN(n)) {
+          setLeftPct(Math.max(SPLIT_MIN_LEFT_PCT, Math.min(SPLIT_MAX_LEFT_PCT, n)));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const startResize = useCallback((e) => {
+    e.preventDefault();
+    const container = splitContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    dragStateRef.current = {
+      rectLeft: rect.left,
+      // Available space is the container width minus the fixed divider; the
+      // fr columns split *that* number, not the whole container, so the
+      // percentage we compute has to use the same denominator.
+      avail: rect.width - SPLIT_DIVIDER_PX,
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  // Re-bound only on mount: the move/up handlers read from refs so a state
+  // change to leftPct doesn't tear down and re-add window listeners mid-drag.
+  useEffect(() => {
+    let raf = null;
+    let pending = null;
+    function flush() {
+      raf = null;
+      if (pending != null) {
+        setLeftPct(pending);
+        pending = null;
+      }
+    }
+    function onMove(ev) {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      // Cursor sits over the *middle* of the divider, so subtract half its
+      // width to get the desired left-column edge.
+      const leftEdge = ev.clientX - drag.rectLeft - SPLIT_DIVIDER_PX / 2;
+      const pct = (leftEdge / drag.avail) * 100;
+      const clamped = Math.max(SPLIT_MIN_LEFT_PCT, Math.min(SPLIT_MAX_LEFT_PCT, pct));
+      // Coalesce mousemove → at most one setState per animation frame so a
+      // fast drag never produces a backlog of renders mid-flight.
+      pending = clamped;
+      if (raf == null) raf = window.requestAnimationFrame(flush);
+    }
+    function onUp() {
+      if (!dragStateRef.current) return;
+      dragStateRef.current = null;
+      if (raf != null) {
+        window.cancelAnimationFrame(raf);
+        raf = null;
+        if (pending != null) setLeftPct(pending);
+        pending = null;
+      }
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      try {
+        localStorage.setItem(SPLIT_STORAGE_KEY, String(leftPctRef.current));
+      } catch {
+        /* ignore */
+      }
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (raf != null) window.cancelAnimationFrame(raf);
+    };
+  }, []);
+
   // ── Loader: parallel-fetches sow + checklist + status + workflow ────────
   const load = useCallback(
     async (signal) => {
@@ -564,6 +450,8 @@ export default function DrmReview() {
         sow: sowData,
         checklistItems: checklistData.items || [],
         checklistRole: checklistData.reviewer_role || '',
+        checklistFocusAreas: checklistData.focus_areas || [],
+        checklistDisplayName: checklistData.display_name || '',
         checklistMode: checklistData.mode || 'legacy',
         checklistGeneratedAt: checklistData.generated_at || null,
         checklistSowChanged: Boolean(checklistData.sow_changed),
@@ -589,6 +477,8 @@ export default function DrmReview() {
   const sow = data?.sow ?? null;
   const checklistItems = data?.checklistItems ?? [];
   const checklistRole = data?.checklistRole ?? '';
+  const checklistFocusAreas = data?.checklistFocusAreas ?? [];
+  const checklistDisplayName = data?.checklistDisplayName ?? '';
   const checklistMode = data?.checklistMode ?? 'legacy';
   const checklistGeneratedAt = data?.checklistGeneratedAt ?? null;
   const checklistSowChanged = Boolean(data?.checklistSowChanged);
@@ -688,6 +578,19 @@ export default function DrmReview() {
       });
     return () => ctrl.abort();
   }, [id, user, checklistRole, authFetch]);
+
+  // ── COA summary for tab badge ──────────────────────────────────────────
+  useEffect(() => {
+    if (!id) return;
+    const ctrl = new AbortController();
+    authFetch(`/api/coa/sow/${id}/summary`, { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!ctrl.signal.aborted) setCoaSummary(d);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [id, authFetch, progressRefreshKey]);
 
   async function handleSaveProgress() {
     setSaving(true);
@@ -862,6 +765,33 @@ export default function DrmReview() {
   const canAdvance = gatingMet && sow?.status === STAGE_KEYS.DRM_REVIEW;
   const alreadyApproved = sow?.status === 'approved';
 
+  // True while the SoW is still at DRM Review. If the SoW has moved past
+  // DRM Review the page shows an out-of-stage warning so the reviewer
+  // knows their actions on this surface are no longer driving the workflow.
+  const isStageCurrent = sow?.status === STAGE_KEYS.DRM_REVIEW;
+
+  // Tab definitions with dynamic Conditions badge.
+  const coaOpen = coaSummary?.open ?? 0;
+  const coaTotal = coaSummary?.total ?? 0;
+  const REVIEW_TABS = [
+    { key: 'review', label: 'Review' },
+    { key: 'attachments', label: 'Attachments' },
+    {
+      key: 'conditions',
+      label: 'Conditions',
+      badge: coaTotal > 0 ? `${coaOpen} open` : null,
+    },
+    { key: 'activity', label: 'Activity' },
+  ];
+
+  // Hide the right-side review panel once the SoW is approved — the SoW
+  // reader expands to full width and the prominent "Approved" banner above
+  // the split conveys the terminal state.  Roles without checklist items
+  // still see the right column: it shows the no-items message and the
+  // Approve/Send-Back buttons stay reachable (allRequiredChecked is
+  // trivially true when there are no required items).
+  const showChecklist = !alreadyApproved;
+
   const aiResult = aiAnalysis;
 
   if (loading) {
@@ -944,57 +874,100 @@ export default function DrmReview() {
         onLeave={confirmUnsavedLeave}
       />
 
+      {/* The page is bound to the viewport (no outer scroll) so the SoW
+          reader and review panel can each manage their own scroll within
+          the space that's actually available. */}
       <div
         style={{
-          minHeight: 'calc(100vh - 80px)',
+          height: 'calc(100vh - 80px)',
+          minHeight: '600px',
           backgroundColor: 'var(--color-bg-primary)',
-          padding: 'var(--spacing-xl)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
-        <div style={{ maxWidth: 'var(--container-2xl)', margin: '0 auto' }}>
-          {/* Back link */}
-          <Link
-            href="/drm-dashboard"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: 'var(--font-size-sm)',
-              color: 'var(--color-text-secondary)',
-              textDecoration: 'none',
-              marginBottom: 'var(--spacing-lg)',
-            }}
-          >
-            ← Back to DRM Dashboard
-          </Link>
-
-          {/* Header card */}
-          <div
-            style={{
-              backgroundColor: 'var(--color-bg-secondary)',
-              border: '1px solid var(--color-border-default)',
-              borderRadius: 'var(--radius-xl)',
-              padding: 'var(--spacing-lg) var(--spacing-xl)',
-              marginBottom: 'var(--spacing-xl)',
-            }}
-          >
+        {/* ── Top section (header, progress, tabs) ─────────────────────── */}
+        <div
+          style={{
+            flexShrink: 0,
+            backgroundColor: 'var(--color-bg-primary)',
+            borderBottom: '1px solid var(--color-border-default)',
+            padding: 'var(--spacing-md) var(--spacing-xl) 0',
+          }}
+        >
+          <div style={{ width: '100%' }}>
+            {/* Compact header row */}
             <div
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: 'var(--spacing-md)',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 'var(--spacing-sm)',
                 marginBottom: 'var(--spacing-sm)',
               }}
             >
-              <h1 className="text-2xl font-bold" style={{ margin: 0 }}>
-                {sow?.title || 'Untitled SoW'}
-              </h1>
-              <div style={{ display: 'flex', gap: 'var(--spacing-xs)', flexShrink: 0 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--spacing-md)',
+                  minWidth: 0,
+                }}
+              >
+                <Link
+                  href="/drm-dashboard"
+                  title="Back to DRM Dashboard"
+                  style={{
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-text-tertiary)',
+                    textDecoration: 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  ←
+                </Link>
+                <h1
+                  style={{
+                    margin: 0,
+                    fontSize: 'var(--font-size-lg)',
+                    fontWeight: 'var(--font-weight-bold)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {sow?.title || 'Untitled SoW'}
+                </h1>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 'var(--spacing-sm)',
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-tertiary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {sow?.customer_name && <span>{sow.customer_name}</span>}
+                  {sow?.deal_value && <span>· {formatDeal(sow.deal_value)}</span>}
+                  {sow?.methodology && <span>· {sow.methodology}</span>}
+                  {checklistRole && <span>· {roleLabel(checklistRole)}</span>}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 'var(--spacing-sm)',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                }}
+              >
                 {esap && (
                   <span
                     style={{
-                      padding: '4px 12px',
+                      padding: '3px 10px',
                       borderRadius: 'var(--radius-full)',
                       fontSize: 'var(--font-size-xs)',
                       fontWeight: 'var(--font-weight-semibold)',
@@ -1004,10 +977,10 @@ export default function DrmReview() {
                     {esap.toUpperCase()}
                   </span>
                 )}
-                {alreadyApproved && (
+                {alreadyApproved ? (
                   <span
                     style={{
-                      padding: '4px 12px',
+                      padding: '3px 10px',
                       borderRadius: 'var(--radius-full)',
                       fontSize: 'var(--font-size-xs)',
                       fontWeight: 'var(--font-weight-semibold)',
@@ -1017,404 +990,175 @@ export default function DrmReview() {
                   >
                     Approved
                   </span>
+                ) : (
+                  <span
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: 'var(--radius-full)',
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      backgroundColor: 'rgba(124,58,237,0.1)',
+                      color: 'var(--color-accent-purple, #7c3aed)',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {currentStage?.display_name || 'DRM Review'}
+                  </span>
                 )}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--spacing-xl)', flexWrap: 'wrap' }}>
-              {sow?.customer_name && (
-                <span className="text-sm text-secondary">
-                  <strong style={{ color: 'var(--color-text-primary)' }}>Customer:</strong>{' '}
-                  {sow.customer_name}
-                </span>
-              )}
-              <span className="text-sm text-secondary">
-                <strong style={{ color: 'var(--color-text-primary)' }}>Deal:</strong>{' '}
-                {formatDeal(sow?.deal_value)}
-              </span>
-              {sow?.methodology && (
-                <span className="text-sm text-secondary">
-                  <strong style={{ color: 'var(--color-text-primary)' }}>Methodology:</strong>{' '}
-                  {sow.methodology}
-                </span>
-              )}
-              <span className="text-sm text-secondary">
-                <strong style={{ color: 'var(--color-text-primary)' }}>Your Role:</strong>{' '}
-                {roleLabel(checklistRole)}
-              </span>
-            </div>
 
-            {/* Status tracker */}
-            <div style={{ marginTop: 'var(--spacing-lg)' }}>
+            {/* Phase tracker */}
+            <div style={{ marginBottom: 'var(--spacing-sm)' }}>
               <WorkflowProgress
                 sowId={sow?.id}
                 currentStage={sow?.status}
                 reviewAssignments={reviewStatus?.assignments || []}
+                refreshKey={progressRefreshKey}
               />
             </div>
-          </div>
 
-          {/* Internal review results banner */}
-          <InternalReviewBanner reviewStatus={reviewStatus} />
-
-          {/* Reviewer instructions from workflow stage config */}
-          {currentStage?.config?.reviewer_instructions && (
+            {/* Tab bar */}
             <div
               style={{
                 display: 'flex',
-                gap: 'var(--spacing-sm)',
-                padding: 'var(--spacing-sm) var(--spacing-md)',
-                marginBottom: 'var(--spacing-xl)',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--color-info-border, #93c5fd)',
-                backgroundColor: 'var(--color-info-bg, #eff6ff)',
-                color: 'var(--color-info-text, #1e40af)',
-                fontSize: 'var(--text-sm)',
-                lineHeight: 1.5,
+                gap: '2px',
+                marginTop: 'var(--spacing-sm)',
               }}
             >
-              <span style={{ flexShrink: 0 }}>ℹ</span>
-              <span>{currentStage.config.reviewer_instructions}</span>
-            </div>
-          )}
-
-          {/* Two-column body */}
-          <div style={{ display: 'flex', gap: 'var(--spacing-xl)', alignItems: 'flex-start' }}>
-            {/* Left: Persona dashboard */}
-            <div
-              style={{
-                flex: '0 0 55%',
-                minWidth: 0,
-                border: '1px solid var(--color-border-default)',
-                borderRadius: 'var(--radius-xl)',
-                backgroundColor: 'var(--color-bg-secondary)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  borderBottom: '1px solid var(--color-border-default)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 'var(--font-size-sm)',
-                    fontWeight: 'var(--font-weight-semibold)',
-                  }}
-                >
-                  Your Focus Areas
-                </span>
-                <Link
-                  href={`/sow/${id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-accent-purple, #7c3aed)',
-                    textDecoration: 'none',
-                  }}
-                >
-                  View Full SoW ↗
-                </Link>
-              </div>
-              <div style={{ padding: 'var(--spacing-md)', overflowY: 'auto', maxHeight: '70vh' }}>
-                <PersonaDashboard
-                  role={checklistRole}
-                  summaryData={summaryData}
-                  loading={summaryLoading}
-                />
-
-                {/* AI role-specific insights — hidden when endpoint not shipped */}
-                {insightsLoading && (
-                  <div
+              {REVIEW_TABS.map((tab) => {
+                const active = activeReviewTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveReviewTab(tab.key)}
                     style={{
-                      marginTop: 'var(--spacing-md)',
-                      padding: 'var(--spacing-md)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: '1px solid var(--color-border-default)',
-                      backgroundColor: 'var(--color-bg-primary)',
-                      textAlign: 'center',
+                      background: 'none',
+                      border: 'none',
+                      padding: '8px 16px',
+                      fontSize: 'var(--font-size-sm)',
+                      fontWeight: active ? 'var(--font-weight-semibold)' : 'normal',
+                      color: active
+                        ? 'var(--color-accent-purple, #7c3aed)'
+                        : 'var(--color-text-secondary)',
+                      borderBottom: active
+                        ? '2px solid var(--color-accent-purple, #7c3aed)'
+                        : '2px solid transparent',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    <span
-                      style={{
-                        fontSize: 'var(--font-size-xs)',
-                        color: 'var(--color-text-tertiary)',
-                      }}
-                    >
-                      Loading AI insights…
-                    </span>
-                  </div>
-                )}
-                {!insightsLoading && insightsData?.summary && (
-                  <div
-                    style={{
-                      marginTop: 'var(--spacing-md)',
-                      border: '1px solid var(--color-border-default)',
-                      borderRadius: 'var(--radius-lg)',
-                      overflow: 'hidden',
-                      backgroundColor: 'var(--color-bg-primary)',
-                    }}
-                  >
-                    <div
-                      style={{
-                        padding: 'var(--spacing-sm) var(--spacing-md)',
-                        borderBottom: '1px solid var(--color-border-default)',
-                        backgroundColor: 'var(--color-bg-secondary)',
-                      }}
-                    >
+                    {tab.label}
+                    {tab.badge && (
                       <span
                         style={{
-                          fontSize: 'var(--font-size-xs)',
+                          fontSize: '10px',
+                          padding: '1px 6px',
+                          borderRadius: 'var(--radius-full)',
+                          backgroundColor: active
+                            ? 'rgba(124,58,237,0.1)'
+                            : 'var(--color-bg-tertiary)',
+                          color: active
+                            ? 'var(--color-accent-purple, #7c3aed)'
+                            : 'var(--color-text-tertiary)',
                           fontWeight: 'var(--font-weight-semibold)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          color: 'var(--color-text-tertiary)',
                         }}
                       >
-                        AI Insights
+                        {tab.badge}
                       </span>
-                    </div>
-                    <div style={{ padding: 'var(--spacing-md)' }}>
-                      <p
-                        style={{
-                          margin: '0 0 var(--spacing-sm)',
-                          fontSize: 'var(--font-size-sm)',
-                          color: 'var(--color-text-primary)',
-                          lineHeight: 'var(--line-height-relaxed)',
-                        }}
-                      >
-                        {insightsData.summary}
-                      </p>
-                      {Array.isArray(insightsData.flags) && insightsData.flags.length > 0 && (
-                        <div
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '4px',
-                            marginTop: 'var(--spacing-xs)',
-                          }}
-                        >
-                          {insightsData.flags.map((flag, i) => (
-                            <div
-                              key={i}
-                              style={{
-                                fontSize: 'var(--font-size-xs)',
-                                color: 'var(--color-warning)',
-                                padding: '2px 0 2px 8px',
-                              }}
-                            >
-                              ⚠{' '}
-                              {typeof flag === 'string'
-                                ? flag
-                                : flag.message || JSON.stringify(flag)}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+        </div>
 
-            {/* Right: Checklist + AI + actions */}
+        {/* ── Tab content ──────────────────────────────────────────────── */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            padding: 'var(--spacing-md) var(--spacing-xl) var(--spacing-md)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* ── Review tab ─────────────────────────────────────────── */}
+          {activeReviewTab === 'review' && (
             <div
+              className="custom-scrollbar"
               style={{
-                flex: '0 0 calc(45% - var(--spacing-xl))',
-                minWidth: 0,
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 'var(--spacing-md)',
               }}
             >
-              {/* Checklist card */}
-              <div
-                style={{
-                  border: '1px solid var(--color-border-default)',
-                  borderRadius: 'var(--radius-xl)',
-                  backgroundColor: 'var(--color-bg-secondary)',
-                  overflow: 'hidden',
-                }}
-              >
+              {/* Out-of-stage banner */}
+              {!isStageCurrent && currentStage && !alreadyApproved && (
                 <div
                   style={{
-                    padding: 'var(--spacing-sm) var(--spacing-md)',
-                    borderBottom: '1px solid var(--color-border-default)',
+                    flexShrink: 0,
+                    padding: 'var(--spacing-sm) var(--spacing-lg)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid rgba(245,158,11,0.3)',
+                    backgroundColor: 'rgba(245,158,11,0.08)',
+                    marginBottom: 'var(--spacing-md)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-warning)',
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: 'var(--font-size-sm)',
-                      fontWeight: 'var(--font-weight-semibold)',
-                    }}
-                  >
-                    Review Checklist
-                  </span>
+                  This SoW has moved past DRM Review to <strong>{currentStage.display_name}</strong>
+                  . Your actions here may no longer affect the workflow.
                 </div>
-                <div style={{ padding: 'var(--spacing-md)' }}>
-                  {checklistItems.length > 0 ? (
-                    <ReviewChecklist
-                      items={checklistItems}
-                      responses={responses}
-                      onChange={setResponses}
-                      readOnly={isMyDone}
-                      mode={checklistMode}
-                      generatedAt={checklistGeneratedAt}
-                      sowChanged={checklistSowChanged}
-                      regenerating={regeneratingChecklist}
-                      onRegenerate={checklistAssignmentId ? handleRegenerateChecklist : undefined}
-                    />
-                  ) : (
-                    <p
-                      style={{
-                        fontSize: 'var(--font-size-sm)',
-                        color: 'var(--color-text-secondary)',
-                      }}
-                    >
-                      No checklist items for this role.
-                    </p>
-                  )}
+              )}
+
+              {/* Reviewer instructions */}
+              {currentStage?.config?.reviewer_instructions && (
+                <div
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    gap: 'var(--spacing-sm)',
+                    padding: 'var(--spacing-sm) var(--spacing-md)',
+                    marginBottom: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--color-info-border, #93c5fd)',
+                    backgroundColor: 'var(--color-info-bg, #eff6ff)',
+                    color: 'var(--color-info-text, #1e40af)',
+                    fontSize: 'var(--text-sm)',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>ℹ</span>
+                  <span>{currentStage.config.reviewer_instructions}</span>
                 </div>
+              )}
+
+              {/* Internal review results banner */}
+              <div style={{ flexShrink: 0 }}>
+                <InternalReviewBanner reviewStatus={reviewStatus} />
               </div>
 
-              {/* AI panel */}
-              {aiError && (
-                <AIUnavailableBanner error={aiError} context="analysis" onRetry={handleRunAI} />
-              )}
-              <AISuggestionsPanel
-                analysisResult={aiResult}
-                collapsed={false}
-                showRunButton={!aiResult}
-                onRunAnalysis={handleRunAI}
-                loading={aiLoading}
-                autoRun
-              />
-
-              {/* Action buttons */}
-              {!isMyDone && !alreadyApproved && (
-                <div
-                  style={{
-                    border: '1px solid var(--color-border-default)',
-                    borderRadius: 'var(--radius-xl)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    padding: 'var(--spacing-md)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--spacing-sm)',
-                  }}
-                >
-                  {hasChanges && !saving && (
-                    <span
-                      className="text-xs"
-                      style={{
-                        color: 'var(--color-warning)',
-                        fontWeight: 600,
-                        textAlign: 'center',
-                      }}
-                    >
-                      ● Unsaved changes
-                    </span>
-                  )}
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={handleSaveProgress}
-                    disabled={saving || !hasChanges}
-                    style={{
-                      width: '100%',
-                      opacity: saving || !hasChanges ? 0.6 : 1,
-                    }}
-                  >
-                    {saving ? 'Saving…' : 'Save Progress'}
-                  </button>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => setModal('approved')}
-                    disabled={!allRequiredChecked}
-                    style={{ width: '100%' }}
-                    title={!allRequiredChecked ? 'Complete all required checklist items first' : ''}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setModal('approved-with-conditions')}
-                    disabled={!allRequiredChecked}
-                    style={{ width: '100%' }}
-                  >
-                    Approve with Conditions
-                  </button>
-                  <button
-                    className="btn btn-sm"
-                    onClick={() => setModal('send-back')}
-                    style={{
-                      width: '100%',
-                      backgroundColor: 'rgba(245,158,11,0.1)',
-                      color: 'var(--color-warning)',
-                      border: '1px solid rgba(245,158,11,0.3)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '6px 12px',
-                      cursor: 'pointer',
-                      fontSize: 'var(--font-size-sm)',
-                    }}
-                  >
-                    Send Back
-                  </button>
-                </div>
-              )}
-
-              {/* Completed state */}
-              {isMyDone && !alreadyApproved && (
-                <div
-                  style={{
-                    border: '1px solid var(--color-border-default)',
-                    borderRadius: 'var(--radius-xl)',
-                    backgroundColor: 'var(--color-bg-secondary)',
-                    padding: 'var(--spacing-md)',
-                    textAlign: 'center',
-                  }}
-                >
-                  <div style={{ fontSize: '1.5rem', marginBottom: '8px' }}>✅</div>
-                  <p
-                    style={{
-                      fontSize: 'var(--font-size-sm)',
-                      color: 'var(--color-text-secondary)',
-                      margin: 0,
-                    }}
-                  >
-                    Your review is submitted. Waiting for other DRM reviewers.
-                  </p>
-                </div>
-              )}
-
-              {/* Advance to Approved button */}
-              {canAdvance && (
-                <button
-                  className="btn btn-primary"
-                  onClick={handleAdvance}
-                  disabled={advancing}
-                  style={{
-                    width: '100%',
-                    padding: 'var(--spacing-sm)',
-                    backgroundColor: 'var(--color-success)',
-                    borderColor: 'var(--color-success)',
-                  }}
-                >
-                  {advancing ? 'Marking as Approved…' : '✓ Mark as Approved'}
-                </button>
-              )}
-
+              {/* Approved announcement — hoisted out of the right column so
+                  it stays prominent when the right column collapses (showChecklist
+                  is false once the SoW is approved). */}
               {alreadyApproved && (
                 <div
                   style={{
+                    flexShrink: 0,
                     border: '1px solid rgba(74,222,128,0.3)',
                     borderRadius: 'var(--radius-xl)',
                     backgroundColor: 'rgba(74,222,128,0.08)',
                     padding: 'var(--spacing-md)',
                     textAlign: 'center',
+                    marginBottom: 'var(--spacing-md)',
                   }}
                 >
                   <div style={{ fontSize: '1.5rem', marginBottom: '8px' }}>🎉</div>
@@ -1430,18 +1174,504 @@ export default function DrmReview() {
                   </p>
                 </div>
               )}
+
+              {/* Resizable split: SoW reader (left) | review controls (right).
+                  Explicit height (not min-height) bounds the SoW reader so its
+                  internal scroll engages — without this the row would grow to
+                  the SoW's natural height and force the reviewer to scroll
+                  past the entire document just to reach the focus area below.
+                  The calc() leaves ~320px above (header + progress + tabs +
+                  padding) and the minHeight floor keeps the split usable on
+                  short viewports. */}
+              <div
+                ref={splitContainerRef}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: showChecklist
+                    ? `${leftPct}fr ${SPLIT_DIVIDER_PX}px ${100 - leftPct}fr`
+                    : '1fr',
+                  alignItems: 'stretch',
+                  height: 'calc(100vh - 320px)',
+                  minHeight: '450px',
+                  flexShrink: 0,
+                }}
+              >
+                {/* Left: SoW reader */}
+                <div
+                  className="card"
+                  style={{
+                    padding: 0,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minWidth: 0,
+                    minHeight: 0,
+                  }}
+                >
+                  <SoWDocumentReader sow={sow} onContentChange={loadAll} />
+                </div>
+
+                {/* Drag handle */}
+                {showChecklist && (
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize panels"
+                    onMouseDown={startResize}
+                    onDoubleClick={() => {
+                      setLeftPct(SPLIT_DEFAULT_LEFT_PCT);
+                      try {
+                        localStorage.setItem(SPLIT_STORAGE_KEY, String(SPLIT_DEFAULT_LEFT_PCT));
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    title="Drag to resize · double-click to reset"
+                    style={{
+                      cursor: 'col-resize',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      position: 'relative',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '4px',
+                        height: '44px',
+                        borderRadius: '2px',
+                        backgroundColor: 'var(--color-border-default)',
+                        transition: 'background-color 0.15s',
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Right: review panel */}
+                {showChecklist && (
+                  <div
+                    className="custom-scrollbar"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--spacing-md)',
+                      minWidth: 0,
+                      minHeight: 0,
+                      overflowY: 'auto',
+                      scrollbarGutter: 'stable',
+                      padding: 'var(--spacing-md)',
+                      border: '1px solid var(--color-border-default)',
+                      borderRadius: 'var(--radius-lg)',
+                      backgroundColor: 'var(--color-bg-primary)',
+                    }}
+                  >
+                    {/* Role card */}
+                    <div
+                      className="card"
+                      style={{ padding: 'var(--spacing-md) var(--spacing-lg)', flexShrink: 0 }}
+                    >
+                      <p
+                        style={{
+                          margin: '0 0 2px',
+                          fontSize: 'var(--font-size-xs)',
+                          color: 'var(--color-text-tertiary)',
+                        }}
+                      >
+                        Reviewing as
+                      </p>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontWeight: 'var(--font-weight-semibold)',
+                          color: 'var(--color-text-primary)',
+                        }}
+                      >
+                        {checklistDisplayName || roleLabel(checklistRole)}
+                      </p>
+                      {checklistFocusAreas.length > 0 && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '4px',
+                            marginTop: 'var(--spacing-xs)',
+                          }}
+                        >
+                          {checklistFocusAreas.map((fa, idx) => (
+                            <span
+                              key={idx}
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: 'var(--radius-full)',
+                                backgroundColor: 'var(--color-bg-tertiary)',
+                                border: '1px solid var(--color-border-default)',
+                                fontSize: '11px',
+                                color: 'var(--color-text-secondary)',
+                              }}
+                            >
+                              {fa}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Checklist */}
+                    <div className="card" style={{ padding: 'var(--spacing-lg)', flexShrink: 0 }}>
+                      <h4
+                        style={{
+                          margin: '0 0 var(--spacing-md)',
+                          fontSize: 'var(--font-size-sm)',
+                          fontWeight: 'var(--font-weight-semibold)',
+                        }}
+                      >
+                        Review Checklist
+                      </h4>
+                      {checklistItems.length > 0 ? (
+                        <ReviewChecklist
+                          items={checklistItems}
+                          responses={responses}
+                          onChange={setResponses}
+                          readOnly={isMyDone}
+                          mode={checklistMode}
+                          generatedAt={checklistGeneratedAt}
+                          sowChanged={checklistSowChanged}
+                          regenerating={regeneratingChecklist}
+                          onRegenerate={
+                            checklistAssignmentId ? handleRegenerateChecklist : undefined
+                          }
+                        />
+                      ) : (
+                        <p
+                          style={{
+                            fontSize: 'var(--font-size-sm)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >
+                          No checklist items for this role.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* AI suggestions */}
+                    {aiError && (
+                      <AIUnavailableBanner
+                        error={aiError}
+                        context="analysis"
+                        onRetry={handleRunAI}
+                      />
+                    )}
+                    <div style={{ flexShrink: 0 }}>
+                      <AISuggestionsPanel
+                        analysisResult={aiResult}
+                        collapsed={false}
+                        showRunButton={!aiResult}
+                        onRunAnalysis={handleRunAI}
+                        loading={aiLoading}
+                        autoRun
+                      />
+                    </div>
+
+                    {/* Action buttons — open assignment */}
+                    {!isMyDone && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 'var(--spacing-sm)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {hasChanges && !saving && (
+                          <span
+                            className="text-xs"
+                            style={{
+                              color: 'var(--color-warning)',
+                              fontWeight: 600,
+                              textAlign: 'center',
+                            }}
+                          >
+                            ● Unsaved changes
+                          </span>
+                        )}
+                        <button
+                          className="btn btn-secondary"
+                          onClick={handleSaveProgress}
+                          disabled={saving || !hasChanges}
+                          title={
+                            !hasChanges && !saving
+                              ? 'No unsaved changes'
+                              : 'Saves your current checklist without submitting your decision'
+                          }
+                          style={{ opacity: saving || !hasChanges ? 0.6 : 1 }}
+                        >
+                          {saving ? 'Saving…' : 'Save Progress'}
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => setModal('approved')}
+                          disabled={!allRequiredChecked || submitting}
+                          title={
+                            !allRequiredChecked ? 'Complete all required checklist items first' : ''
+                          }
+                        >
+                          Approve ✓
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => setModal('approved-with-conditions')}
+                          disabled={!allRequiredChecked || submitting}
+                        >
+                          Approve with Conditions
+                        </button>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => setModal('send-back')}
+                          disabled={submitting}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'rgba(245,158,11,0.1)',
+                            color: 'var(--color-warning)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                        >
+                          Send Back
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Completed state — this reviewer done, SoW not yet approved */}
+                    {isMyDone && !alreadyApproved && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 'var(--spacing-sm)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: 'var(--spacing-md)',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: 'rgba(74,222,128,0.1)',
+                            border: '1px solid rgba(74,222,128,0.3)',
+                            textAlign: 'center',
+                            fontSize: 'var(--font-size-sm)',
+                            color: 'var(--color-success)',
+                            fontWeight: 'var(--font-weight-semibold)',
+                          }}
+                        >
+                          ✓ Your review is submitted. Waiting for other DRM reviewers.
+                        </div>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => setModal('send-back')}
+                          disabled={submitting}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'rgba(245,158,11,0.1)',
+                            color: 'var(--color-warning)',
+                            border: '1px solid rgba(245,158,11,0.3)',
+                            borderRadius: 'var(--radius-md)',
+                            padding: '6px 12px',
+                            cursor: 'pointer',
+                            fontSize: 'var(--font-size-sm)',
+                          }}
+                        >
+                          Send Back
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Advance to Approved button — DRM-only gating */}
+                    {canAdvance && (
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleAdvance}
+                        disabled={advancing}
+                        style={{
+                          width: '100%',
+                          padding: 'var(--spacing-sm)',
+                          backgroundColor: 'var(--color-success)',
+                          borderColor: 'var(--color-success)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {advancing ? 'Marking as Approved…' : '✓ Mark as Approved'}
+                      </button>
+                    )}
+
+                    {/* Note: the "🎉 SoW Approved" banner is rendered above
+                        the split (full-width) since the right column is
+                        hidden via showChecklist when alreadyApproved is true. */}
+                  </div>
+                )}
+              </div>
+
+              {/* Focus area — full-width below the split */}
+              <div
+                style={{
+                  marginTop: 'var(--spacing-lg)',
+                  flexShrink: 0,
+                  border: '1px solid var(--color-border-default)',
+                  borderRadius: 'var(--radius-xl)',
+                  backgroundColor: 'var(--color-bg-secondary)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    padding: 'var(--spacing-sm) var(--spacing-md)',
+                    borderBottom: '1px solid var(--color-border-default)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 'var(--font-size-sm)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                    }}
+                  >
+                    Your Focus Areas
+                  </span>
+                  <Link
+                    href={`/sow/${id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--color-accent-purple, #7c3aed)',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    View Full SoW ↗
+                  </Link>
+                </div>
+                <div style={{ padding: 'var(--spacing-md)' }}>
+                  <PersonaDashboard
+                    role={checklistRole}
+                    summaryData={summaryData}
+                    loading={summaryLoading}
+                  />
+                </div>
+              </div>
+
+              {/* AI role-specific insights */}
+              {insightsLoading && (
+                <div
+                  style={{
+                    marginTop: 'var(--spacing-md)',
+                    padding: 'var(--spacing-md)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--color-border-default)',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    textAlign: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--color-text-tertiary)',
+                    }}
+                  >
+                    Loading AI insights…
+                  </span>
+                </div>
+              )}
+              {!insightsLoading && insightsData?.summary && (
+                <div
+                  style={{
+                    marginTop: 'var(--spacing-md)',
+                    border: '1px solid var(--color-border-default)',
+                    borderRadius: 'var(--radius-lg)',
+                    overflow: 'hidden',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: 'var(--spacing-sm) var(--spacing-md)',
+                      borderBottom: '1px solid var(--color-border-default)',
+                      backgroundColor: 'var(--color-bg-secondary)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 'var(--font-size-xs)',
+                        fontWeight: 'var(--font-weight-semibold)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: 'var(--color-text-tertiary)',
+                      }}
+                    >
+                      AI Insights
+                    </span>
+                  </div>
+                  <div style={{ padding: 'var(--spacing-md)' }}>
+                    <p
+                      style={{
+                        margin: '0 0 var(--spacing-sm)',
+                        fontSize: 'var(--font-size-sm)',
+                        color: 'var(--color-text-primary)',
+                        lineHeight: 'var(--line-height-relaxed)',
+                      }}
+                    >
+                      {insightsData.summary}
+                    </p>
+                    {Array.isArray(insightsData.flags) && insightsData.flags.length > 0 && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                          marginTop: 'var(--spacing-xs)',
+                        }}
+                      >
+                        {insightsData.flags.map((flag, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              fontSize: 'var(--font-size-xs)',
+                              color: 'var(--color-warning)',
+                              padding: '2px 0 2px 8px',
+                            }}
+                          >
+                            ⚠{' '}
+                            {typeof flag === 'string' ? flag : flag.message || JSON.stringify(flag)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* DRM reviewer status footer */}
+              <div style={{ flexShrink: 0 }}>
+                <DrmReviewerStatus reviewStatus={reviewStatus} currentUserId={user?.id} />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* DRM reviewer status footer */}
-          <DrmReviewerStatus reviewStatus={reviewStatus} />
-
-          {/* Attachments */}
-          {sow && (
+          {/* ── Attachments tab ────────────────────────────────────── */}
+          {activeReviewTab === 'attachments' && sow && (
             <div
+              className="custom-scrollbar"
               style={{
-                padding: 'var(--spacing-xl)',
-                borderTop: '1px solid var(--color-border-default)',
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
               }}
             >
               <AttachmentManager
@@ -1454,44 +1684,38 @@ export default function DrmReview() {
             </div>
           )}
 
-          {/* Conditions of Approval */}
-          {sow && (
+          {/* ── Conditions tab ─────────────────────────────────────── */}
+          {activeReviewTab === 'conditions' && sow && (
             <div
+              className="custom-scrollbar"
               style={{
-                padding: 'var(--spacing-xl)',
-                borderTop: '1px solid var(--color-border-default)',
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
               }}
             >
-              <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 0 }}>
-                Conditions of Approval
-              </h3>
               <COATracker
                 sowId={sow.id}
                 authFetch={authFetch}
                 readOnly={false}
-                onStatusChange={() => {}}
+                onStatusChange={() => setProgressRefreshKey((k) => k + 1)}
               />
             </div>
           )}
 
-          {/* Activity Log */}
-          {sow && (
+          {/* ── Activity tab ───────────────────────────────────────── */}
+          {activeReviewTab === 'activity' && sow && (
             <div
+              className="custom-scrollbar"
               style={{
-                padding: 'var(--spacing-xl)',
-                borderTop: '1px solid var(--color-border-default)',
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                scrollbarGutter: 'stable',
               }}
             >
-              <div className="card">
-                <h3
-                  style={{
-                    fontSize: 'var(--font-size-base)',
-                    fontWeight: 600,
-                    marginBottom: 'var(--spacing-md)',
-                  }}
-                >
-                  Activity Log
-                </h3>
+              <div className="card" style={{ padding: 'var(--spacing-lg)' }}>
                 <ActivityLog sowId={sow.id} />
               </div>
             </div>

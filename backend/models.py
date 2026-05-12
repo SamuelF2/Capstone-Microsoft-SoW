@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -298,11 +298,60 @@ class ViolationResult(BaseModel):
 
 
 class RiskResult(BaseModel):
-    """A single identified risk."""
+    """A single identified risk with probability × impact scoring per framework §4."""
 
-    category: str  # "Staffing", "Timeline", "Budget", etc.
-    level: str  # "high", "medium", "low"
+    category: str  # Financial | Delivery | Technical | Compliance | Reputational | Strategic
+    level: str  # legacy severity: "high" | "medium" | "low" (kept for back-compat)
     description: str
+
+    # Framework scoring fields. Defaults make legacy JSONB rows deserialise cleanly.
+    probability: int = 3  # 1..5 per framework §4.1
+    impact: int = 3  # 1..5 per framework §4.2
+    priority_score: int = 9  # probability × impact, 1..25
+    priority_band: str = "Medium"  # Very Low | Low | Medium | High | Very High
+    mitigation: str | None = None
+    has_mitigation: bool = False
+    risk_id: str | None = None  # e.g. "FIN-001"
+
+
+class TriggeredRisk(BaseModel):
+    """Rule-triggered risk (banned phrase / pattern hit). Distinct from RiskResult
+    because triggered risks don't have probability/impact — they have a trigger phrase
+    and a section location."""
+
+    section: str
+    trigger: str
+    reason: str
+    severity: str  # "high" | "medium" | "low" (normalized)
+    suggestion: str | None = None
+
+
+class RiskAssessmentResult(BaseModel):
+    """Aggregate per-SoW risk assessment consumed by RiskAssessmentSection."""
+
+    risks: list[RiskResult] = []
+    triggered: list[TriggeredRisk] = []
+    overall_risk_score: float = 0.0  # max priority_score across risks, 0..25
+    risk_band: str = "Very Low"  # band of overall_risk_score
+    category_breakdown: dict[str, int] = Field(default_factory=dict)
+    band_breakdown: dict[str, int] = Field(default_factory=dict)
+    has_mitigation_coverage: float = 0.0  # ratio 0..1
+
+
+class MitigationPattern(BaseModel):
+    """A single mitigation pattern within a category playbook."""
+
+    risk: str
+    risk_id: str
+    mitigations: list[str]
+
+
+class MitigationPlaybook(BaseModel):
+    """Category-level mitigation playbook (response model for /api/rules/risk-framework)."""
+
+    category: str
+    patterns: list[MitigationPattern] = []
+    note: str | None = None
 
 
 class ApprovalRouting(BaseModel):
@@ -337,7 +386,8 @@ class AIAnalysisResult(BaseModel):
     """Complete AI analysis result for a SoW."""
 
     violations: list[ViolationResult]
-    risks: list[RiskResult]
+    risk_assessment: RiskAssessmentResult = Field(default_factory=RiskAssessmentResult)
+    risks: list[RiskResult] = []  # back-compat mirror of risk_assessment.risks
     approval: ApprovalRouting
     checklist: list[ChecklistSuggestion]
     suggestions: list[SectionSuggestion]
@@ -347,6 +397,14 @@ class AIAnalysisResult(BaseModel):
     generation_meta: dict[str, Any] | None = (
         None  # {endpoints_used, latency_ms, kg_node_id, model_version}
     )
+
+    @model_validator(mode="after")
+    def _mirror_risks(self) -> AIAnalysisResult:
+        # Keep self.risks in sync with risk_assessment.risks so legacy callers
+        # reading .risks keep working without changes.
+        if self.risk_assessment and self.risk_assessment.risks and not self.risks:
+            self.risks = self.risk_assessment.risks
+        return self
 
 
 # ── Review  (Phase 2) ───────────────────────────────────────────────────────

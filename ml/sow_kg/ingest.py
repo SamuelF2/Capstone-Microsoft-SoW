@@ -478,7 +478,12 @@ def ingest_directory(driver: Driver, data_dir: Path, banned_phrases: list[dict] 
 
 
 def get_banned_phrases(driver: Driver) -> list[dict]:
+    # Filter at the source so downstream consumers (ingest markdown check,
+    # LLM prompt builders, etc.) never have to defend against null phrases.
+    # The schema constraint is UNIQUE-only, not NOT NULL, so a bad row in
+    # the graph is possible.
     with driver.session() as session:
         return session.run(
-            "MATCH (b:BannedPhrase) RETURN b.phrase AS phrase, b.severity AS severity, b.suggestion AS suggestion"
+            "MATCH (b:BannedPhrase) WHERE b.phrase IS NOT NULL AND b.phrase <> '' "
+            "RETURN b.phrase AS phrase, b.severity AS severity, b.suggestion AS suggestion"
         ).data()
