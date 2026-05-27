@@ -269,7 +269,10 @@ class TestUserUpsert:
             patch.object(database, "pg_pool", MagicMock()),
         ):
             database.pg_pool.acquire.return_value = ctx
-            user = await get_current_user(token="fake-token")
+            # role_override defaults to a Header() instance when called outside
+            # FastAPI's dependency-resolution flow; pass None explicitly so the
+            # production code's `.strip()` doesn't fire on a non-string default.
+            user = await get_current_user(token="fake-token", role_override=None)
 
         assert user.id == 42
         assert user.email == "bob@contoso.com"
@@ -317,7 +320,7 @@ class TestUserUpsert:
             patch.object(database, "pg_pool", MagicMock()),
         ):
             database.pg_pool.acquire.return_value = ctx
-            user = await get_current_user(token="fake-token")
+            user = await get_current_user(token="fake-token", role_override=None)
 
         assert user.id == 7
         assert user.oid == "existing-oid"

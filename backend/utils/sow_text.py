@@ -67,6 +67,121 @@ def flatten_sow_content(content: dict[str, Any] | None) -> str:
     return "\n\n".join(parts)
 
 
+def _looks_like_risks_list(value: Any) -> bool:
+    """Heuristic: ``value`` is a non-empty list of risk-shaped objects.
+
+    The SoW author UI (assumptionsRisks.risks) stores each entry as
+    ``{description, severity, owner?, mitigation?}`` — that's what we want
+    to surface to the ML risk extractor as a pipe table.
+    """
+    if not isinstance(value, list) or not value:
+        return False
+    keys_seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            return False
+        keys_seen.update(item.keys())
+    return "description" in keys_seen and "severity" in keys_seen
+
+
+def _risks_to_markdown_table(risks: list[dict]) -> str:
+    """Render a risks list as a Markdown pipe table the ML extractor parses.
+
+    The column headers match the substrings ``ml/sow_kg/ingest_markdown.py``
+    looks for (``risk``, ``severity``, ``mitigation``, ``probability``,
+    ``impact``, ``category``), so adding any of those fields to the SoW
+    risk objects in the future will flow through without further changes.
+    """
+    cols = ["Risk", "Severity", "Probability", "Impact", "Mitigation", "Category", "Owner"]
+    lines = [
+        "| " + " | ".join(cols) + " |",
+        "|" + "|".join("---" for _ in cols) + "|",
+    ]
+    for r in risks:
+        cells = [
+            str(r.get("description", "")).replace("|", "\\|").replace("\n", " ").strip(),
+            str(r.get("severity", "")).strip(),
+            str(r.get("probability", "")).strip(),
+            str(r.get("impact", "")).strip(),
+            str(r.get("mitigation", "")).replace("|", "\\|").replace("\n", " ").strip(),
+            str(r.get("category", "")).strip(),
+            str(r.get("owner", "")).replace("|", "\\|").replace("\n", " ").strip(),
+        ]
+        # Skip rows that have neither a description nor any severity signal —
+        # those are usually placeholder rows from the form's "add row" button.
+        if not cells[0] and not cells[1]:
+            continue
+        lines.append("| " + " | ".join(cells) + " |")
+    # If every row was blank we don't want a header-only table polluting the
+    # flattened body; the caller treats "" as "fall back to normal flatten".
+    if len(lines) == 2:
+        return ""
+    return "\n".join(lines)
+
+
+def _flatten_markdown(value: Any, key: str | None = None) -> str:
+    """Like :func:`_flatten` but rewrites ``risks: [...]`` arrays into a pipe
+    table so the ML extractor's regex parser can pick them up.
+
+    Everything that isn't a recognised risks list falls through to the same
+    rules :func:`_flatten` uses.
+    """
+    if key == "risks" and _looks_like_risks_list(value):
+        table = _risks_to_markdown_table(value)
+        if table:
+            return table + "\n"
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return ("Yes" if value else "No") + "\n"
+    if isinstance(value, int | float):
+        return f"{value}\n"
+    if isinstance(value, str):
+        return value + "\n" if value else ""
+    if isinstance(value, list):
+        return "".join(_flatten_markdown(item, key=key) for item in value)
+    if isinstance(value, dict):
+        out: list[str] = []
+        for k, v in value.items():
+            sub = _flatten_markdown(v, key=k).rstrip("\n")
+            if not sub:
+                continue
+            # Inline risk tables already include their own heading semantics
+            # via the column row; for everything else, prefix the human key
+            # so structured fields stay readable.
+            if k == "risks" and sub.startswith("| "):
+                out.append(f"{sub}\n")
+            else:
+                out.append(f"{_humanise_key(k)}\n{sub}\n")
+        return "".join(out)
+    return f"{value}\n"
+
+
+def flatten_sow_content_markdown(content: dict[str, Any] | None) -> str:
+    """Flatten ``sow.content`` with each section prefixed by ``## <Heading>``.
+
+    The ML KG ingester's section extractor regexes for Markdown headers
+    (``^#{1,4}\\s+(.+)$``), so this variant exists alongside
+    :func:`flatten_sow_content` for the ML ingest payload — the plain-text
+    flattener stays unchanged because review/comment offsets depend on its
+    exact byte layout.
+
+    Structured ``risks`` arrays are rewritten as Markdown pipe tables so the
+    downstream parser (``ml/sow_kg/ingest_markdown.py:_extract_risks``) can
+    extract probability/impact/severity from the SoW the user authored in
+    the form UI, not just SoWs uploaded as free-text Markdown documents.
+    """
+    if not isinstance(content, dict):
+        return ""
+    parts: list[str] = []
+    for key, val in content.items():
+        body = _flatten_markdown(val, key=key).rstrip("\n").rstrip()
+        if not body:
+            continue
+        parts.append(f"## {_humanise_key(key)}\n{body}")
+    return "\n\n".join(parts)
+
+
 def hash_sow_content(content: dict[str, Any] | None) -> str:
     """Stable hash of ``sow.content`` — used to detect SoW edits between
     cache writes and reads. Sorted keys + utf-8 encoding so two equivalent

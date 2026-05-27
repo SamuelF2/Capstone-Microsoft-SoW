@@ -132,14 +132,21 @@ class RetrievedContext:
 
 
 def _load_deal_context(driver: Driver, sow_id: str) -> DealContext:
+    # Prefer fields from a linked :DealContext node (added by PR #34 "Deal
+    # context"); fall back to fields stored directly on the :SOW node for
+    # SoWs that haven't been linked to a DealContext yet. The previous
+    # implementation only read :SOW properties so the link was invisible at
+    # retrieval time even after sync.
     with driver.session() as session:
         row = session.run(
             """
             MATCH (s:SOW {id: $sow_id})
+            OPTIONAL MATCH (s)-[:HAS_CONTEXT]->(dc:DealContext)
             OPTIONAL MATCH (s)-[:USES_METHODOLOGY]->(m:Methodology)
-            RETURN s.deal_value  AS deal_value,
-                   s.industry    AS industry,
-                   m.name        AS methodology
+            RETURN
+                coalesce(dc.total_revenue, s.deal_value)  AS deal_value,
+                coalesce(dc.industry,      s.industry)    AS industry,
+                m.name                                    AS methodology
             LIMIT 1
             """,
             sow_id=sow_id,

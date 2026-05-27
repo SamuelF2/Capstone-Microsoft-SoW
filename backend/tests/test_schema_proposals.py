@@ -313,7 +313,12 @@ class TestRoleOverrideHeader:
     """
 
     @pytest.mark.asyncio
-    async def test_admin_override_swaps_role_to_system_admin(self):
+    async def test_overridable_role_header_swaps_role(self):
+        """An X-Role-Override value in auth._OVERRIDABLE_ROLES swaps the role
+        for this request only. ``system-admin`` is intentionally excluded
+        from that allow-list to block header-driven privilege escalation —
+        that exclusion is exercised by ``test_unknown_override_is_ignored``.
+        """
         from auth import get_current_user
 
         async def fake_decode(_token):
@@ -346,8 +351,8 @@ class TestRoleOverrideHeader:
             patch("auth.decode_token", fake_decode),
             patch("database.pg_pool", pool),
         ):
-            user = await get_current_user(token="fake.jwt", role_override="system-admin")
-        assert user.role == "system-admin"
+            user = await get_current_user(token="fake.jwt", role_override="delivery-manager")
+        assert user.role == "delivery-manager"
 
     @pytest.mark.asyncio
     async def test_unknown_override_is_ignored(self):

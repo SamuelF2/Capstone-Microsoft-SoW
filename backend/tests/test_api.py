@@ -518,20 +518,53 @@ class TestUpdateSow:
 
 
 class TestUpdateSowStatus:
+    @staticmethod
+    def _wf_data_row():
+        """Minimal sow_workflow row covering the drm_review -> approved transition."""
+        return {
+            "workflow_data": {
+                "transitions": [
+                    {"from_stage": "drm_review", "to_stage": "approved"},
+                ],
+                "stages": [
+                    {"stage_key": "draft"},
+                    {"stage_key": "drm_review"},
+                    {"stage_key": "approved"},
+                ],
+            }
+        }
+
     def test_valid_status(self, auth_client):
         import database
 
-        _mock_pg_acquire(
-            database,
-            fetchval="drm_review",
-            fetchrow=_full_sow_row(status="approved"),
-        )
+        # PUT /api/sow/{id}/status issues four fetchrow calls in order:
+        #   1. require_collaborator                 (collaboration row)
+        #   2. _get_workflow_transitions            (workflow_data lookup)
+        #   3. doc-requirement gating fetch         (workflow_data lookup)
+        #   4. UPDATE sow_documents ... RETURNING * (final row)
+        conn = _mock_pg_acquire(database, fetchval="drm_review")
+        conn.fetchrow.side_effect = [
+            {"x": 1},
+            self._wf_data_row(),
+            {"workflow_data": None},
+            _full_sow_row(status="approved"),
+        ]
 
         resp = auth_client.put("/api/sow/1/status", json={"status": "approved"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "approved"
 
     def test_invalid_status_returns_400(self, auth_client):
+        import database
+
+        # Status validation runs after workflow_data is loaded but before the
+        # UPDATE, so only the first two fetchrow calls are reached.
+        conn = _mock_pg_acquire(database, fetchval="drm_review")
+        conn.fetchrow.side_effect = [
+            {"x": 1},
+            self._wf_data_row(),
+        ]
+
         resp = auth_client.put("/api/sow/1/status", json={"status": "bogus"})
         assert resp.status_code == 400
         assert "Invalid status" in resp.json()["detail"]

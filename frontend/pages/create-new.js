@@ -246,21 +246,52 @@ export default function CreateNew() {
       const sow = await res.json();
       const id = sow.id; // integer PK from PostgreSQL
 
-      // Add group collaborators if selected
+      // ─────────────────────────────────────────────────────────────────
+      // GROUP SYNC DISABLED.
+      //
+      // The block below would call POST /api/sow/{id}/collaborators/sync-group
+      // to auto-enroll every member of the selected Entra group as a
+      // collaborator (group owners as `group-owner`, non-owners as `viewer`).
+      // It is currently disabled because the sync endpoint requires the
+      // Microsoft Graph `GroupMember.Read.All` scope, which requires admin
+      // consent that is not available in the Azure-for-Students demo tenant.
+      // See the matching header banner in backend/routers/sow_roles.py for
+      // the full context and the steps to re-enable.
+      //
+      // While this is disabled, the group picker is informational: the user
+      // sees and can pick a group they belong to, but no collaborators are
+      // automatically added. They add collaborators individually through
+      // the existing add-collaborator UI on the SoW after creation.
+      // ─────────────────────────────────────────────────────────────────
       if (selectedGroupId) {
-        try {
-          const graphToken = await getGraphToken();
-          await fetch(`/api/sow/${id}/collaborators/sync-group`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(graphToken ? { Authorization: `Bearer ${graphToken}` } : {}),
-            },
-            body: JSON.stringify({ group_id: selectedGroupId }),
-          });
-        } catch {
-          console.warn('Group collaborator sync failed — add members manually');
-        }
+        console.info(
+          'Group selected; auto-enrollment is disabled — add collaborators manually after creation'
+        );
+        // try {
+        //   const graphToken = await getGraphToken();
+        //   if (!graphToken) {
+        //     console.warn('Graph token unavailable; add group members manually');
+        //   } else {
+        //     // authFetch attaches the backend ID token as Authorization for
+        //     // CurrentUser auth; the Graph token rides separately on
+        //     // X-Graph-Token so the two audiences don't collide.
+        //     const syncRes = await authFetch(`/api/sow/${id}/collaborators/sync-group`, {
+        //       method: 'POST',
+        //       headers: {
+        //         'Content-Type': 'application/json',
+        //         'X-Graph-Token': graphToken,
+        //       },
+        //       body: JSON.stringify({ group_id: selectedGroupId }),
+        //     });
+        //     if (!syncRes.ok) {
+        //       console.warn(
+        //         `Group collaborator sync returned ${syncRes.status}; add group members manually`
+        //       );
+        //     }
+        //   }
+        // } catch (err) {
+        //   console.warn('Group collaborator sync failed; add group members manually', err);
+        // }
       }
 
       // Cache the SoW record in localStorage for offline auto-save
@@ -318,9 +349,10 @@ export default function CreateNew() {
           return;
         }
 
-        // Call our backend proxy which forwards to Graph using this token
-        const res = await fetch('/api/users/me/groups', {
-          headers: { Authorization: `Bearer ${graphToken}` },
+        // authFetch attaches the backend ID token as Authorization for
+        // CurrentUser auth; the Graph token rides separately on X-Graph-Token.
+        const res = await authFetch('/api/users/me/groups', {
+          headers: { 'X-Graph-Token': graphToken },
         });
         if (cancelled) return;
         const data = res.ok ? await res.json() : { groups: [] };
