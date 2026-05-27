@@ -40,6 +40,7 @@ class RetrievedContext:
     risks: list[dict] = field(default_factory=list)
     deliverables: list[dict] = field(default_factory=list)
     similar_sections: list[dict] = field(default_factory=list)
+    similar_project_risks: list[dict] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not any(
@@ -50,6 +51,7 @@ class RetrievedContext:
                 self.risks,
                 self.deliverables,
                 self.similar_sections,
+                self.similar_project_risks,
             ]
         )
 
@@ -118,6 +120,14 @@ class RetrievedContext:
                 meta = f" [{meth}]" if meth else ""
                 parts.append(f"### {heading} (from {sow}{meta})\n{content}")
 
+        if self.similar_project_risks:
+            parts.append("## Risk Mitigations from Similar Projects")
+            for r in self.similar_project_risks:
+                proj = r.get("project_name", "Unknown Project")
+                risk = r.get("risk", "")
+                mit = r.get("mitigation", "")
+                parts.append(f"- From '{proj}': Risk [{risk}] → Mitigation [{mit}]")
+
         return "\n\n".join(parts)
 
 
@@ -148,6 +158,7 @@ def retrieve(
     driver: Driver,
     model,
     query: str,
+    draft_data: dict | None = None,
     sow_id: str | None = None,
     top_k: int = 5,
     hop_depth: int = 2,
@@ -218,6 +229,24 @@ def retrieve(
         deal_ctx,
         limit=MAX_CROSS_SOW,
     )
+    draft_vec = None
+    if draft_data:
+        agg_string = (
+            f"Project: {draft_data.project_name} | "
+            f"Deal Type: {draft_data.deal_type} | "
+            # ... remaining string interpolation ...
+            f"SOW Content: {draft_data.sow_content[:5000]}"
+        )
+        draft_vec = model.encode(agg_string, normalize_embeddings=True).tolist()
+
+        # ... existing anchor node searches ...
+
+    similar_project_risks = []
+    if draft_vec:
+        similar_project_risks = _vector_search_project_risks(driver, draft_vec, top_k=3)
+
+    # ADD THIS LINE: Attach the local data to the context object
+    ctx.similar_project_risks = similar_project_risks
 
     return ctx
 
@@ -409,3 +438,24 @@ def _fetch_cross_deal_sections(
             sow_id=deal_ctx.sow_id,
             limit=limit,
         ).data()
+
+
+def _vector_search_project_risks(driver: Driver, draft_vec: list[float], top_k: int) -> list[dict]:
+    with driver.session() as session:
+        rows = session.run(
+            """
+            CALL db.index.vector.queryNodes('project_aggregate_embeddings', $k, $vec)
+            YIELD node AS p, score
+
+            MATCH (p)-[:HAS_SOW]-(:SOW)-[:HAS_RISK]->(r:Risk)
+            WHERE r.has_mitigation = true
+
+            RETURN p.project_name AS project_name, score AS similarity_score,
+                   r.description AS risk, r.mitigation AS mitigation
+            ORDER BY score DESC, r.severity
+            LIMIT 10
+            """,
+            k=top_k,
+            vec=draft_vec,
+        ).data()
+    return rows

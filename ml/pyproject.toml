@@ -21,3 +21,6 @@ dependencies = [
 
 [project.scripts]
 sow-kg = "main:cli"
+
+[tool.setuptools.packages.find]
+include = ["sow_kg*", "kg_data_gen*"]

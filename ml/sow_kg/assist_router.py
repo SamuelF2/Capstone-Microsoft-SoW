@@ -31,9 +31,21 @@ def _init():
     return _driver, _model
 
 
+class DraftProjectData(BaseModel):
+    project_name: str = ""
+    deal_type: str = "N/A"
+    deal_terms: str = "N/A"
+    planned_duration: str = "Unknown"
+    total_revenue: float = 0.0
+    total_margin_pct: str = "0%"
+    customer_industry: str = ""
+    sow_content: str = ""
+
+
 class AssistRequest(BaseModel):
     query: str
     sow_id: str | None = None
+    draft_data: DraftProjectData | None = None
     history: list[dict] | None = None
     top_k: int = 5
     hop_depth: int = 2
@@ -58,6 +70,7 @@ async def assist_endpoint(req: AssistRequest):
             model=model,
             query=req.query,
             sow_id=req.sow_id,
+            draft_data=req.draft_data.dict() if req.draft_data else None,
             history=req.history,
             top_k=req.top_k,
             hop_depth=req.hop_depth,

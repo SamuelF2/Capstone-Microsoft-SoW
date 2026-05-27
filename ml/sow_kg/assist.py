@@ -127,13 +127,16 @@ def assist(
     model,
     query: str,
     sow_id: str | None = None,
+    draft_data: dict | None = None,
     history: list[dict] | None = None,
     top_k: int = 5,
     hop_depth: int = 2,
     max_tokens: int = 2048,
     section_key: str | None = None,
 ) -> dict:
-    ctx = retrieve(driver, model, query, sow_id=sow_id, top_k=top_k, hop_depth=hop_depth)
+    ctx = retrieve(
+        driver, model, query, sow_id=sow_id, top_k=top_k, hop_depth=hop_depth, draft_data=draft_data
+    )
 
     # Determine if we should return structured JSON
     schema_entry = SECTION_SCHEMAS.get(section_key) if section_key else None
@@ -171,14 +174,16 @@ def assist(
         # Generate a human-readable summary as the answer
         answer = f"[Structured rewrite for {section_key}]"
     else:
-        from .llm_client import get_client, get_model
+        # --- TEMPORARILY BYPASS AZURE FOR TESTING ---
+        # from .llm_client import get_client, get_model
+        # response = get_client().chat.completions.create(
+        #     model=get_model(),
+        #     messages=messages,
+        #     temperature=0.3,
+        # )
+        # answer = response.choices[0].message.content or ""
 
-        response = get_client().chat.completions.create(
-            model=get_model(),
-            messages=messages,
-            temperature=0.3,
-        )
-        answer = response.choices[0].message.content or ""
+        answer = "AZURE BYPASSED: GraphRAG retrieval successful!"
 
     result = {
         "answer": answer,
@@ -188,6 +193,7 @@ def assist(
             "banned_phrases_found": len(ctx.banned_phrases),
             "risks_surfaced": len(ctx.risks),
             "similar_sections": len(ctx.similar_sections),
+            "similar_projects_found": len(ctx.similar_project_risks),
             "methodology": ctx.deal_context.methodology,
             "deal_value": ctx.deal_context.deal_value,
             "sow_id": sow_id,

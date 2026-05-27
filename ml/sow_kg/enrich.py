@@ -38,6 +38,7 @@ VECTOR_INDEXES = [
     ("risk_embeddings", "Risk", "embedding"),
     ("rule_embeddings", "Rule", "embedding"),
     ("clausetype_embeddings", "ClauseType", "embedding"),
+    ("project_aggregate_embeddings", "Project", "AggregateContextEmbedding"),
 ]
 
 # Queries return id + text only hashing is done in Python
@@ -77,6 +78,57 @@ NODE_TEXT_QUERIES = {
                coalesce(n.display_name, '') + ' ' + coalesce(n.description, '') AS text
         ORDER BY n.type_id
     """,
+    "Project": """
+        MATCH (n:Project)
+        WHERE ($force OR n.AggregateContextEmbedding IS NULL OR n.embed_hash IS NULL)
+
+        // 1. Customer Context
+        OPTIONAL MATCH (n)-[:HAS_PROJECT]-(c:Customer)
+        WITH n,
+             collect(DISTINCT coalesce(c._id, '')) AS c_ids,
+             collect(DISTINCT coalesce(c.customer_name, '')) AS c_names,
+             collect(DISTINCT coalesce(c.customer_location, '')) AS c_locations,
+             collect(DISTINCT coalesce(c.customer_industry, '')) AS c_industries
+
+        // 2. Budget Context
+        OPTIONAL MATCH (n)-[:HAS_BUDGET_ENTRY]-(b:BudgetEntry)
+        WITH n, c_ids, c_names, c_locations, c_industries,
+             sum(CASE WHEN toLower(b.budget_component) CONTAINS 'revenue' THEN toFloat(b.usd) ELSE 0.0 END) AS total_revenue,
+             sum(CASE WHEN toLower(b.budget_component) CONTAINS 'margin'  THEN toFloat(b.usd) ELSE 0.0 END) AS total_margin
+
+        // 3. SOW Context (Fixed: Linking via filename containing the project_id)
+        OPTIONAL MATCH (sow:SOW)-[:HAS_SECTION]->(sec:Section)
+        WHERE toLower(sow.filename) CONTAINS toLower(n.project_id)
+        WITH n, c_ids, c_names, c_locations, c_industries, total_revenue, total_margin,
+             collect(DISTINCT coalesce(sec.content, '')) AS sow_sections
+
+        // 4. Calculate Planned Duration and Margin %
+        WITH *,
+             CASE
+                WHEN n.start_date IS NOT NULL AND n.end_date IS NOT NULL
+                THEN toString(duration.inDays(date(n.start_date), date(n.end_date)).days) + ' days'
+                ELSE 'Unknown'
+             END AS planned_duration,
+             CASE
+                WHEN total_revenue > 0 THEN toString(round((total_margin / total_revenue) * 100, 2)) + '%'
+                ELSE '0%'
+             END AS margin_pct
+
+        // 5. Assemble the final string
+        RETURN n.project_id AS id,
+               'Project: ' + coalesce(n.project_name, n.project_id, '') +
+               ' | Deal Type: ' + coalesce(n.deal_type, 'N/A') +
+               ' | Deal Terms: ' + coalesce(n.deal_terms, 'N/A') +
+               ' | Planned Duration: ' + planned_duration +
+               ' | Total Revenue: $' + toString(total_revenue) +
+               ' | Total Margin %: ' + margin_pct +
+               ' | Customer IDs: ' + reduce(acc='', x IN [id IN c_ids WHERE id <> ''] | acc + x + ', ') +
+               ' | Customers: ' + reduce(acc='', x IN [name IN c_names WHERE name <> ''] | acc + x + ', ') +
+               ' | Locations: ' + reduce(acc='', x IN [loc IN c_locations WHERE loc <> ''] | acc + x + ', ') +
+               ' | Industries: ' + reduce(acc='', x IN [ind IN c_industries WHERE ind <> ''] | acc + x + ', ') +
+               ' | SOW Content: ' + reduce(acc='', x IN [s IN sow_sections WHERE s <> ''] | acc + x + ' ') AS text
+        ORDER BY n.project_id
+    """,
 }
 
 WRITE_QUERIES = {
@@ -85,6 +137,13 @@ WRITE_QUERIES = {
     "Risk": "MATCH (n:Risk {id: $id})               SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
     "Rule": "MATCH (n:Rule {rule_id: $id})          SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
     "ClauseType": "MATCH (n:ClauseType {type_id: $id})    SET n.embedding = $vec, n.embed_hash = $hash, n.embedded_at = $ts",
+    "Project": """
+        MATCH (n:Project {project_id: $id})
+        SET n.AggregateContext = $text,
+            n.AggregateContextEmbedding = $vec,
+            n.embed_hash = $hash,
+            n.embedded_at = $ts
+    """,
 }
 
 
@@ -182,6 +241,7 @@ def enrich_label(
                     session.run(
                         write_query,
                         id=row["id"],
+                        text=row["text"],
                         vec=vec.tolist(),
                         hash=row["content_hash"],
                         ts=ts,
