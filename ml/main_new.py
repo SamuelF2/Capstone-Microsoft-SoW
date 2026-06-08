@@ -24,8 +24,12 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+# In main_new.py
+from sow_kg.assist import assist as _assist
 from sow_kg.db import get_driver, init_schema
 from sow_kg.enrich import run_enrichment, semantic_search
+from sow_kg.graphrag import retrieve
 from sow_kg.ingest_async import ingest_async
 from sow_kg.ingest_json import ingest_all_json
 from sow_kg.queries import (
@@ -306,6 +310,7 @@ def enrich(batch_size: int, force: bool):
             "risk_embeddings",
             "rule_embeddings",
             "clausetype_embeddings",
+            "project_aggregate_embeddings",
         ]
     ),
 )
@@ -327,6 +332,7 @@ def search(query: str, index: str, top_k: int):
     t.add_column("Preview")
     for r in results:
         props = r["props"]
+
         preview = (
             props.get("content")
             or props.get("description")
@@ -334,6 +340,7 @@ def search(query: str, index: str, top_k: int):
             or props.get("display_name")
             or ""
         )
+
         node_id = props.get("id") or props.get("rule_id") or props.get("type_id") or ""
         t.add_row(f"{r['score']:.4f}", node_id, preview[:120])
     console.print(t)
@@ -532,8 +539,6 @@ def promote_proposals(min_evidence: int, min_confidence: float, dry_run: bool):
 def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bool):
     """Context-aware SOW authoring assistant powered by GraphRAG."""
     from sentence_transformers import SentenceTransformer
-    from sow_kg.assist import assist as _assist
-    from sow_kg.graph_rag import retrieve
 
     driver = get_driver()
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
@@ -612,6 +617,7 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
         f"{ctx_meta['rules_applied']} rules · "
         f"{ctx_meta['banned_phrases_found']} banned phrases · "
         f"{ctx_meta['risks_surfaced']} risks · "
+        f"{ctx_meta.get('similar_projects_found', 0)} similar projects · "
         f"methodology: {ctx_meta['methodology'] or 'unknown'}[/]"
     )
 

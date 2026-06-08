@@ -171,6 +171,34 @@ def ensure_vector_indexes(driver: Driver) -> None:
                 console.print(f"  [yellow][/] {index_name}: {e}")
 
 
+def validate_vector_indexes(driver):
+    """Automatically verifies that all vector indexes are online and fully populated."""
+    print("\nValidating vector index health...")
+    with driver.session() as session:
+        result = session.run(
+            "SHOW INDEXES YIELD name, type, state, populationPercent WHERE type = 'VECTOR'"
+        )
+
+        all_healthy = True
+        for record in result:
+            name = record["name"]
+            state = record["state"]
+            pop = record["populationPercent"]
+
+            if state != "ONLINE" or pop != 100.0:
+                print(
+                    f"❌ CRITICAL WARNING: Index '{name}' is unhealthy (State: {state}, Pop: {pop}%)"
+                )
+                all_healthy = False
+            else:
+                print(f"✅ {name}: ONLINE & 100% Populated")
+
+        if not all_healthy:
+            print("\nWARNING: One or more indexes failed validation. Check Neo4j database.")
+        else:
+            print("\nAll vector indexes validated successfully!")
+
+
 def _batched(items: list, size: int) -> Generator[list, None, None]:
     for i in range(0, len(items), size):
         yield items[i : i + size]
@@ -254,6 +282,12 @@ def enrich_label(
 
 
 def run_enrichment(driver: Driver, batch_size: int = 64, force: bool = False) -> None:
+    """
+    Orchestrates the vector embedding process for the knowledge graph.
+
+    Populates 'AggregateContextEmbedding' on Project nodes and other embeddings
+    for Section, Risk, and Deliverable nodes to enable semantic GraphRAG traversal.
+    """
     ensure_vector_indexes(driver)
     console.print()
 

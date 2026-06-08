@@ -121,12 +121,21 @@ class RetrievedContext:
                 parts.append(f"### {heading} (from {sow}{meta})\n{content}")
 
         if self.similar_project_risks:
-            parts.append("## Risk Mitigations from Similar Projects")
+            parts.append("## Risk Mitigations & Outcomes from Similar Projects")
             for r in self.similar_project_risks:
                 proj = r.get("project_name", "Unknown Project")
                 risk = r.get("risk", "")
                 mit = r.get("mitigation", "")
-                parts.append(f"- From '{proj}': Risk [{risk}] → Mitigation [{mit}]")
+                timeline = r.get("timeline_status", "Unknown")
+                financial = r.get("financial_status", "Unknown")
+                acc = r.get("accomplishments", "None listed")
+
+                parts.append(f"### Project: {proj}")
+                parts.append(f"- **Identified Risk:** {risk}")
+                parts.append(f"- **Applied Mitigation:** {mit}")
+                parts.append(
+                    f"- **Final Project Outcome:** Timeline was [{timeline}], Financials were [{financial}]. Key Accomplishments: {acc}"
+                )
 
         return "\n\n".join(parts)
 
@@ -250,7 +259,10 @@ def retrieve(
 
     similar_project_risks = []
     if draft_vec:
-        similar_project_risks = _vector_search_project_risks(driver, draft_vec, top_k=3)
+        # ADD THE PRINT STATEMENT RIGHT HERE:
+        print(f"Vector length: {len(draft_vec)}")
+
+        similar_project_risks = _vector_search_project_risks(driver, draft_vec, top_k=25)
 
     # ADD THIS LINE: Attach the local data to the context object
     ctx.similar_project_risks = similar_project_risks
@@ -447,22 +459,42 @@ def _fetch_cross_deal_sections(
         ).data()
 
 
-def _vector_search_project_risks(driver: Driver, draft_vec: list[float], top_k: int) -> list[dict]:
+def _vector_search_project_risks(driver, draft_vec: list[float], top_k: int = 25) -> list[dict]:
+    query = """
+        CALL db.index.vector.queryNodes('project_aggregate_embeddings', $top_k, $query_vec)
+        YIELD node AS p, score
+        MATCH (p)-[:HAS_SOW]->(s:SOW)-[:HAS_RISK]->(r:Risk)
+        WHERE r.has_mitigation = true
+        OPTIONAL MATCH (p)-[:HAS_STATUS_REPORT]->(sr:StatusReport)
+        RETURN p.project_name, s.title, r.description, r.mitigation, sr.timeline_status, sr.financial_status
+        ORDER BY score DESC, sr.period_ending_date DESC
+    """
+
     with driver.session() as session:
-        rows = session.run(
-            """
-            CALL db.index.vector.queryNodes('project_aggregate_embeddings', $k, $vec)
-            YIELD node AS p, score
+        result = session.run(query, query_vec=draft_vec, top_k=top_k)
+        return [record.data() for record in result]
 
-            MATCH (p)-[:HAS_SOW]-(:SOW)-[:HAS_RISK]->(r:Risk)
-            WHERE r.has_mitigation = true
 
-            RETURN p.project_name AS project_name, score AS similarity_score,
-                   r.description AS risk, r.mitigation AS mitigation
-            ORDER BY score DESC, r.severity
-            LIMIT 10
-            """,
-            k=top_k,
-            vec=draft_vec,
-        ).data()
-    return rows
+def get_historical_risk_context(driver, project_id: str) -> str:
+    """
+    Dynamically fetches risks from the 3 most similar historical projects.
+    """
+    query = """
+    MATCH (p:Project {project_id: $pid})
+    // Use the existing vector index to find similar projects
+    CALL db.index.vector.queryNodes('project_aggregate_embeddings', 3, p.AggregateContextEmbedding)
+    YIELD node AS sim_proj, score
+    WHERE sim_proj <> p
+    // Traverse to risks
+    OPTIONAL MATCH (sim_proj)-[:HAS_RISK]->(r:Risk)
+    RETURN collect(DISTINCT "Project: " + sim_proj.project_name +
+                   " | Risk: " + coalesce(r.description, 'N/A') +
+                   " | Mitigation: " + coalesce(r.mitigation, 'N/A')) AS insights
+    """
+    with driver.session() as session:
+        result = session.run(query, pid=project_id).single()
+        return (
+            "\n".join(result["insights"])
+            if result and result["insights"]
+            else "No historical risk data found."
+        )

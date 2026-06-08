@@ -119,6 +119,60 @@ SECTION_SCHEMAS: dict[str, dict] = {
             ],
         },
     },
+    "riskMitigationAnalysis": {
+        "description": "Detailed historical risk and mitigation analysis based on similar projects and their outcomes.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "key_risks": {
+                    "type": "array",
+                    "description": "A list of Key Risks requiring mitigation for the Draft Project Proposal.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "risk_title": {"type": "string"},
+                            "risk_description": {"type": "string"},
+                            "risk_source": {
+                                "type": "string",
+                                "description": "MUST BE either the [Project Name] from historical data OR 'General Knowledge'.",
+                            },
+                        },
+                        "required": ["risk_title", "risk_description", "risk_source"],
+                    },
+                },
+                "recommended_mitigations": {
+                    "type": "array",
+                    "description": "A list of actionable mitigation recommendations mapped to the identified risks.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "risk_title": {
+                                "type": "string",
+                                "description": "Must match a risk_title from the key_risks array.",
+                            },
+                            "mitigation_title": {"type": "string"},
+                            "document_change_targets": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Specific documents to edit, e.g., 'SOW', 'Budget', 'Staffing Plan'.",
+                            },
+                            "actionable_recommendation": {
+                                "type": "string",
+                                "description": "The detailed instructions on what to change.",
+                            },
+                        },
+                        "required": [
+                            "risk_title",
+                            "mitigation_title",
+                            "document_change_targets",
+                            "actionable_recommendation",
+                        ],
+                    },
+                },
+            },
+            "required": ["key_risks", "recommended_mitigations"],
+        },
+    },
 }
 
 
@@ -141,7 +195,17 @@ def assist(
     # Determine if we should return structured JSON
     schema_entry = SECTION_SCHEMAS.get(section_key) if section_key else None
 
-    system = SYSTEM_PROMPT
+    # INJECT CUSTOM PERSONA FOR RISK ANALYSIS
+    if section_key == "riskMitigationAnalysis":
+        system = (
+            "Your role is to perform QA reviews of draft project proposals for proposed consulting projects. "
+            "Your goal is to identify risks and propose risk mitigation-focused edits based on analysis of "
+            "risks, issues, and outcomes encountered on similar historical projects. "
+            "You must output valid JSON matching the provided schema. Do not include markdown formatting."
+        )
+    else:
+        system = SYSTEM_PROMPT
+
     if schema_entry:
         schema_json = json.dumps(schema_entry["schema"], indent=2)
         system += (
@@ -173,18 +237,17 @@ def assist(
         )
         # Generate a human-readable summary as the answer
         answer = f"[Structured rewrite for {section_key}]"
-    else:
-        # --- TEMPORARILY BYPASS AZURE FOR TESTING ---
-        # from .llm_client import get_client, get_model
-        # response = get_client().chat.completions.create(
-        #     model=get_model(),
-        #     messages=messages,
-        #     temperature=0.3,
-        # )
-        # answer = response.choices[0].message.content or ""
+    # else:
+    # --- TEMPORARILY BYPASS AZURE FOR TESTING ---
+    # from .llm_client import get_client, get_model
+    # response = get_client().chat.completions.create(
+    #     model=get_model(),
+    #     messages=messages,
+    #     temperature=0.3,
+    # )
+    # answer = response.choices[0].message.content or ""
 
-        answer = "AZURE BYPASSED: GraphRAG retrieval successful!"
-
+    #    answer = "AZURE BYPASSED: GraphRAG retrieval successful!"
     result = {
         "answer": answer,
         "context": {

@@ -363,20 +363,43 @@ def _write_sow(driver: Driver, doc: dict, banned_phrases: list[dict]):
     sow_id = _stable_id(filename, "sow")
     methodology = _detect_methodology(doc["raw_text"])
 
-    console.print(
-        f"  [dim]→ SOW:[/] [yellow]{filename}[/] | methodology=[cyan]{methodology}[/] | sections={len(doc['sections'])}"
-    )
+    # Regex to extract PROJ-XXXX from the filename
+    match = re.search(r"(PROJ-\d{4})", filename)
+    project_id = match.group(1) if match else None
 
     with driver.session() as session:
-        session.run(
-            "MERGE (s:SOW {id: $sid}) SET s.title=$title, s.filename=$fn, s.methodology=$meth, s.char_count=$cc, s.format=$fmt, s.source='ingested'",
-            sid=sow_id,
-            title=doc["title"],
-            fn=filename,
-            meth=methodology,
-            cc=len(doc["raw_text"]),
-            fmt=doc["metadata"].get("format", "unknown"),
-        )
+        # Create SOW and link to Project if ID was parsed successfully
+        if project_id:
+            session.run(
+                """
+                MERGE (s:SOW {id: $sid})
+                SET s.title=$title, s.filename=$fn, s.methodology=$meth,
+                    s.char_count=$cc, s.format=$fmt, s.source='ingested'
+                WITH s
+                MATCH (p:Project {id: $pid})
+                MERGE (p)-[:HAS_SOW]->(s)
+                """,
+                sid=sow_id,
+                pid=project_id,
+                title=doc["title"],
+                fn=filename,
+                meth=methodology,
+                cc=len(doc["raw_text"]),
+                fmt=doc["metadata"].get("format", "unknown"),
+            )
+        else:
+            # Fallback if no project ID found
+            session.run(
+                "MERGE (s:SOW {id: $sid}) SET s.title=$title, s.filename=$fn, s.methodology=$meth, s.char_count=$cc, s.format=$fmt, s.source='ingested'",
+                sid=sow_id,
+                title=doc["title"],
+                fn=filename,
+                meth=methodology,
+                cc=len(doc["raw_text"]),
+                fmt=doc["metadata"].get("format", "unknown"),
+            )
+
+        # Link to Methodology
         session.run(
             "MATCH (s:SOW {id: $sid}) MERGE (m:Methodology {method_id: $mid}) MERGE (s)-[:USES_METHODOLOGY]->(m)",
             sid=sow_id,
