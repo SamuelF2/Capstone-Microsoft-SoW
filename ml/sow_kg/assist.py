@@ -5,7 +5,7 @@ import logging
 
 from neo4j import Driver
 
-from .graphrag import retrieve
+from sow_kg.graphrag import retrieve
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +188,7 @@ def assist(
     max_tokens: int = 2048,
     section_key: str | None = None,
 ) -> dict:
+    answer = ""
     ctx = retrieve(
         driver, model, query, sow_id=sow_id, top_k=top_k, hop_depth=hop_depth, draft_data=draft_data
     )
@@ -256,9 +257,14 @@ def assist(
             "banned_phrases_found": len(ctx.banned_phrases),
             "risks_surfaced": len(ctx.risks),
             "similar_sections": len(ctx.similar_sections),
-            "similar_projects_found": len(ctx.similar_project_risks),
-            "methodology": ctx.deal_context.methodology,
-            "deal_value": ctx.deal_context.deal_value,
+            # SAFE FIXES BELOW:
+            "similar_projects_found": len(getattr(ctx, "similar_project_risks", [])),
+            "methodology": ctx.deal_context.methodology
+            if getattr(ctx, "deal_context", None)
+            else None,
+            "deal_value": ctx.deal_context.deal_value
+            if getattr(ctx, "deal_context", None)
+            else None,
             "sow_id": sow_id,
         },
         "retrieved": {

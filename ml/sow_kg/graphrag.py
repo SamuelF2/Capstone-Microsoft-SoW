@@ -136,7 +136,35 @@ class RetrievedContext:
                 parts.append(
                     f"- **Final Project Outcome:** Timeline was [{timeline}], Financials were [{financial}]. Key Accomplishments: {acc}"
                 )
+        # CORRECTED P1 FIX: Safely append the historical risk block to 'parts'
+        if hasattr(self, "similar_project_risks") and self.similar_project_risks:
+            risk_block = "[HISTORICAL PROJECT RISKS & CLOSE-OUT DATA]\n"
+            for r in self.similar_project_risks:
+                outcomes = r.get("project_outcomes", "None listed")
+                lessons = r.get("lessons_learned", "None listed")
+                csat = r.get("customer_satisfaction", "N/A")
+                end_date = r.get("actual_end_date", "N/A")
+                budget = r.get("total_budget_actuals", 0.0)
 
+                timeline_str = ""
+                for st in r.get("status_timeline", []):
+                    if st.get("period"):
+                        timeline_str += f"    - {st['period']}: Time={st['timeline']}, Fin={st['financial']} ({st['summary']})\n"
+
+                risk_block += f"--- Project: {r.get('project_name')} (Similarity Score: {r.get('score', 0):.2f}) ---\n"
+                risk_block += (
+                    f"Close-out: Ended {end_date} | CSAT: {csat} | Actuals: ${budget:,.2f}\n"
+                )
+                risk_block += f"Outcomes: {outcomes}\n"
+                risk_block += f"Lessons Learned: {lessons}\n"
+                status_info = timeline_str if timeline_str else "- No status reports found\n"
+                risk_block += f"Status Timeline:\n{status_info}"
+                risk_block += f"Historical Risk: {r.get('risk_description')} \n"
+                risk_block += f"Mitigation Strategy: {r.get('mitigation')}\n\n"
+
+            parts.append(risk_block)
+
+        # Return the joined list (this fixes the 'block' error)
         return "\n\n".join(parts)
 
 
@@ -150,14 +178,14 @@ def _load_deal_context(driver: Driver, sow_id: str) -> DealContext:
         row = session.run(
             """
             MATCH (s:SOW {id: $sow_id})
-            OPTIONAL MATCH (s)-[:HAS_CONTEXT]->(dc:DealContext)
+            // Removed the HAS_CONTEXT match that was throwing the warning
             OPTIONAL MATCH (s)-[:USES_METHODOLOGY]->(m:Methodology)
             RETURN
-                coalesce(dc.total_revenue, s.deal_value)  AS deal_value,
-                coalesce(dc.industry,      s.industry)    AS industry,
-                m.name                                    AS methodology
+            s.deal_value AS deal_value,
+            s.industry AS industry,
+            m.name AS methodology
             LIMIT 1
-            """,
+         """,
             sow_id=sow_id,
         ).single()
     if not row:
@@ -248,10 +276,10 @@ def retrieve(
     draft_vec = None
     if draft_data:
         agg_string = (
-            f"Project: {draft_data.project_name} | "
-            f"Deal Type: {draft_data.deal_type} | "
+            f"Project: {draft_data.get('project_name', '')} | "
+            f"Deal Type: {draft_data.get('deal_type', '')} | "
             # ... remaining string interpolation ...
-            f"SOW Content: {draft_data.sow_content[:5000]}"
+            f"SOW Content: {str(draft_data.get('sow_content', ''))[:5000]}"
         )
         draft_vec = model.encode(agg_string, normalize_embeddings=True).tolist()
 
@@ -459,20 +487,47 @@ def _fetch_cross_deal_sections(
         ).data()
 
 
-def _vector_search_project_risks(driver, draft_vec: list[float], top_k: int = 25) -> list[dict]:
+def _vector_search_project_risks(driver: Driver, draft_vec: list[float], top_k: int) -> list[dict]:
+    """Retrieve risks, close-out data, timelines, and actuals from similar projects."""
     query = """
-        CALL db.index.vector.queryNodes('project_aggregate_embeddings', $top_k, $query_vec)
-        YIELD node AS p, score
-        MATCH (p)-[:HAS_SOW]->(s:SOW)-[:HAS_RISK]->(r:Risk)
-        WHERE r.has_mitigation = true
-        OPTIONAL MATCH (p)-[:HAS_STATUS_REPORT]->(sr:StatusReport)
-        RETURN p.project_name, s.title, r.description, r.mitigation, sr.timeline_status, sr.financial_status
-        ORDER BY score DESC, sr.period_ending_date DESC
-    """
+    // Find Similar Projects
+    CALL db.index.vector.queryNodes('project_aggregate_embeddings', $top_k, $draft_vec)
+    YIELD node AS sim_proj, score
 
+    // Traverse to Risks
+    OPTIONAL MATCH (sim_proj)-[:HAS_RISK]->(r:Risk)
+
+    // P1 FIX: Traverse to Status Reports and collect as a timeline array
+    OPTIONAL MATCH (sim_proj)-[:HAS_STATUS_REPORT]->(sr:StatusReport)
+    WITH sim_proj, score, r,
+         collect({
+             period: sr.period_ending_date,
+             timeline: sr.timeline_status,
+             financial: sr.financial_status,
+             summary: sr.summary
+         } ORDER BY sr.period_ending_date) AS status_timeline
+
+    // P1 FIX: Traverse to Budget Entries and aggregate actuals
+    OPTIONAL MATCH (sim_proj)-[:HAS_BUDGET_ENTRY]->(b:BudgetEntry)
+    WITH sim_proj, score, r, status_timeline,
+         sum(CASE WHEN b IS NOT NULL THEN toFloat(b.usd) ELSE 0 END) AS total_budget_actuals
+
+    // P1 FIX: Return explicit close-out properties from the Project node
+    RETURN sim_proj.project_id AS project_id,
+           sim_proj.project_name AS project_name,
+           score,
+           r.description AS risk_description,
+           r.mitigation AS mitigation,
+           sim_proj.actual_end_date AS actual_end_date,
+           sim_proj.project_outcomes AS project_outcomes,
+           sim_proj.lessons_learned AS lessons_learned,
+           sim_proj.customer_satisfaction AS customer_satisfaction,
+           status_timeline,
+           total_budget_actuals
+    ORDER BY score DESC
+    """
     with driver.session() as session:
-        result = session.run(query, query_vec=draft_vec, top_k=top_k)
-        return [record.data() for record in result]
+        return session.run(query, draft_vec=draft_vec, top_k=top_k).data()
 
 
 def get_historical_risk_context(driver, project_id: str) -> str:

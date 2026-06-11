@@ -556,8 +556,8 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
             driver.close()
             return
 
-        if ctx.methodology:
-            console.print(f"[dim]Methodology:[/] [cyan]{ctx.methodology}[/]\n")
+        if getattr(ctx, "deal_context", None) and ctx.deal_context.methodology:
+            console.print(f"[dim]Methodology:[/] [cyan]{ctx.deal_context.methodology}[/]\n")
 
         if ctx.sections:
             t = Table(title="Retrieved Sections")
@@ -582,7 +582,7 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
             t.add_column("Description")
             for r in ctx.rules:
                 t.add_row(
-                    r.get("severity", "").upper(),
+                    (r.get("severity") or "").upper(),
                     r.get("category", ""),
                     (r.get("description") or "")[:80],
                 )
@@ -601,7 +601,7 @@ def assist(query: str, sow_id: str, top_k: int, hop_depth: int, context_only: bo
             t.add_column("Severity")
             t.add_column("Description")
             for r in ctx.risks:
-                t.add_row(r.get("severity", "").upper(), (r.get("description") or "")[:100])
+                t.add_row((r.get("severity") or "").upper(), (r.get("description") or "")[:100])
             console.print(t)
 
         driver.close()
